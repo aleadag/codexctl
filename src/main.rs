@@ -9,6 +9,8 @@ mod app;
 mod brain;
 mod commands;
 mod config;
+#[cfg(feature = "coord")]
+mod coord;
 mod demo;
 mod discovery;
 mod health;
@@ -87,6 +89,11 @@ pub(crate) struct Cli {
     /// Stream status changes to stdout (no TUI). Only prints when status changes.
     #[arg(short, long, help_heading = "Output Modes")]
     pub(crate) watch: bool,
+
+    /// Run headless with brain, coordination, and context rot prevention active (no TUI).
+    /// Attach a dashboard with `claudectl` in another terminal.
+    #[arg(long, help_heading = "Output Modes")]
+    pub(crate) headless: bool,
 
     /// Output format for watch mode. Placeholders: {pid}, {project}, {status}, {cost}, {context}
     #[arg(
@@ -225,6 +232,12 @@ pub(crate) struct Cli {
     /// Run independent tasks in parallel (used with --run)
     #[arg(long, help_heading = "Orchestration")]
     pub(crate) parallel: bool,
+
+    // ── Coordination ──────────────────────────────────────────────────
+    /// Coordination layer inspection (events, leases, blockers, handoffs, interrupts, memory)
+    #[cfg(feature = "coord")]
+    #[arg(long, help_heading = "Coordination")]
+    coord: Option<String>,
 
     // ── Recording ──────────────────────────────────────────────────────
     /// Record the TUI session as an asciicast v2 file (e.g., --record demo.cast)
@@ -451,6 +464,11 @@ fn run_main(cli: Cli) -> io::Result<()> {
         return Ok(());
     }
 
+    #[cfg(feature = "coord")]
+    if let Some(ref sub) = cli.coord {
+        return coord::cli::dispatch(sub, cli.json);
+    }
+
     if cli.brain_query {
         return commands::run_brain_query(&cfg, &cli);
     }
@@ -520,6 +538,10 @@ fn run_main(cli: Cli) -> io::Result<()> {
 
     if cli.summary {
         return commands::print_summary(&cli.since);
+    }
+
+    if cli.headless {
+        return commands::run_headless(Duration::from_millis(cfg.interval), &cfg, cli.json);
     }
 
     if cli.json && !cli.watch {
