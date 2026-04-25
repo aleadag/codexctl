@@ -104,6 +104,31 @@ pub enum KnowledgeScope {
     Project(String),
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Content size limits for shared artifacts
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Maximum size for a shared skill body (32 KB).
+pub const MAX_SKILL_BYTES: usize = 32 * 1024;
+/// Maximum size for a shared command body (16 KB).
+pub const MAX_COMMAND_BYTES: usize = 16 * 1024;
+/// Maximum size for a shared hook config JSON (4 KB).
+pub const MAX_HOOK_CONFIG_BYTES: usize = 4 * 1024;
+
+/// Compatibility requirements for a shared artifact.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ArtifactRequires {
+    /// CLI binaries that must be on PATH (e.g., ["claudectl", "jq"]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cli: Vec<String>,
+    /// Target OS labels (e.g., ["macos", "linux"]). Empty = any OS.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub os: Vec<String>,
+    /// Minimum claudectl version (e.g., "0.42.0"). None = any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_version: Option<String>,
+}
+
 /// The actual knowledge payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -135,6 +160,41 @@ pub enum KnowledgeContent {
     },
     /// A promoted rule from coord memory.
     PromotedRule { rule: String, source_type: String },
+    /// A shared skill (markdown with YAML frontmatter).
+    Skill {
+        name: String,
+        description: String,
+        version: String,
+        /// Full markdown content (frontmatter + body). Capped at MAX_SKILL_BYTES.
+        body: String,
+        /// Compatibility requirements (CLIs, OS, version).
+        #[serde(default)]
+        requires: ArtifactRequires,
+    },
+    /// A shared slash command (markdown with YAML frontmatter).
+    Command {
+        name: String,
+        description: String,
+        args: Option<String>,
+        /// Full markdown content (frontmatter + body). Capped at MAX_COMMAND_BYTES.
+        body: String,
+        /// Compatibility requirements (CLIs, OS, version).
+        #[serde(default)]
+        requires: ArtifactRequires,
+    },
+    /// A shared hook configuration (declarative JSON, no executables).
+    HookConfig {
+        /// Hook event type (e.g., "PreToolUse", "PostToolUse").
+        event: String,
+        /// Matcher pattern (e.g., "Bash|Write|Edit").
+        matcher: String,
+        description: String,
+        /// Sanitized hook config JSON (no secrets). Capped at MAX_HOOK_CONFIG_BYTES.
+        config_json: String,
+        /// Compatibility requirements (CLIs, OS, version).
+        #[serde(default)]
+        requires: ArtifactRequires,
+    },
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -178,6 +238,15 @@ pub fn semantic_key(unit: &KnowledgeUnit) -> String {
         KnowledgeContent::PromotedRule { rule, .. } => {
             format!("rule:{}", truncate_chars(rule, 40))
         }
+        KnowledgeContent::Skill { name, .. } => {
+            format!("skill:{}", name.to_lowercase().replace(' ', "-"))
+        }
+        KnowledgeContent::Command { name, .. } => {
+            format!("command:{}", name.to_lowercase())
+        }
+        KnowledgeContent::HookConfig { event, matcher, .. } => {
+            format!("hook:{}:{}", event.to_lowercase(), matcher.to_lowercase())
+        }
     };
     format!("{scope_part}/{content_part}")
 }
@@ -196,6 +265,8 @@ pub struct SharingFilter {
     pub exclude_tools: Vec<String>,
     /// Command substrings to exclude.
     pub exclude_commands: Vec<String>,
+    /// Content types to exclude from sharing (e.g., "skill", "command", "hook").
+    pub exclude_content_types: Vec<String>,
 }
 
 impl SharingFilter {
@@ -205,6 +276,7 @@ impl SharingFilter {
             allow_categories: cfg.share_categories.clone(),
             exclude_tools: cfg.exclude_tools.clone(),
             exclude_commands: cfg.exclude_commands.clone(),
+            exclude_content_types: cfg.exclude_content_types.clone(),
         }
     }
 
@@ -241,6 +313,33 @@ impl SharingFilter {
             if self.exclude_tools.iter().any(|t| t == tool) {
                 return false;
             }
+        }
+
+        // Content type exclusions for shared artifacts
+        match &unit.content {
+            KnowledgeContent::Skill { .. }
+                if self.exclude_content_types.iter().any(|t| t == "skill") =>
+            {
+                return false;
+            }
+            KnowledgeContent::Command { name, .. } => {
+                if self.exclude_content_types.iter().any(|t| t == "command") {
+                    return false;
+                }
+                if self
+                    .exclude_commands
+                    .iter()
+                    .any(|exc| name.contains(exc.as_str()))
+                {
+                    return false;
+                }
+            }
+            KnowledgeContent::HookConfig { .. }
+                if self.exclude_content_types.iter().any(|t| t == "hook") =>
+            {
+                return false;
+            }
+            _ => {}
         }
 
         true
@@ -308,6 +407,461 @@ pub fn signal_new_knowledge(count: u32) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Hook config sanitization
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Environment variables safe to keep in shared hook configs.
+const SAFE_ENV_VARS: &[&str] = &["HOME", "PWD", "PATH", "CLAUDE_PLUGIN_ROOT", "USER", "SHELL"];
+
+/// Credential-like key prefixes (case-insensitive match).
+const CREDENTIAL_KEYS: &[&str] = &[
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "api_key",
+    "apikey",
+    "api-key",
+    "auth_token",
+    "access_key",
+    "private_key",
+];
+
+/// Sanitize a hook config string before sharing: strip credentials, unsafe env
+/// vars, and absolute user paths. Returns the sanitized version.
+pub fn sanitize_hook_config(input: &str) -> String {
+    let mut lines: Vec<String> = Vec::new();
+
+    for line in input.lines() {
+        let mut sanitized = sanitize_credentials(line);
+        sanitized = sanitize_env_vars(&sanitized);
+        sanitized = sanitize_user_paths(&sanitized);
+        lines.push(sanitized);
+    }
+
+    lines.join("\n")
+}
+
+/// Replace credential-like `key=value`, `key: value`, `"key": "value"` patterns.
+fn sanitize_credentials(line: &str) -> String {
+    let lower = line.to_lowercase();
+    for key in CREDENTIAL_KEYS {
+        // Check for JSON-style: "key": "value" or "key":"value"
+        if lower.contains(key) {
+            // Check "key": "value" pattern
+            if let Some(pos) = lower.find(key) {
+                let after_key = &line[pos + key.len()..];
+                let after_key_trimmed = after_key.trim_start_matches('"').trim_start();
+                if after_key_trimmed.starts_with(':') || after_key_trimmed.starts_with('=') {
+                    let sep_char = if after_key_trimmed.starts_with(':') {
+                        ':'
+                    } else {
+                        '='
+                    };
+                    let before = &line[..pos];
+                    // Find the key boundary (include quotes if present)
+                    let key_start = if before.ends_with('"') {
+                        before.len() - 1
+                    } else {
+                        pos
+                    };
+                    let after_sep = &after_key_trimmed[1..].trim_start();
+                    let redacted = if let Some(stripped) = after_sep.strip_prefix('"') {
+                        // JSON string value — find closing quote
+                        if let Some(end) = stripped.find('"') {
+                            let rest_start =
+                                pos + key.len() + (after_key.len() - after_sep.len()) + 2 + end;
+                            format!(
+                                "{}\"{key}\"{sep_char} \"REDACTED\"{}",
+                                &line[..key_start],
+                                &line[rest_start..]
+                            )
+                        } else {
+                            format!("{}\"{key}\"{sep_char} \"REDACTED\"", &line[..key_start])
+                        }
+                    } else {
+                        // Unquoted value — redact to end of token
+                        let end = after_sep
+                            .find(|c: char| c.is_whitespace() || c == ',' || c == '}')
+                            .unwrap_or(after_sep.len());
+                        let rest_start =
+                            pos + key.len() + (after_key.len() - after_sep.len()) + end;
+                        format!(
+                            "{}{}{}REDACTED{}",
+                            &line[..pos],
+                            key,
+                            sep_char,
+                            &line[rest_start..]
+                        )
+                    };
+                    return redacted;
+                }
+            }
+        }
+    }
+    line.to_string()
+}
+
+/// Replace `$VAR` and `${VAR}` references with `$REDACTED` / `${REDACTED}`
+/// unless the variable name is in the safe list.
+fn sanitize_env_vars(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let chars: Vec<char> = input.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        if chars[i] == '$' && i + 1 < chars.len() {
+            if chars[i + 1] == '{' {
+                // ${VAR} form
+                if let Some(close) = chars[i + 2..].iter().position(|&c| c == '}') {
+                    let var_name: String = chars[i + 2..i + 2 + close].iter().collect();
+                    if is_env_var_name(&var_name) {
+                        if SAFE_ENV_VARS.contains(&var_name.as_str()) {
+                            result.push_str(&format!("${{{var_name}}}"));
+                        } else {
+                            result.push_str("${REDACTED}");
+                        }
+                        i += 3 + close; // skip past }
+                        continue;
+                    }
+                }
+            } else if chars[i + 1].is_ascii_uppercase() || chars[i + 1] == '_' {
+                // $VAR form
+                let start = i + 1;
+                let mut end = start;
+                while end < chars.len() && (chars[end].is_ascii_alphanumeric() || chars[end] == '_')
+                {
+                    end += 1;
+                }
+                let var_name: String = chars[start..end].iter().collect();
+                if is_env_var_name(&var_name) {
+                    if SAFE_ENV_VARS.contains(&var_name.as_str()) {
+                        result.push('$');
+                        result.push_str(&var_name);
+                    } else {
+                        result.push_str("$REDACTED");
+                    }
+                    i = end;
+                    continue;
+                }
+            }
+        }
+        result.push(chars[i]);
+        i += 1;
+    }
+
+    result
+}
+
+/// Check if a string looks like an env var name (uppercase + underscores + digits).
+fn is_env_var_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// Replace `/Users/<name>` and `/home/<name>` with `$HOME`.
+fn sanitize_user_paths(input: &str) -> String {
+    let mut result = input.to_string();
+    for prefix in &["/Users/", "/home/"] {
+        while let Some(pos) = result.find(prefix) {
+            let after = &result[pos + prefix.len()..];
+            let username_end = after
+                .find(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '-' && c != '_')
+                .unwrap_or(after.len());
+            if username_end > 0 {
+                let end = pos + prefix.len() + username_end;
+                result = format!("{}$HOME{}", &result[..pos], &result[end..]);
+            } else {
+                break;
+            }
+        }
+    }
+    result
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Compatibility checking
+// ────────────────────────────────────────────────────────────────────────────
+
+/// A compatibility issue found when checking an artifact against the local environment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CompatIssue {
+    /// A required CLI binary is not on PATH.
+    MissingCli(String),
+    /// The artifact targets a different OS.
+    WrongOs {
+        current: String,
+        required: Vec<String>,
+    },
+    /// The local claudectl version is too old.
+    VersionTooOld { current: String, required: String },
+}
+
+impl CompatIssue {
+    /// Short label for display in the COMPAT column.
+    pub fn short_label(&self) -> &'static str {
+        match self {
+            Self::MissingCli(_) => "!cli",
+            Self::WrongOs { .. } => "!os",
+            Self::VersionTooOld { .. } => "!ver",
+        }
+    }
+
+    /// Whether this issue should block installation (vs just warn).
+    pub fn is_blocking(&self) -> bool {
+        matches!(self, Self::WrongOs { .. } | Self::VersionTooOld { .. })
+    }
+}
+
+impl std::fmt::Display for CompatIssue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingCli(cli) => write!(f, "missing CLI: {cli}"),
+            Self::WrongOs { current, required } => {
+                write!(
+                    f,
+                    "OS mismatch: running {current}, requires {}",
+                    required.join("/")
+                )
+            }
+            Self::VersionTooOld { current, required } => {
+                write!(f, "claudectl {current} too old, requires >= {required}")
+            }
+        }
+    }
+}
+
+/// Check an artifact's requirements against the local environment.
+pub fn check_compatibility(requires: &ArtifactRequires) -> Vec<CompatIssue> {
+    let mut issues = Vec::new();
+
+    for cli in &requires.cli {
+        if !is_cli_available(cli) {
+            issues.push(CompatIssue::MissingCli(cli.clone()));
+        }
+    }
+
+    if !requires.os.is_empty() {
+        let current = current_os_label();
+        if !requires.os.iter().any(|o| o == current) {
+            issues.push(CompatIssue::WrongOs {
+                current: current.to_string(),
+                required: requires.os.clone(),
+            });
+        }
+    }
+
+    if let Some(min_ver) = &requires.min_version {
+        let current = env!("CARGO_PKG_VERSION");
+        if !version_gte(current, min_ver) {
+            issues.push(CompatIssue::VersionTooOld {
+                current: current.to_string(),
+                required: min_ver.clone(),
+            });
+        }
+    }
+
+    issues
+}
+
+/// Check if a CLI binary is available on PATH.
+pub fn is_cli_available(name: &str) -> bool {
+    // Reject names with path separators or shell metacharacters
+    if name.contains('/') || name.contains('\\') || name.contains(';') || name.is_empty() {
+        return false;
+    }
+    std::process::Command::new("which")
+        .arg(name)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Current OS label for compatibility matching.
+pub fn current_os_label() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else if cfg!(target_os = "windows") {
+        "windows"
+    } else {
+        "unknown"
+    }
+}
+
+/// Simple semver comparison: is `current` >= `required`?
+/// Compares major.minor.patch numerically. Non-numeric parts are treated as 0.
+fn version_gte(current: &str, required: &str) -> bool {
+    let parse = |s: &str| -> (u32, u32, u32) {
+        let parts: Vec<u32> = s
+            .split('.')
+            .take(3)
+            .map(|p| p.parse().unwrap_or(0))
+            .collect();
+        (
+            parts.first().copied().unwrap_or(0),
+            parts.get(1).copied().unwrap_or(0),
+            parts.get(2).copied().unwrap_or(0),
+        )
+    };
+    parse(current) >= parse(required)
+}
+
+/// Shell builtins and common shell syntax tokens to exclude from CLI detection.
+const SHELL_BUILTINS: &[&str] = &[
+    "if", "then", "else", "fi", "for", "do", "done", "while", "until", "case", "esac", "in",
+    "echo", "printf", "cd", "export", "set", "unset", "local", "return", "exit", "source", ".",
+    "true", "false", "test", "[", "[[", "read", "shift", "eval", "exec", "trap", "wait", "sleep",
+    "cat", "head", "tail", "grep", "sed", "awk", "tr", "cut", "sort", "uniq", "wc", "tee", "mkdir",
+    "rm", "cp", "mv", "ls", "touch", "chmod", "chown", "ln", "find", "xargs",
+];
+
+/// Detect CLI dependencies by scanning bash code blocks in a markdown body.
+pub fn detect_cli_deps(body: &str) -> Vec<String> {
+    let mut deps = std::collections::BTreeSet::new();
+    let mut in_bash_block = false;
+
+    for line in body.lines() {
+        let trimmed = line.trim();
+
+        if trimmed.starts_with("```bash") || trimmed.starts_with("```sh") {
+            in_bash_block = true;
+            continue;
+        }
+        if trimmed.starts_with("```") && in_bash_block {
+            in_bash_block = false;
+            continue;
+        }
+
+        if !in_bash_block {
+            continue;
+        }
+
+        // Skip comments and empty lines
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        // Extract the first token (the command being run)
+        // Handle pipes: each segment after | is a new command
+        for segment in trimmed.split('|') {
+            let segment = segment.trim();
+            // Strip leading env var assignments (KEY=val cmd)
+            let cmd_part = skip_env_assignments(segment);
+            if let Some(cmd) = cmd_part.split_whitespace().next() {
+                // Strip path prefix if present
+                let base = cmd.rsplit('/').next().unwrap_or(cmd);
+                if !base.is_empty()
+                    && !SHELL_BUILTINS.contains(&base)
+                    && base
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                {
+                    deps.insert(base.to_string());
+                }
+            }
+        }
+    }
+
+    deps.into_iter().collect()
+}
+
+/// Skip leading `KEY=value` assignments to find the actual command.
+fn skip_env_assignments(s: &str) -> &str {
+    let mut rest = s;
+    loop {
+        let trimmed = rest.trim_start();
+        // Check for KEY=... pattern (uppercase start, has =)
+        if let Some(eq_pos) = trimmed.find('=') {
+            let key = &trimmed[..eq_pos];
+            if !key.is_empty()
+                && key
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+            {
+                // Skip past the value
+                let after_eq = &trimmed[eq_pos + 1..];
+                // Quoted value
+                if let Some(inner) = after_eq.strip_prefix('"') {
+                    if let Some(end) = inner.find('"') {
+                        rest = &inner[end + 1..];
+                        continue;
+                    }
+                } else if let Some(inner) = after_eq.strip_prefix('\'') {
+                    if let Some(end) = inner.find('\'') {
+                        rest = &inner[end + 1..];
+                        continue;
+                    }
+                } else {
+                    // Unquoted — next whitespace
+                    let end = after_eq.find(char::is_whitespace).unwrap_or(after_eq.len());
+                    rest = &after_eq[end..];
+                    continue;
+                }
+            }
+        }
+        return trimmed;
+    }
+}
+
+/// Detect OS requirements from body content heuristics.
+pub fn detect_os_deps(body: &str) -> Vec<String> {
+    let mut os_set = std::collections::BTreeSet::new();
+
+    let lower = body.to_lowercase();
+
+    // macOS signals
+    if lower.contains("brew ") || lower.contains("brew install") || lower.contains("/usr/local/bin")
+    {
+        os_set.insert("macos".to_string());
+    }
+
+    // Linux signals
+    if lower.contains("apt-get")
+        || lower.contains("apt install")
+        || lower.contains("systemctl")
+        || lower.contains("yum install")
+        || lower.contains("dnf install")
+    {
+        os_set.insert("linux".to_string());
+    }
+
+    os_set.into_iter().collect()
+}
+
+/// Get the `requires` field from a KnowledgeContent, if it's an artifact type.
+pub fn get_requires(content: &KnowledgeContent) -> Option<&ArtifactRequires> {
+    match content {
+        KnowledgeContent::Skill { requires, .. }
+        | KnowledgeContent::Command { requires, .. }
+        | KnowledgeContent::HookConfig { requires, .. } => Some(requires),
+        _ => None,
+    }
+}
+
+/// Compute a short compatibility label for display.
+/// Returns "ok", "!cli", "!os", "!ver", or "?" (no requirements declared).
+pub fn compat_label(content: &KnowledgeContent) -> &'static str {
+    match get_requires(content) {
+        None => "—",
+        Some(req) if req.cli.is_empty() && req.os.is_empty() && req.min_version.is_none() => "?",
+        Some(req) => {
+            let issues = check_compatibility(req);
+            if issues.is_empty() {
+                "ok"
+            } else {
+                // Return the first (most important) issue label
+                issues[0].short_label()
+            }
+        }
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Display helpers
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -358,6 +912,30 @@ impl KnowledgeContent {
             }
             Self::PromotedRule { rule, .. } => {
                 format!("rule: {rule}")
+            }
+            Self::Skill {
+                name,
+                version,
+                body,
+                ..
+            } => {
+                format!("skill: {name} v{version} ({} bytes)", body.len())
+            }
+            Self::Command { name, args, .. } => {
+                let arg_str = args.as_deref().unwrap_or("");
+                if arg_str.is_empty() {
+                    format!("command: /{name}")
+                } else {
+                    format!("command: /{name} {arg_str}")
+                }
+            }
+            Self::HookConfig {
+                event,
+                matcher,
+                description,
+                ..
+            } => {
+                format!("hook: {event}[{matcher}] — {description}")
             }
         }
     }
@@ -538,5 +1116,527 @@ mod tests {
         };
         let key = semantic_key(&unit);
         assert!(key.starts_with("universal/insight:error_loop:"));
+    }
+
+    // ── New content type tests ─────────────────────────────────────────
+
+    fn sample_skill_unit() -> KnowledgeUnit {
+        KnowledgeUnit {
+            id: "ku_skill_1".into(),
+            scope: KnowledgeScope::Universal,
+            category: KnowledgeCategory::Technique,
+            content: KnowledgeContent::Skill {
+                name: "Session Monitoring".into(),
+                description: "Monitors sessions".into(),
+                version: "0.31.0".into(),
+                body: "---\nname: Session Monitoring\n---\nContent here".into(),
+                requires: ArtifactRequires::default(),
+            },
+            evidence_count: 1,
+            confidence: 1.0,
+            source_peer: "peer-a".into(),
+            originated_at: 1000,
+            last_validated_at: 2000,
+            propagation_count: 0,
+            version: 1,
+        }
+    }
+
+    fn sample_command_unit() -> KnowledgeUnit {
+        KnowledgeUnit {
+            id: "ku_cmd_1".into(),
+            scope: KnowledgeScope::Universal,
+            category: KnowledgeCategory::Technique,
+            content: KnowledgeContent::Command {
+                name: "brain".into(),
+                description: "Toggle brain gate".into(),
+                args: Some("[on|off|auto|status]".into()),
+                body: "---\nname: brain\n---\nContent".into(),
+                requires: ArtifactRequires::default(),
+            },
+            evidence_count: 1,
+            confidence: 1.0,
+            source_peer: "peer-b".into(),
+            originated_at: 1000,
+            last_validated_at: 2000,
+            propagation_count: 0,
+            version: 1,
+        }
+    }
+
+    fn sample_hook_unit() -> KnowledgeUnit {
+        KnowledgeUnit {
+            id: "ku_hook_1".into(),
+            scope: KnowledgeScope::Universal,
+            category: KnowledgeCategory::WorkflowPattern,
+            content: KnowledgeContent::HookConfig {
+                event: "PreToolUse".into(),
+                matcher: "Bash|Write|Edit".into(),
+                description: "Brain gate hook".into(),
+                config_json: r#"{"command": "brain-gate.sh", "timeout": 5000}"#.into(),
+                requires: ArtifactRequires::default(),
+            },
+            evidence_count: 1,
+            confidence: 1.0,
+            source_peer: "peer-a".into(),
+            originated_at: 1000,
+            last_validated_at: 2000,
+            propagation_count: 0,
+            version: 1,
+        }
+    }
+
+    #[test]
+    fn semantic_key_skill() {
+        let unit = sample_skill_unit();
+        assert_eq!(semantic_key(&unit), "universal/skill:session-monitoring");
+    }
+
+    #[test]
+    fn semantic_key_command() {
+        let unit = sample_command_unit();
+        assert_eq!(semantic_key(&unit), "universal/command:brain");
+    }
+
+    #[test]
+    fn semantic_key_hook() {
+        let unit = sample_hook_unit();
+        assert_eq!(
+            semantic_key(&unit),
+            "universal/hook:pretooluse:bash|write|edit"
+        );
+    }
+
+    #[test]
+    fn summary_line_skill() {
+        let unit = sample_skill_unit();
+        let line = unit.content.summary_line();
+        assert!(line.contains("Session Monitoring"));
+        assert!(line.contains("v0.31.0"));
+        assert!(line.contains("bytes"));
+    }
+
+    #[test]
+    fn summary_line_command() {
+        let unit = sample_command_unit();
+        let line = unit.content.summary_line();
+        assert!(line.contains("/brain"));
+        assert!(line.contains("[on|off|auto|status]"));
+    }
+
+    #[test]
+    fn summary_line_command_no_args() {
+        let content = KnowledgeContent::Command {
+            name: "sessions".into(),
+            description: "List sessions".into(),
+            args: None,
+            body: "body".into(),
+            requires: ArtifactRequires::default(),
+        };
+        let line = content.summary_line();
+        assert_eq!(line, "command: /sessions");
+    }
+
+    #[test]
+    fn summary_line_hook() {
+        let unit = sample_hook_unit();
+        let line = unit.content.summary_line();
+        assert!(line.contains("PreToolUse"));
+        assert!(line.contains("Bash|Write|Edit"));
+    }
+
+    #[test]
+    fn serde_roundtrip_skill() {
+        let unit = sample_skill_unit();
+        let json = serde_json::to_string(&unit).unwrap();
+        let back: KnowledgeUnit = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.id, "ku_skill_1");
+        if let KnowledgeContent::Skill { name, version, .. } = &back.content {
+            assert_eq!(name, "Session Monitoring");
+            assert_eq!(version, "0.31.0");
+        } else {
+            panic!("expected Skill variant");
+        }
+    }
+
+    #[test]
+    fn serde_roundtrip_command() {
+        let unit = sample_command_unit();
+        let json = serde_json::to_string(&unit).unwrap();
+        let back: KnowledgeUnit = serde_json::from_str(&json).unwrap();
+        if let KnowledgeContent::Command { name, args, .. } = &back.content {
+            assert_eq!(name, "brain");
+            assert_eq!(args.as_deref(), Some("[on|off|auto|status]"));
+        } else {
+            panic!("expected Command variant");
+        }
+    }
+
+    #[test]
+    fn serde_roundtrip_hook() {
+        let unit = sample_hook_unit();
+        let json = serde_json::to_string(&unit).unwrap();
+        let back: KnowledgeUnit = serde_json::from_str(&json).unwrap();
+        if let KnowledgeContent::HookConfig { event, matcher, .. } = &back.content {
+            assert_eq!(event, "PreToolUse");
+            assert_eq!(matcher, "Bash|Write|Edit");
+        } else {
+            panic!("expected HookConfig variant");
+        }
+    }
+
+    #[test]
+    fn sharing_filter_excludes_skills() {
+        let filter = SharingFilter {
+            exclude_content_types: vec!["skill".into()],
+            ..Default::default()
+        };
+        let unit = sample_skill_unit();
+        assert!(!filter.allows(&unit));
+
+        // Commands should still be allowed
+        let cmd = sample_command_unit();
+        assert!(filter.allows(&cmd));
+    }
+
+    #[test]
+    fn sharing_filter_excludes_commands() {
+        let filter = SharingFilter {
+            exclude_content_types: vec!["command".into()],
+            ..Default::default()
+        };
+        let cmd = sample_command_unit();
+        assert!(!filter.allows(&cmd));
+
+        // Skills should still be allowed
+        let skill = sample_skill_unit();
+        assert!(filter.allows(&skill));
+    }
+
+    #[test]
+    fn sharing_filter_excludes_hooks() {
+        let filter = SharingFilter {
+            exclude_content_types: vec!["hook".into()],
+            ..Default::default()
+        };
+        let hook = sample_hook_unit();
+        assert!(!filter.allows(&hook));
+    }
+
+    #[test]
+    fn sharing_filter_allows_all_by_default() {
+        let filter = SharingFilter::default();
+        assert!(filter.allows(&sample_skill_unit()));
+        assert!(filter.allows(&sample_command_unit()));
+        assert!(filter.allows(&sample_hook_unit()));
+    }
+
+    #[test]
+    fn sharing_filter_command_name_exclusion() {
+        let filter = SharingFilter {
+            exclude_commands: vec!["brain".into()],
+            ..Default::default()
+        };
+        let cmd = sample_command_unit();
+        assert!(!filter.allows(&cmd));
+    }
+
+    // ── Sanitization tests ─────────────────────────────────────────────
+
+    #[test]
+    fn sanitize_strips_env_vars() {
+        let input = "cmd: $API_KEY and ${SECRET_TOKEN}";
+        let result = sanitize_hook_config(input);
+        assert!(result.contains("$REDACTED"));
+        assert!(result.contains("${REDACTED}"));
+        assert!(!result.contains("API_KEY"));
+        assert!(!result.contains("SECRET_TOKEN"));
+    }
+
+    #[test]
+    fn sanitize_keeps_safe_vars() {
+        let input = "path: $HOME/.claudectl and ${CLAUDE_PLUGIN_ROOT}/hooks";
+        let result = sanitize_hook_config(input);
+        assert!(result.contains("$HOME"));
+        assert!(result.contains("${CLAUDE_PLUGIN_ROOT}"));
+    }
+
+    #[test]
+    fn sanitize_strips_absolute_paths() {
+        let input = "file: /Users/barada/.claudectl/config";
+        let result = sanitize_hook_config(input);
+        assert!(result.contains("$HOME"));
+        assert!(!result.contains("/Users/barada"));
+    }
+
+    #[test]
+    fn sanitize_strips_home_paths() {
+        let input = "file: /home/ubuntu/.config/thing";
+        let result = sanitize_hook_config(input);
+        assert!(result.contains("$HOME"));
+        assert!(!result.contains("/home/ubuntu"));
+    }
+
+    #[test]
+    fn sanitize_strips_credentials() {
+        let input = r#""api_key": "sk-1234567890""#;
+        let result = sanitize_hook_config(input);
+        assert!(result.contains("REDACTED"));
+        assert!(!result.contains("sk-1234567890"));
+    }
+
+    #[test]
+    fn sanitize_strips_unquoted_credentials() {
+        let input = "token=abc123def";
+        let result = sanitize_hook_config(input);
+        assert!(result.contains("REDACTED"));
+        assert!(!result.contains("abc123def"));
+    }
+
+    #[test]
+    fn sanitize_preserves_safe_content() {
+        let input = r#"{"command": "brain-gate.sh", "timeout": 5000}"#;
+        let result = sanitize_hook_config(input);
+        assert_eq!(result, input);
+    }
+
+    // ── Compatibility tests ────────────────────────────────────────────
+
+    #[test]
+    fn artifact_requires_serde_roundtrip() {
+        let req = ArtifactRequires {
+            cli: vec!["claudectl".into(), "jq".into()],
+            os: vec!["macos".into()],
+            min_version: Some("0.42.0".into()),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let back: ArtifactRequires = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.cli, vec!["claudectl", "jq"]);
+        assert_eq!(back.os, vec!["macos"]);
+        assert_eq!(back.min_version.as_deref(), Some("0.42.0"));
+    }
+
+    #[test]
+    fn artifact_requires_default_empty() {
+        let req = ArtifactRequires::default();
+        assert!(req.cli.is_empty());
+        assert!(req.os.is_empty());
+        assert!(req.min_version.is_none());
+    }
+
+    #[test]
+    fn artifact_requires_skips_empty_on_serialize() {
+        let req = ArtifactRequires::default();
+        let json = serde_json::to_string(&req).unwrap();
+        assert_eq!(json, "{}");
+    }
+
+    #[test]
+    fn artifact_requires_backward_compat_deserialize() {
+        // Old units without `requires` should deserialize with empty default
+        let json =
+            r#"{"type":"skill","name":"Test","description":"Test","version":"1.0","body":"x"}"#;
+        let content: KnowledgeContent = serde_json::from_str(json).unwrap();
+        if let KnowledgeContent::Skill { requires, .. } = content {
+            assert!(requires.cli.is_empty());
+            assert!(requires.os.is_empty());
+        } else {
+            panic!("expected Skill");
+        }
+    }
+
+    #[test]
+    fn version_gte_basic() {
+        assert!(version_gte("0.42.0", "0.42.0"));
+        assert!(version_gte("0.43.0", "0.42.0"));
+        assert!(version_gte("1.0.0", "0.99.99"));
+        assert!(!version_gte("0.41.0", "0.42.0"));
+        assert!(!version_gte("0.42.0", "0.42.1"));
+    }
+
+    #[test]
+    fn version_gte_partial() {
+        assert!(version_gte("1.0", "0.42.0"));
+        assert!(version_gte("1", "0"));
+    }
+
+    #[test]
+    fn current_os_label_not_unknown() {
+        let label = current_os_label();
+        assert!(label == "macos" || label == "linux" || label == "windows");
+    }
+
+    #[test]
+    fn is_cli_available_rejects_path_traversal() {
+        assert!(!is_cli_available("../../../etc/passwd"));
+        assert!(!is_cli_available("foo;rm -rf /"));
+        assert!(!is_cli_available(""));
+    }
+
+    #[test]
+    fn detect_cli_deps_basic() {
+        let body = r#"
+# Usage
+
+```bash
+claudectl --list
+jq '.sessions[]' output.json
+cargo test --all
+```
+
+Some text.
+"#;
+        let deps = detect_cli_deps(body);
+        assert!(deps.contains(&"claudectl".to_string()));
+        assert!(deps.contains(&"jq".to_string()));
+        assert!(deps.contains(&"cargo".to_string()));
+    }
+
+    #[test]
+    fn detect_cli_deps_skips_builtins() {
+        let body = r#"
+```bash
+echo "hello"
+cd /tmp
+export FOO=bar
+if [ -f test ]; then echo ok; fi
+```
+"#;
+        let deps = detect_cli_deps(body);
+        assert!(deps.is_empty());
+    }
+
+    #[test]
+    fn detect_cli_deps_handles_pipes() {
+        let body = r#"
+```bash
+claudectl --json | jq '.[] | .cost'
+```
+"#;
+        let deps = detect_cli_deps(body);
+        assert!(deps.contains(&"claudectl".to_string()));
+        assert!(deps.contains(&"jq".to_string()));
+    }
+
+    #[test]
+    fn detect_cli_deps_skips_non_bash_blocks() {
+        let body = r#"
+```python
+import json
+```
+
+```bash
+claudectl --list
+```
+
+```rust
+fn main() {}
+```
+"#;
+        let deps = detect_cli_deps(body);
+        assert_eq!(deps, vec!["claudectl"]);
+    }
+
+    #[test]
+    fn detect_cli_deps_handles_env_assignments() {
+        let body = r#"
+```bash
+FOO=bar claudectl --list
+```
+"#;
+        let deps = detect_cli_deps(body);
+        assert!(deps.contains(&"claudectl".to_string()));
+    }
+
+    #[test]
+    fn detect_os_deps_macos() {
+        let body = "Install with: brew install claudectl";
+        assert_eq!(detect_os_deps(body), vec!["macos"]);
+    }
+
+    #[test]
+    fn detect_os_deps_linux() {
+        let body = "Install with: apt-get install tool";
+        assert_eq!(detect_os_deps(body), vec!["linux"]);
+    }
+
+    #[test]
+    fn detect_os_deps_none() {
+        let body = "Just run claudectl";
+        assert!(detect_os_deps(body).is_empty());
+    }
+
+    #[test]
+    fn compat_issue_display() {
+        let issue = CompatIssue::MissingCli("jq".into());
+        assert_eq!(format!("{issue}"), "missing CLI: jq");
+        assert_eq!(issue.short_label(), "!cli");
+        assert!(!issue.is_blocking());
+
+        let issue = CompatIssue::WrongOs {
+            current: "macos".into(),
+            required: vec!["linux".into()],
+        };
+        assert!(issue.is_blocking());
+        assert_eq!(issue.short_label(), "!os");
+    }
+
+    #[test]
+    fn check_compatibility_no_requirements() {
+        let req = ArtifactRequires::default();
+        assert!(check_compatibility(&req).is_empty());
+    }
+
+    #[test]
+    fn check_compatibility_missing_cli() {
+        let req = ArtifactRequires {
+            cli: vec!["this_binary_surely_does_not_exist_xyz".into()],
+            ..Default::default()
+        };
+        let issues = check_compatibility(&req);
+        assert_eq!(issues.len(), 1);
+        assert!(
+            matches!(&issues[0], CompatIssue::MissingCli(s) if s == "this_binary_surely_does_not_exist_xyz")
+        );
+    }
+
+    #[test]
+    fn check_compatibility_version_ok() {
+        let req = ArtifactRequires {
+            min_version: Some("0.1.0".into()),
+            ..Default::default()
+        };
+        // Current version is always >= 0.1.0
+        assert!(check_compatibility(&req).is_empty());
+    }
+
+    #[test]
+    fn check_compatibility_version_too_high() {
+        let req = ArtifactRequires {
+            min_version: Some("99.99.99".into()),
+            ..Default::default()
+        };
+        let issues = check_compatibility(&req);
+        assert_eq!(issues.len(), 1);
+        assert!(matches!(&issues[0], CompatIssue::VersionTooOld { .. }));
+    }
+
+    #[test]
+    fn get_requires_returns_none_for_pattern() {
+        let unit = sample_pattern_unit("Bash", Some("test"));
+        assert!(get_requires(&unit.content).is_none());
+    }
+
+    #[test]
+    fn get_requires_returns_some_for_skill() {
+        let unit = sample_skill_unit();
+        assert!(get_requires(&unit.content).is_some());
+    }
+
+    #[test]
+    fn compat_label_no_requirements() {
+        let unit = sample_skill_unit();
+        // Default requires is empty — should show "?"
+        assert_eq!(compat_label(&unit.content), "?");
     }
 }
