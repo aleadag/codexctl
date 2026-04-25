@@ -27,6 +27,8 @@ pub struct Config {
     pub file_conflicts: bool, // Detect file-level conflicts across sessions
     pub auto_deny_file_conflicts: bool, // Auto-deny writes to conflicting files
     pub brain: Option<BrainConfig>,
+    pub relay: Option<RelayConfig>,
+    pub hive: Option<HiveConfig>,
     pub lifecycle: LifecycleConfig,
     pub idle: IdleConfig,
     pub agents: Vec<AgentConfig>,
@@ -174,6 +176,79 @@ impl Default for IdleConfig {
     }
 }
 
+/// Configuration for relay transport (cross-machine collaboration).
+#[derive(Debug, Clone)]
+pub struct RelayConfig {
+    pub enabled: bool,
+    pub listen_port: u16,
+    pub listen_addr: String,
+    pub max_peers: u8,
+    pub heartbeat_interval_secs: u64,
+    pub reconnect_max_secs: u64,
+    pub auto_connect: Vec<String>,
+}
+
+impl Default for RelayConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            listen_port: 9847,
+            listen_addr: "0.0.0.0".into(),
+            max_peers: 8,
+            heartbeat_interval_secs: 30,
+            reconnect_max_secs: 60,
+            auto_connect: Vec::new(),
+        }
+    }
+}
+
+/// Configuration for hive mind knowledge sharing.
+#[derive(Debug, Clone)]
+pub struct HiveConfig {
+    pub enabled: bool,
+    pub default_trust: f64,
+    pub auto_trust_drift: bool,
+    pub max_propagation: u32,
+    pub export_min_evidence: u32,
+    pub export_min_tool_decisions: u32,
+    pub knowledge_ttl_days: u32,
+    pub inject_unverified: bool,
+    /// Which knowledge categories to share. Empty = share all shareable categories.
+    /// Valid values: "best_practice", "technique", "workflow"
+    pub share_categories: Vec<String>,
+    /// Tools to exclude from sharing (e.g., ["Write"] to keep file-write patterns private).
+    pub exclude_tools: Vec<String>,
+    /// Command patterns to exclude from sharing (substring match).
+    pub exclude_commands: Vec<String>,
+    /// Maximum knowledge units to keep in the store. Oldest/lowest-confidence evicted.
+    pub max_units: usize,
+    /// Maximum knowledge units to inject into the brain prompt per evaluation.
+    pub max_prompt_units: usize,
+    /// Days after which a peer's knowledge is pruned if the peer hasn't been seen.
+    pub stale_peer_days: u32,
+}
+
+impl Default for HiveConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            default_trust: 0.5,
+            auto_trust_drift: true,
+            max_propagation: 5,
+            export_min_evidence: 5,
+            export_min_tool_decisions: 10,
+            knowledge_ttl_days: 30,
+            inject_unverified: true,
+            share_categories: Vec::new(),
+            exclude_tools: Vec::new(),
+            exclude_commands: Vec::new(),
+            max_units: 500,
+            max_prompt_units: 20,
+            stale_peer_days: 90,
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -195,6 +270,8 @@ impl Default for Config {
             file_conflicts: true,
             auto_deny_file_conflicts: false,
             brain: None,
+            relay: None,
+            hive: None,
             lifecycle: LifecycleConfig::default(),
             idle: IdleConfig::default(),
             agents: Vec::new(),
@@ -223,9 +300,40 @@ struct RawConfig {
     file_conflicts: Option<bool>,
     auto_deny_file_conflicts: Option<bool>,
     brain: Option<BrainConfig>,
+    relay: Option<RawRelayConfig>,
+    hive: Option<RawHiveConfig>,
     lifecycle: Option<RawLifecycleConfig>,
     idle: Option<RawIdleConfig>,
     agents: Vec<AgentConfig>,
+}
+
+#[derive(Debug, Default)]
+struct RawRelayConfig {
+    enabled: Option<bool>,
+    listen_port: Option<u16>,
+    listen_addr: Option<String>,
+    max_peers: Option<u8>,
+    heartbeat_interval_secs: Option<u64>,
+    reconnect_max_secs: Option<u64>,
+    auto_connect: Option<Vec<String>>,
+}
+
+#[derive(Debug, Default)]
+struct RawHiveConfig {
+    enabled: Option<bool>,
+    default_trust: Option<f64>,
+    auto_trust_drift: Option<bool>,
+    max_propagation: Option<u32>,
+    export_min_evidence: Option<u32>,
+    export_min_tool_decisions: Option<u32>,
+    knowledge_ttl_days: Option<u32>,
+    inject_unverified: Option<bool>,
+    share_categories: Vec<String>,
+    exclude_tools: Vec<String>,
+    exclude_commands: Vec<String>,
+    max_units: Option<usize>,
+    max_prompt_units: Option<usize>,
+    stale_peer_days: Option<u32>,
 }
 
 #[derive(Debug, Default)]
@@ -364,6 +472,75 @@ impl Config {
         }
         if let Some(brain) = raw.brain {
             self.brain = Some(brain);
+        }
+        if let Some(raw_relay) = raw.relay {
+            let relay = self.relay.get_or_insert_with(RelayConfig::default);
+            if let Some(v) = raw_relay.enabled {
+                relay.enabled = v;
+            }
+            if let Some(v) = raw_relay.listen_port {
+                relay.listen_port = v;
+            }
+            if let Some(v) = raw_relay.listen_addr {
+                relay.listen_addr = v;
+            }
+            if let Some(v) = raw_relay.max_peers {
+                relay.max_peers = v;
+            }
+            if let Some(v) = raw_relay.heartbeat_interval_secs {
+                relay.heartbeat_interval_secs = v;
+            }
+            if let Some(v) = raw_relay.reconnect_max_secs {
+                relay.reconnect_max_secs = v;
+            }
+            if let Some(v) = raw_relay.auto_connect {
+                relay.auto_connect = v;
+            }
+        }
+        if let Some(raw_hive) = raw.hive {
+            let hive = self.hive.get_or_insert_with(HiveConfig::default);
+            if let Some(v) = raw_hive.enabled {
+                hive.enabled = v;
+            }
+            if let Some(v) = raw_hive.default_trust {
+                hive.default_trust = v.clamp(0.0, 1.0);
+            }
+            if let Some(v) = raw_hive.auto_trust_drift {
+                hive.auto_trust_drift = v;
+            }
+            if let Some(v) = raw_hive.max_propagation {
+                hive.max_propagation = v;
+            }
+            if let Some(v) = raw_hive.export_min_evidence {
+                hive.export_min_evidence = v;
+            }
+            if let Some(v) = raw_hive.export_min_tool_decisions {
+                hive.export_min_tool_decisions = v;
+            }
+            if let Some(v) = raw_hive.knowledge_ttl_days {
+                hive.knowledge_ttl_days = v;
+            }
+            if let Some(v) = raw_hive.inject_unverified {
+                hive.inject_unverified = v;
+            }
+            if !raw_hive.share_categories.is_empty() {
+                hive.share_categories = raw_hive.share_categories;
+            }
+            if !raw_hive.exclude_tools.is_empty() {
+                hive.exclude_tools = raw_hive.exclude_tools;
+            }
+            if !raw_hive.exclude_commands.is_empty() {
+                hive.exclude_commands = raw_hive.exclude_commands;
+            }
+            if let Some(v) = raw_hive.max_units {
+                hive.max_units = v;
+            }
+            if let Some(v) = raw_hive.max_prompt_units {
+                hive.max_prompt_units = v;
+            }
+            if let Some(v) = raw_hive.stale_peer_days {
+                hive.stale_peer_days = v;
+            }
         }
         if let Some(lc) = raw.lifecycle {
             if let Some(v) = lc.auto_restart {
@@ -666,6 +843,27 @@ impl Config {
 # orchestrate = false
 # orchestrate_interval = 30
 
+# ── Relay / Hive (feature: relay) ─────────────────────────────────────
+#
+# [relay]
+# enabled = false
+# listen_addr = "0.0.0.0"
+# listen_port = 9847
+# max_peers = 8
+# heartbeat_interval_secs = 30
+# reconnect_max_secs = 60
+# auto_connect = []
+#
+# [hive]
+# enabled = false
+# default_trust = 0.5
+# auto_trust_drift = true
+# max_propagation = 5
+# export_min_evidence = 5
+# export_min_tool_decisions = 10
+# knowledge_ttl_days = 30
+# inject_unverified = true
+
 # ── External Agents ─────────────────────────────────────────────────
 #
 # [agents.codex]
@@ -896,6 +1094,79 @@ fn parse_config_file(path: &PathBuf) -> Option<RawConfig> {
                         if let Ok(v) = value.parse() {
                             brain.orchestrate_interval_secs = v;
                         }
+                    }
+                    _ => {}
+                }
+            }
+            ("relay", _) => {
+                let relay = raw.relay.get_or_insert_with(RawRelayConfig::default);
+                match key {
+                    "enabled" => {
+                        relay.enabled = parse_bool(value);
+                    }
+                    "listen_port" | "port" => {
+                        relay.listen_port = value.parse().ok();
+                    }
+                    "listen_addr" | "addr" => relay.listen_addr = Some(unquote(value)),
+                    "max_peers" => {
+                        relay.max_peers = value.parse().ok();
+                    }
+                    "heartbeat_interval" | "heartbeat_interval_secs" => {
+                        relay.heartbeat_interval_secs = value.parse().ok();
+                    }
+                    "reconnect_max" | "reconnect_max_secs" => {
+                        relay.reconnect_max_secs = value.parse().ok();
+                    }
+                    "auto_connect" => {
+                        relay.auto_connect = Some(parse_string_array(value));
+                    }
+                    _ => {}
+                }
+            }
+            ("hive", _) => {
+                let hive = raw.hive.get_or_insert_with(RawHiveConfig::default);
+                match key {
+                    "enabled" => {
+                        hive.enabled = parse_bool(value);
+                    }
+                    "default_trust" => {
+                        hive.default_trust = value.parse().ok();
+                    }
+                    "auto_trust_drift" => {
+                        hive.auto_trust_drift = parse_bool(value);
+                    }
+                    "max_propagation" => {
+                        hive.max_propagation = value.parse().ok();
+                    }
+                    "export_min_evidence" => {
+                        hive.export_min_evidence = value.parse().ok();
+                    }
+                    "export_min_tool_decisions" => {
+                        hive.export_min_tool_decisions = value.parse().ok();
+                    }
+                    "knowledge_ttl_days" => {
+                        hive.knowledge_ttl_days = value.parse().ok();
+                    }
+                    "inject_unverified" => {
+                        hive.inject_unverified = parse_bool(value);
+                    }
+                    "share_categories" => {
+                        hive.share_categories = parse_string_array(value);
+                    }
+                    "exclude_tools" => {
+                        hive.exclude_tools = parse_string_array(value);
+                    }
+                    "exclude_commands" => {
+                        hive.exclude_commands = parse_string_array(value);
+                    }
+                    "max_units" => {
+                        hive.max_units = value.parse().ok();
+                    }
+                    "max_prompt_units" => {
+                        hive.max_prompt_units = value.parse().ok();
+                    }
+                    "stale_peer_days" => {
+                        hive.stale_peer_days = value.parse().ok();
                     }
                     _ => {}
                 }
@@ -1151,6 +1422,40 @@ context_max = 128000
         assert!(config.notify); // Unchanged
         assert_eq!(config.budget, Some(10.0)); // Overridden
         assert!(config.grouped); // New
+
+        // Partial relay/hive sections layer without resetting omitted fields.
+        config.apply(RawConfig {
+            relay: Some(RawRelayConfig {
+                enabled: Some(true),
+                listen_port: Some(9000),
+                ..RawRelayConfig::default()
+            }),
+            hive: Some(RawHiveConfig {
+                enabled: Some(true),
+                default_trust: Some(0.7),
+                ..RawHiveConfig::default()
+            }),
+            ..RawConfig::default()
+        });
+        config.apply(RawConfig {
+            relay: Some(RawRelayConfig {
+                max_peers: Some(4),
+                ..RawRelayConfig::default()
+            }),
+            hive: Some(RawHiveConfig {
+                knowledge_ttl_days: Some(14),
+                ..RawHiveConfig::default()
+            }),
+            ..RawConfig::default()
+        });
+        let relay = config.relay.as_ref().unwrap();
+        assert!(relay.enabled);
+        assert_eq!(relay.listen_port, 9000);
+        assert_eq!(relay.max_peers, 4);
+        let hive = config.hive.as_ref().unwrap();
+        assert!(hive.enabled);
+        assert_eq!(hive.default_trust, 0.7);
+        assert_eq!(hive.knowledge_ttl_days, 14);
     }
 
     #[test]
@@ -1246,6 +1551,47 @@ max_context_tokens = 8000
 
         let raw = parse_config_file(&file.path().to_path_buf()).unwrap();
         assert!(raw.brain.is_none());
+    }
+
+    #[test]
+    fn test_parse_relay_hive_config() {
+        use std::io::Write;
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"
+[relay]
+enabled = true
+listen_port = 9999
+listen_addr = "127.0.0.1"
+max_peers = 3
+auto_connect = ["peer-a:9847"]
+
+[hive]
+enabled = true
+default_trust = 0.65
+max_propagation = 2
+knowledge_ttl_days = 7
+inject_unverified = false
+"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+
+        let raw = parse_config_file(&file.path().to_path_buf()).unwrap();
+        let relay = raw.relay.expect("relay config should be parsed");
+        assert_eq!(relay.enabled, Some(true));
+        assert_eq!(relay.listen_port, Some(9999));
+        assert_eq!(relay.listen_addr.as_deref(), Some("127.0.0.1"));
+        assert_eq!(relay.max_peers, Some(3));
+        assert_eq!(relay.auto_connect, Some(vec!["peer-a:9847".into()]));
+
+        let hive = raw.hive.expect("hive config should be parsed");
+        assert_eq!(hive.enabled, Some(true));
+        assert_eq!(hive.default_trust, Some(0.65));
+        assert_eq!(hive.max_propagation, Some(2));
+        assert_eq!(hive.knowledge_ttl_days, Some(7));
+        assert_eq!(hive.inject_unverified, Some(false));
     }
 
     #[test]

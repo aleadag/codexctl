@@ -202,3 +202,39 @@ The plugin and the `--init` hooks are complementary:
 | Plugin | Brain gate hook (PreToolUse) + commands | Inline approve/deny without the TUI |
 
 You can use both. The `--init` hooks notify claudectl of tool completions. The plugin hook queries the brain before tool execution.
+
+## Coordination Layer (--features coord)
+
+Multi-session coordination on a single machine. Stores events, leases, blockers, handoffs, interrupts, and memory in a local SQLite database at `~/.claudectl/coord.db`. No TOML configuration needed — inspect with `claudectl --coord <subcommand>`. See [Reference](reference.md#coordination---features-coord) for all subcommands.
+
+## Relay & Hive Mind Configuration
+
+Cross-machine collaboration. `relay` feature enables task delegation. `hive` feature (depends on relay) enables knowledge sharing. See [Relay & Hive Mind](relay.md) for the full guide.
+
+```toml
+[relay]
+enabled = true              # start relay with TUI/brain
+listen_port = 9847          # TCP port for peer connections
+listen_addr = "0.0.0.0"    # bind address
+max_peers = 8               # maximum connected peers
+heartbeat_interval_secs = 30
+reconnect_max_secs = 60
+auto_connect = []           # list of "host:port" to auto-connect on startup
+
+[hive]
+enabled = true              # enable knowledge sharing (requires relay)
+default_trust = 0.5         # trust level for new peers (0.0-1.0)
+auto_trust_drift = true     # adjust trust based on decision concordance
+max_propagation = 5         # max gossip hops
+export_min_evidence = 5     # min decisions before sharing a pattern
+knowledge_ttl_days = 30     # expire unvalidated knowledge
+inject_unverified = true    # show low-trust knowledge in brain prompt
+max_units = 500             # hard cap on stored knowledge units
+max_prompt_units = 20       # cap on units injected into brain prompt
+stale_peer_days = 90        # prune knowledge from peers gone this long
+
+# Sharing controls — what knowledge to share with peers
+share_categories = []       # empty = all shareable. Options: best_practice, technique, workflow
+exclude_tools = []          # never share patterns for these tools (e.g., ["Write"])
+exclude_commands = []       # never share patterns matching these substrings
+```

@@ -424,6 +424,62 @@ fn maybe_distill_background() {
                 let _ = super::insights::merge_insights(insights, &mut state);
                 let _ = super::insights::save_state(&state);
             }
+
+            // Export knowledge units to hive store for sharing
+            #[cfg(feature = "hive")]
+            {
+                let cfg = crate::config::Config::load();
+                if let Some(hive_cfg) = cfg.hive.filter(|h| h.enabled) {
+                    let thresholds = crate::hive::distiller::ExportThresholds {
+                        min_pattern_evidence: hive_cfg.export_min_evidence,
+                        min_tool_decisions: hive_cfg.export_min_tool_decisions,
+                        ..Default::default()
+                    };
+                    let peer_id = crate::relay::load_or_create_identity();
+                    let mut store = crate::hive::store::HiveStore::load();
+                    let units = crate::hive::distiller::distill_to_knowledge_stable(
+                        &prefs,
+                        peer_id.as_str(),
+                        None,
+                        &thresholds,
+                        &store,
+                    );
+                    let count = units.len() as u32;
+                    for unit in units {
+                        store.insert(unit);
+                    }
+
+                    // Compact: enforce TTL, max_units, stale peer cleanup
+                    let trust_store =
+                        crate::hive::trust::TrustStore::load_with_default(hive_cfg.default_trust);
+                    let evicted = store.compact(
+                        hive_cfg.knowledge_ttl_days,
+                        hive_cfg.max_units,
+                        hive_cfg.stale_peer_days,
+                        Some(&trust_store),
+                    );
+                    if !evicted.is_empty() {
+                        // Archive evicted units to cold storage (optional)
+                        let archived = crate::hive::archive::archive_units(&evicted).unwrap_or(0);
+                        crate::logger::log(
+                            "HIVE",
+                            &format!(
+                                "compacted: {} evicted, {} archived (max {})",
+                                evicted.len(),
+                                archived,
+                                hive_cfg.max_units
+                            ),
+                        );
+                    }
+
+                    let _ = store.save();
+
+                    // Signal the relay to broadcast new knowledge to peers
+                    if count > 0 {
+                        crate::hive::signal_new_knowledge(count);
+                    }
+                }
+            }
         }
         DISTILLING.store(false, Ordering::Release);
     });

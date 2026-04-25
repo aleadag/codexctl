@@ -16,6 +16,8 @@ mod discovery;
 mod health;
 mod helpers;
 mod history;
+#[cfg(feature = "hive")]
+mod hive;
 mod hooks;
 mod init;
 mod launch;
@@ -25,6 +27,8 @@ mod monitor;
 mod orchestrator;
 mod process;
 mod recorder;
+#[cfg(feature = "relay")]
+mod relay;
 mod rules;
 mod session;
 mod session_recorder;
@@ -238,6 +242,17 @@ pub(crate) struct Cli {
     #[cfg(feature = "coord")]
     #[arg(long, help_heading = "Coordination")]
     coord: Option<String>,
+
+    // ── Relay ─────────────────────────────────────────────────────────
+    /// Relay: serve, invite, join, discover, pair, accept, connect, peers, delegate, status, interrupt, forget, identity
+    #[cfg(feature = "relay")]
+    #[arg(long, help_heading = "Relay")]
+    relay: Option<String>,
+
+    /// Hive: status, knowledge, trust, export, import, forget, archive, distill, curriculum
+    #[cfg(feature = "hive")]
+    #[arg(long, help_heading = "Hive Mind")]
+    hive: Option<String>,
 
     // ── Recording ──────────────────────────────────────────────────────
     /// Record the TUI session as an asciicast v2 file (e.g., --record demo.cast)
@@ -475,6 +490,16 @@ fn run_main(cli: Cli) -> io::Result<()> {
     #[cfg(feature = "coord")]
     if let Some(ref sub) = cli.coord {
         return coord::cli::dispatch(sub, cli.json);
+    }
+
+    #[cfg(feature = "relay")]
+    if let Some(ref sub) = cli.relay {
+        return relay::cli::dispatch(sub, cli.json);
+    }
+
+    #[cfg(feature = "hive")]
+    if let Some(ref sub) = cli.hive {
+        return hive::cli::dispatch(sub, cli.json);
     }
 
     if cli.brain_query {
@@ -730,7 +755,29 @@ fn run_tui<W: io::Write>(
             }
         }
         terminal.draw(|frame| {
-            ui::table::render(frame, frame.area(), &app);
+            let area = frame.area();
+
+            #[cfg(feature = "relay")]
+            let main_area = if app.show_peers_panel {
+                let chunks = ratatui::layout::Layout::default()
+                    .direction(ratatui::layout::Direction::Vertical)
+                    .constraints([
+                        ratatui::layout::Constraint::Min(5),
+                        ratatui::layout::Constraint::Length(
+                            (app.relay_peers.len() as u16 + 2).min(8),
+                        ),
+                    ])
+                    .split(area);
+                ui::peers::render_peers_panel(frame, chunks[1], &app.relay_peers, &app.theme);
+                chunks[0]
+            } else {
+                area
+            };
+
+            #[cfg(not(feature = "relay"))]
+            let main_area = area;
+
+            ui::table::render(frame, main_area, &app);
         })?;
 
         let timeout = tick_rate

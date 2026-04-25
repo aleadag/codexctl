@@ -26,6 +26,9 @@ pub struct TaskDef {
     pub resume: Option<String>,
     #[serde(default)]
     pub retries: Option<u32>,
+    /// Remote peer to delegate this task to (None = local execution).
+    #[serde(default)]
+    pub peer: Option<String>,
 }
 
 /// Task file containing a list of tasks.
@@ -180,6 +183,7 @@ pub fn decomposition_to_task_file(
                 depends_on: t.depends_on,
                 resume: None,
                 retries: None,
+                peer: None,
             })
             .collect(),
         retries: None,
@@ -296,6 +300,19 @@ pub fn run_tasks(task_file: TaskFile, parallel: bool) -> io::Result<()> {
 
             if !parallel && running_count > 0 {
                 break;
+            }
+
+            // Skip tasks targeted at a remote peer — the relay handles these
+            if task.def.peer.is_some() {
+                let peer = task.def.peer.as_deref().unwrap_or("unknown");
+                task.state = TaskState::Skipped(format!(
+                    "remote delegation to peer '{peer}' requires relay serve mode"
+                ));
+                println!(
+                    "  Skipped: {} (remote peer '{peer}' — use relay serve for delegation)",
+                    task.def.name
+                );
+                continue;
             }
 
             let attempt = task.attempts_started + 1;
@@ -1243,6 +1260,7 @@ mod tests {
                 depends_on: vec!["nonexistent".into()],
                 resume: None,
                 retries: None,
+                peer: None,
             }],
             retries: None,
         };
@@ -1264,6 +1282,7 @@ mod tests {
                     depends_on: vec!["task2".into()],
                     resume: None,
                     retries: None,
+                    peer: None,
                 },
                 TaskDef {
                     name: "task2".into(),
@@ -1272,6 +1291,7 @@ mod tests {
                     depends_on: vec!["task1".into()],
                     resume: None,
                     retries: None,
+                    peer: None,
                 },
             ],
             retries: None,
@@ -1338,6 +1358,7 @@ mod tests {
                 depends_on: vec![],
                 resume: None,
                 retries: None,
+                peer: None,
             },
             TaskDef {
                 name: "fix".into(),
@@ -1346,6 +1367,7 @@ mod tests {
                 depends_on: vec!["analyze".into()],
                 resume: None,
                 retries: None,
+                peer: None,
             },
         ];
         assert!(validate_template_references(&tasks).is_ok());
@@ -1360,6 +1382,7 @@ mod tests {
             depends_on: vec![],
             resume: None,
             retries: None,
+            peer: None,
         }];
         let err = validate_template_references(&tasks).unwrap_err();
         assert!(err.to_string().contains("doesn't exist"));
@@ -1375,6 +1398,7 @@ mod tests {
                 depends_on: vec![],
                 resume: None,
                 retries: None,
+                peer: None,
             },
             TaskDef {
                 name: "fix".into(),
@@ -1383,6 +1407,7 @@ mod tests {
                 depends_on: vec![], // Missing dependency
                 resume: None,
                 retries: None,
+                peer: None,
             },
         ];
         let err = validate_template_references(&tasks).unwrap_err();
@@ -1399,6 +1424,7 @@ mod tests {
                 depends_on: vec![],
                 resume: None,
                 retries: None,
+                peer: None,
             },
             TaskDef {
                 name: "b".into(),
@@ -1407,6 +1433,7 @@ mod tests {
                 depends_on: vec!["a".into()],
                 resume: None,
                 retries: None,
+                peer: None,
             },
         ];
         let err = validate_template_references(&tasks).unwrap_err();
