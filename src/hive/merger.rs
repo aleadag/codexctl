@@ -218,6 +218,15 @@ mod tests {
             last_validated_at: 2000,
             propagation_count: 0,
             version: 1,
+            revalidation_interval_secs: 0,
+            injection_state: crate::hive::InjectionState::Live,
+            injection_stats: crate::hive::InjectionStats {
+                injected_count: 0,
+                accepted_count: 0,
+                overridden_count: 0,
+                last_injected_at: 0,
+                last_outcome_at: 0,
+            },
         }
     }
 
@@ -333,6 +342,15 @@ mod tests {
             last_validated_at: 2000,
             propagation_count: 0,
             version: 1,
+            revalidation_interval_secs: 0,
+            injection_state: crate::hive::InjectionState::Live,
+            injection_stats: crate::hive::InjectionStats {
+                injected_count: 0,
+                accepted_count: 0,
+                overridden_count: 0,
+                last_injected_at: 0,
+                last_outcome_at: 0,
+            },
         }
     }
 
