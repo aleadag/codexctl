@@ -51,7 +51,7 @@ pub fn build_hive_context_for_session(
     // Effective confidence applies time-based decay (#224) so stale knowledge
     // sinks even when its peer is still Confirmed.
     // Skip Skill/Command/HookConfig — they aren't decision guidance for the brain.
-    // Users discover them via `claudectl hive shared`.
+    // Users discover them via `codexctl hive shared`.
     let mut scored: Vec<(&super::KnowledgeUnit, f64, TrustTier)> = all
         .iter()
         .filter_map(|unit| {

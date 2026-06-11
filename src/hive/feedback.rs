@@ -73,7 +73,7 @@ pub fn should_inject(state: InjectionState, pid: u32, unit_id: &str) -> bool {
 fn pending_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     PathBuf::from(home)
-        .join(".claudectl")
+        .join(".codexctl")
         .join("hive")
         .join("pending")
 }
@@ -258,7 +258,7 @@ pub fn advance_state(current: &InjectionState, stats: &super::InjectionStats) ->
 fn events_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     PathBuf::from(home)
-        .join(".claudectl")
+        .join(".codexctl")
         .join("hive")
         .join("feedback_events.jsonl")
 }

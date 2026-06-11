@@ -1,20 +1,21 @@
 use std::io::Write;
 use std::time::Duration;
 
-use claudectl::discovery;
-use claudectl::models;
-use claudectl::monitor;
-use claudectl::session::{ClaudeSession, RawSession, SessionStatus, TelemetryStatus};
+use codexctl::discovery;
+use codexctl::models;
+use codexctl::monitor;
+use codexctl::process;
+use codexctl::session::{CodexSession, RawSession, SessionStatus, TelemetryStatus};
 
 /// Helper: create a minimal session for testing status inference.
-fn make_session(cpu: f32, last_message_age_secs: u64) -> ClaudeSession {
+fn make_session(cpu: f32, last_message_age_secs: u64) -> CodexSession {
     let raw = RawSession {
         pid: 1,
         session_id: "test-session".into(),
         cwd: "/tmp/test-project".into(),
         started_at: 0,
     };
-    let mut s = ClaudeSession::from_raw(raw);
+    let mut s = CodexSession::from_raw(raw);
     s.cpu_percent = cpu;
     s.telemetry_status = TelemetryStatus::Available;
     s.usage_metrics_available = true;
@@ -146,7 +147,7 @@ fn status_no_telemetry_unknown() {
         cwd: "/tmp/test-project".into(),
         started_at: 0,
     };
-    let mut s = ClaudeSession::from_raw(raw);
+    let mut s = CodexSession::from_raw(raw);
     monitor::infer_status(&mut s, "", "", false);
     assert_eq!(s.status, SessionStatus::Unknown);
 }
@@ -191,10 +192,10 @@ fn status_persisted_tool_use_survives_empty_tick() {
 
 #[test]
 fn status_null_stop_reason_with_tool_use_infers_needs_input() {
-    // Claude Code writes stop_reason: null for tool calls awaiting approval.
+    // Tool-call transcripts can write stop_reason: null while awaiting approval.
     // The content still has a tool_use block — infer tool_use from content so
     // that the session shows NeedsInput instead of Idle.
-    let jsonl = r#"{"type":"assistant","message":{"role":"assistant","model":"claude-opus-4-6","stop_reason":null,"content":[{"type":"tool_use","id":"toolu_01X","name":"Bash","input":{"command":"echo hi"}}],"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#;
+    let jsonl = r#"{"type":"assistant","message":{"role":"assistant","model":"codex-opus-4-6","stop_reason":null,"content":[{"type":"tool_use","id":"toolu_01X","name":"Bash","input":{"command":"echo hi"}}],"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#;
 
     let (mut s, _file) = make_session_with_jsonl(jsonl);
     s.cpu_percent = 0.5;
@@ -329,32 +330,32 @@ fn context_max_unknown() {
 #[test]
 fn shorten_model_opus_46() {
     assert_eq!(
-        monitor::shorten_model("claude-opus-4-6-20260401"),
+        monitor::shorten_model("codex-opus-4-6-20260401"),
         "opus-4.6"
     );
 }
 
 #[test]
 fn shorten_model_opus_generic() {
-    assert_eq!(monitor::shorten_model("claude-opus-20260101"), "opus");
+    assert_eq!(monitor::shorten_model("codex-opus-20260101"), "opus");
 }
 
 #[test]
 fn shorten_model_sonnet_46() {
     assert_eq!(
-        monitor::shorten_model("claude-sonnet-4-6-20260401"),
+        monitor::shorten_model("codex-sonnet-4-6-20260401"),
         "sonnet-4.6"
     );
 }
 
 #[test]
 fn shorten_model_sonnet_generic() {
-    assert_eq!(monitor::shorten_model("claude-sonnet-20260101"), "sonnet");
+    assert_eq!(monitor::shorten_model("codex-sonnet-20260101"), "sonnet");
 }
 
 #[test]
 fn shorten_model_haiku() {
-    assert_eq!(monitor::shorten_model("claude-haiku-4-5-20251001"), "haiku");
+    assert_eq!(monitor::shorten_model("codex-haiku-4-5-20251001"), "haiku");
 }
 
 #[test]
@@ -366,7 +367,7 @@ fn shorten_model_unknown() {
 // JSONL Parsing Integration Tests (using temp files)
 // ────────────────────────────────────────────────────────────────────────────
 
-fn make_session_with_jsonl(content: &str) -> (ClaudeSession, tempfile::NamedTempFile) {
+fn make_session_with_jsonl(content: &str) -> (CodexSession, tempfile::NamedTempFile) {
     let mut file = tempfile::NamedTempFile::new().unwrap();
     file.write_all(content.as_bytes()).unwrap();
     file.flush().unwrap();
@@ -377,7 +378,7 @@ fn make_session_with_jsonl(content: &str) -> (ClaudeSession, tempfile::NamedTemp
         cwd: "/tmp/test".into(),
         started_at: 0,
     };
-    let mut s = ClaudeSession::from_raw(raw);
+    let mut s = CodexSession::from_raw(raw);
     s.jsonl_path = Some(file.path().to_path_buf());
     (s, file)
 }
@@ -386,14 +387,14 @@ fn make_session_with_paths(
     cwd: String,
     session_id: String,
     jsonl_path: std::path::PathBuf,
-) -> ClaudeSession {
+) -> CodexSession {
     let raw = RawSession {
         pid: 1,
         session_id,
         cwd,
         started_at: 0,
     };
-    let mut s = ClaudeSession::from_raw(raw);
+    let mut s = CodexSession::from_raw(raw);
     s.jsonl_path = Some(jsonl_path);
     s
 }
@@ -405,6 +406,129 @@ fn write_jsonl(path: &std::path::Path, content: &str) {
     std::fs::write(path, content).unwrap();
 }
 
+#[test]
+fn codex_discovery_ignores_history_without_live_processes() {
+    let dir = tempfile::tempdir().unwrap();
+    let codex_home = dir.path().join(".codex");
+    let jsonl_path = codex_home
+        .join("sessions")
+        .join("2026")
+        .join("06")
+        .join("11")
+        .join("rollout-2026-06-11T20-33-34-019eb6ac-6d30-7301-885d-ff4d354c0116.jsonl");
+    write_jsonl(
+        &jsonl_path,
+        include_str!("fixtures/codex-session-meta.json"),
+    );
+
+    unsafe {
+        std::env::set_var("CODEXCTL_CODEX_HOME", &codex_home);
+        std::env::set_var("CODEXCTL_DISABLE_PROCESS_DISCOVERY", "1");
+    }
+    let sessions = discovery::scan_sessions();
+    unsafe {
+        std::env::remove_var("CODEXCTL_CODEX_HOME");
+        std::env::remove_var("CODEXCTL_DISABLE_PROCESS_DISCOVERY");
+    }
+
+    assert!(
+        sessions.is_empty(),
+        "historical Codex transcripts are telemetry, not live sessions"
+    );
+}
+
+#[test]
+fn codex_monitor_records_function_calls() {
+    let jsonl = concat!(
+        r#"{"timestamp":"2026-06-11T12:33:54.694Z","type":"session_meta","payload":{"id":"019eb6ac-6d30-7301-885d-ff4d354c0116","timestamp":"2026-06-11T12:33:34.003Z","cwd":"/home/alexander/hacking/aleadag/codexctl","model_provider":"openai"}}"#,
+        "\n",
+        r#"{"timestamp":"2026-06-11T12:34:01.791Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"cargo test\",\"workdir\":\"/home/alexander/hacking/aleadag/codexctl\"}","call_id":"call_123"}}"#,
+        "\n",
+        r#"{"timestamp":"2026-06-11T12:34:02.100Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_123","output":"test result: ok"}}"#,
+        "\n",
+    );
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    file.write_all(jsonl.as_bytes()).unwrap();
+    file.flush().unwrap();
+
+    let mut session = CodexSession::from_codex_transcript(
+        "019eb6ac-6d30-7301-885d-ff4d354c0116".into(),
+        "/home/alexander/hacking/aleadag/codexctl".into(),
+        0,
+        file.path().to_path_buf(),
+    );
+
+    monitor::update_tokens(&mut session);
+
+    assert_eq!(session.telemetry_status, TelemetryStatus::Available);
+    assert_eq!(session.tool_usage.get("exec_command").unwrap().calls, 1);
+    assert_eq!(session.pending_tool_name, None);
+    assert!(!session.last_tool_error);
+}
+
+#[test]
+fn process_backed_codex_monitor_records_usage_metrics() {
+    let jsonl = concat!(
+        r#"{"timestamp":"2026-06-11T12:33:54.694Z","type":"session_meta","payload":{"id":"019eb6ac-6d30-7301-885d-ff4d354c0116","timestamp":"2026-06-11T12:33:34.003Z","cwd":"/home/alexander/hacking/aleadag/codexctl","model_provider":"openai"}}"#,
+        "\n",
+        r#"{"timestamp":"2026-06-11T12:34:01.000Z","type":"turn_context","payload":{"cwd":"/home/alexander/hacking/aleadag/codexctl","model":"gpt-5-codex"}}"#,
+        "\n",
+        r#"{"timestamp":"2026-06-11T12:34:02.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100000,"cached_input_tokens":25000,"output_tokens":12000,"reasoning_output_tokens":3000,"total_tokens":112000},"last_token_usage":{"input_tokens":42000,"cached_input_tokens":21000,"output_tokens":12000,"reasoning_output_tokens":3000,"total_tokens":54000},"model_context_window":258400}}}"#,
+        "\n",
+    );
+    let mut file = tempfile::Builder::new()
+        .prefix("rollout-")
+        .suffix(".jsonl")
+        .tempfile()
+        .unwrap();
+    file.write_all(jsonl.as_bytes()).unwrap();
+    file.flush().unwrap();
+
+    let raw = RawSession {
+        pid: 1,
+        session_id: "019eb6ac-6d30-7301-885d-ff4d354c0116".into(),
+        cwd: "/home/alexander/hacking/aleadag/codexctl".into(),
+        started_at: 0,
+    };
+    let mut session = CodexSession::from_raw(raw);
+    session.jsonl_path = Some(file.path().to_path_buf());
+    session.model_profile_source = "codex-transcript".into();
+
+    monitor::update_tokens(&mut session);
+
+    assert_eq!(session.telemetry_status, TelemetryStatus::Available);
+    assert!(session.usage_metrics_available);
+    assert_eq!(session.total_input_tokens, 100000);
+    assert_eq!(session.cache_read_tokens, 25000);
+    assert_eq!(session.total_output_tokens, 12000);
+    assert_eq!(session.context_tokens, 42000);
+    assert_eq!(session.context_max, 258400);
+    assert!(session.cost_usd > 0.0);
+    assert_ne!(session.format_tokens(), "n/a");
+    assert_ne!(session.format_cost(), "n/a");
+    assert_ne!(session.format_context(), "n/a");
+}
+
+#[test]
+fn transcript_backed_sessions_are_not_marked_finished_by_ps() {
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    file.write_all(include_str!("fixtures/codex-session-meta.json").as_bytes())
+        .unwrap();
+    file.flush().unwrap();
+    let session = CodexSession::from_codex_transcript(
+        "019eb6ac-6d30-7301-885d-ff4d354c0116".into(),
+        "/home/alexander/hacking/aleadag/codexctl".into(),
+        0,
+        file.path().to_path_buf(),
+    );
+    let mut sessions = vec![session];
+
+    process::fetch_and_enrich(&mut sessions);
+
+    assert_ne!(sessions[0].status, SessionStatus::Finished);
+    assert!(!sessions[0].process_backed);
+}
+
 fn expected_cost(model: &str, input_tokens: u64, output_tokens: u64) -> f64 {
     let profile = models::resolve(model).profile;
     (input_tokens as f64 / 1_000_000.0) * profile.input_per_m
@@ -413,7 +537,7 @@ fn expected_cost(model: &str, input_tokens: u64, output_tokens: u64) -> f64 {
 
 #[test]
 fn jsonl_parse_token_usage() {
-    let jsonl = r#"{"type":"assistant","message":{"model":"claude-opus-4-6-20260401","stop_reason":"end_turn","usage":{"input_tokens":50000,"output_tokens":10000,"cache_read_input_tokens":20000,"cache_creation_input_tokens":5000}}}"#;
+    let jsonl = r#"{"type":"assistant","message":{"model":"codex-opus-4-6-20260401","stop_reason":"end_turn","usage":{"input_tokens":50000,"output_tokens":10000,"cache_read_input_tokens":20000,"cache_creation_input_tokens":5000}}}"#;
 
     let (mut s, _file) = make_session_with_jsonl(jsonl);
     monitor::update_tokens(&mut s);
@@ -431,9 +555,9 @@ fn jsonl_parse_multiple_entries() {
     let jsonl = concat!(
         r#"{"type":"user","message":{"type":"user"}}"#,
         "\n",
-        r#"{"type":"assistant","message":{"model":"claude-sonnet-4-6-20260401","stop_reason":"tool_use","usage":{"input_tokens":1000,"output_tokens":500,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#,
+        r#"{"type":"assistant","message":{"model":"codex-sonnet-4-6-20260401","stop_reason":"tool_use","usage":{"input_tokens":1000,"output_tokens":500,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#,
         "\n",
-        r#"{"type":"assistant","message":{"model":"claude-sonnet-4-6-20260401","stop_reason":"end_turn","usage":{"input_tokens":2000,"output_tokens":1000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#,
+        r#"{"type":"assistant","message":{"model":"codex-sonnet-4-6-20260401","stop_reason":"end_turn","usage":{"input_tokens":2000,"output_tokens":1000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#,
     );
 
     let (mut s, _file) = make_session_with_jsonl(jsonl);
@@ -447,7 +571,7 @@ fn jsonl_parse_multiple_entries() {
 #[test]
 fn jsonl_incremental_reads() {
     let mut file = tempfile::NamedTempFile::new().unwrap();
-    let line1 = r#"{"type":"assistant","message":{"model":"claude-opus-4-6-20260401","stop_reason":"end_turn","usage":{"input_tokens":1000,"output_tokens":500,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#;
+    let line1 = r#"{"type":"assistant","message":{"model":"codex-opus-4-6-20260401","stop_reason":"end_turn","usage":{"input_tokens":1000,"output_tokens":500,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#;
     writeln!(file, "{line1}").unwrap();
     file.flush().unwrap();
 
@@ -457,7 +581,7 @@ fn jsonl_incremental_reads() {
         cwd: "/tmp/test".into(),
         started_at: 0,
     };
-    let mut s = ClaudeSession::from_raw(raw);
+    let mut s = CodexSession::from_raw(raw);
     s.jsonl_path = Some(file.path().to_path_buf());
 
     // First read
@@ -471,7 +595,7 @@ fn jsonl_incremental_reads() {
     assert_eq!(s.total_output_tokens, 500);
 
     // Append more data
-    let line2 = r#"{"type":"assistant","message":{"model":"claude-opus-4-6-20260401","stop_reason":"end_turn","usage":{"input_tokens":2000,"output_tokens":800,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#;
+    let line2 = r#"{"type":"assistant","message":{"model":"codex-opus-4-6-20260401","stop_reason":"end_turn","usage":{"input_tokens":2000,"output_tokens":800,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#;
     writeln!(file, "{line2}").unwrap();
     file.flush().unwrap();
 
@@ -494,7 +618,7 @@ fn jsonl_corrupted_lines_skipped() {
     let jsonl = concat!(
         "not valid json at all\n",
         "{\"type\":\"something but no usage\"}\n",
-        r#"{"type":"assistant","message":{"model":"claude-opus-4-6-20260401","stop_reason":"end_turn","usage":{"input_tokens":5000,"output_tokens":1000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#,
+        r#"{"type":"assistant","message":{"model":"codex-opus-4-6-20260401","stop_reason":"end_turn","usage":{"input_tokens":5000,"output_tokens":1000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#,
     );
 
     let (mut s, _file) = make_session_with_jsonl(jsonl);
@@ -508,7 +632,7 @@ fn jsonl_corrupted_lines_skipped() {
 #[test]
 fn jsonl_waiting_for_task_detection() {
     let jsonl = concat!(
-        r#"{"type":"assistant","message":{"model":"claude-opus-4-6-20260401","stop_reason":"end_turn","usage":{"input_tokens":1000,"output_tokens":500,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#,
+        r#"{"type":"assistant","message":{"model":"codex-opus-4-6-20260401","stop_reason":"end_turn","usage":{"input_tokens":1000,"output_tokens":500,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#,
         "\n",
         r#"{"type":"progress","data":"waiting_for_task"}"#,
     );
@@ -529,7 +653,7 @@ fn jsonl_missing_file() {
         cwd: "/tmp/test".into(),
         started_at: 0,
     };
-    let mut s = ClaudeSession::from_raw(raw);
+    let mut s = CodexSession::from_raw(raw);
     s.jsonl_path = Some(std::path::PathBuf::from("/nonexistent/path.jsonl"));
 
     // Should not panic
@@ -545,7 +669,7 @@ fn jsonl_no_path() {
         cwd: "/tmp/test".into(),
         started_at: 0,
     };
-    let mut s = ClaudeSession::from_raw(raw);
+    let mut s = CodexSession::from_raw(raw);
     // jsonl_path is None
 
     monitor::update_tokens(&mut s);
@@ -558,24 +682,24 @@ fn jsonl_rolls_up_subagent_tokens_and_cost() {
     let parent_jsonl = temp.path().join("parent.jsonl");
     write_jsonl(
         &parent_jsonl,
-        r#"{"type":"assistant","message":{"model":"claude-sonnet-4-6-20260401","stop_reason":"end_turn","usage":{"input_tokens":100000,"output_tokens":50000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#,
+        r#"{"type":"assistant","message":{"model":"codex-sonnet-4-6-20260401","stop_reason":"end_turn","usage":{"input_tokens":100000,"output_tokens":50000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#,
     );
 
     let session_id = format!("subagent-rollup-{}", std::process::id());
-    let cwd = format!("/tmp/claudectl-rollup-{}", std::process::id());
+    let cwd = format!("/tmp/codexctl-rollup-{}", std::process::id());
     let slug = cwd.replace('/', "-");
     let uid = unsafe { libc::getuid() };
-    let tasks_dir = std::path::PathBuf::from(format!("/tmp/claude-{uid}"))
+    let tasks_dir = std::path::PathBuf::from(format!("/tmp/codex-{uid}"))
         .join(&slug)
         .join(&session_id)
         .join("tasks");
     write_jsonl(
         &tasks_dir.join("agent-1.jsonl"),
-        r#"{"type":"assistant","message":{"model":"claude-opus-4-6-20260401","stop_reason":"end_turn","usage":{"input_tokens":200000,"output_tokens":50000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#,
+        r#"{"type":"assistant","message":{"model":"codex-opus-4-6-20260401","stop_reason":"end_turn","usage":{"input_tokens":200000,"output_tokens":50000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#,
     );
     write_jsonl(
         &tasks_dir.join("nested/agent-2.jsonl"),
-        r#"{"type":"assistant","message":{"model":"claude-haiku-4-5-20260101","stop_reason":"end_turn","usage":{"input_tokens":50000,"output_tokens":10000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#,
+        r#"{"type":"assistant","message":{"model":"codex-haiku-4-5-20260101","stop_reason":"end_turn","usage":{"input_tokens":50000,"output_tokens":10000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#,
     );
 
     let mut s = make_session_with_paths(cwd, session_id, parent_jsonl);
@@ -594,7 +718,7 @@ fn jsonl_rolls_up_subagent_tokens_and_cost() {
     assert!(!s.cost_estimate_unverified);
 
     let _ = std::fs::remove_dir_all(
-        std::path::PathBuf::from(format!("/tmp/claude-{uid}"))
+        std::path::PathBuf::from(format!("/tmp/codex-{uid}"))
             .join(&slug)
             .join(&s.session_id),
     );
@@ -606,20 +730,20 @@ fn subagent_rollup_persists_after_task_file_disappears() {
     let parent_jsonl = temp.path().join("parent.jsonl");
     write_jsonl(
         &parent_jsonl,
-        r#"{"type":"assistant","message":{"model":"claude-sonnet-4-6-20260401","stop_reason":"end_turn","usage":{"input_tokens":100000,"output_tokens":10000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#,
+        r#"{"type":"assistant","message":{"model":"codex-sonnet-4-6-20260401","stop_reason":"end_turn","usage":{"input_tokens":100000,"output_tokens":10000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#,
     );
 
     let session_id = format!("subagent-persist-{}", std::process::id());
-    let cwd = format!("/tmp/claudectl-persist-{}", std::process::id());
+    let cwd = format!("/tmp/codexctl-persist-{}", std::process::id());
     let slug = cwd.replace('/', "-");
     let uid = unsafe { libc::getuid() };
-    let subagent_root = std::path::PathBuf::from(format!("/tmp/claude-{uid}"))
+    let subagent_root = std::path::PathBuf::from(format!("/tmp/codex-{uid}"))
         .join(&slug)
         .join(&session_id);
     let tasks_dir = subagent_root.join("tasks");
     write_jsonl(
         &tasks_dir.join("agent-1.jsonl"),
-        r#"{"type":"assistant","message":{"model":"claude-sonnet-4-6-20260401","stop_reason":"end_turn","usage":{"input_tokens":200000,"output_tokens":20000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#,
+        r#"{"type":"assistant","message":{"model":"codex-sonnet-4-6-20260401","stop_reason":"end_turn","usage":{"input_tokens":200000,"output_tokens":20000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#,
     );
 
     let mut s = make_session_with_paths(cwd, session_id, parent_jsonl);
@@ -721,26 +845,26 @@ fn json_export_format() {
 fn json_export_includes_subagent_breakdown() {
     let mut s = make_session(0.0, 0);
     s.active_subagent_jsonl_paths = vec![std::path::PathBuf::from(
-        "/tmp/claude-1/-tmp-project/session-1/tasks/agent-2.jsonl",
+        "/tmp/codex-1/-tmp-project/session-1/tasks/agent-2.jsonl",
     )];
     s.subagent_rollups.insert(
-        std::path::PathBuf::from("/tmp/claude-1/-tmp-project/session-1/tasks/agent-1.jsonl"),
-        claudectl::session::SubagentRollup {
+        std::path::PathBuf::from("/tmp/codex-1/-tmp-project/session-1/tasks/agent-1.jsonl"),
+        codexctl::session::SubagentRollup {
             input_tokens: 20_000,
             output_tokens: 2_000,
             cost_usd: 0.4,
             usage_metrics_available: true,
-            ..claudectl::session::SubagentRollup::default()
+            ..codexctl::session::SubagentRollup::default()
         },
     );
     s.subagent_rollups.insert(
-        std::path::PathBuf::from("/tmp/claude-1/-tmp-project/session-1/tasks/agent-2.jsonl"),
-        claudectl::session::SubagentRollup {
+        std::path::PathBuf::from("/tmp/codex-1/-tmp-project/session-1/tasks/agent-2.jsonl"),
+        codexctl::session::SubagentRollup {
             input_tokens: 10_000,
             output_tokens: 1_000,
             cost_usd: 0.2,
             usage_metrics_available: true,
-            ..claudectl::session::SubagentRollup::default()
+            ..codexctl::session::SubagentRollup::default()
         },
     );
     s.subagent_count = 2;
@@ -796,7 +920,7 @@ fn context_bar_formatting() {
 
 #[test]
 fn session_recorder_produces_highlight_reel() {
-    use claudectl::session_recorder::SessionRecorder;
+    use codexctl::session_recorder::SessionRecorder;
 
     // Create empty JSONL first, then create recorder (which seeks to end),
     // then write events to simulate live session activity
@@ -842,7 +966,7 @@ fn session_recorder_produces_highlight_reel() {
         lines.len()
     );
 
-    // Should contain the Edit tool rendered as Claude Code style "Update(file)"
+    // Should contain the Edit tool rendered as "Update(file)"
     let full = content.to_string();
     assert!(
         full.contains("Update"),
@@ -850,7 +974,7 @@ fn session_recorder_produces_highlight_reel() {
     );
     assert!(full.contains("auth.rs"), "Should contain edited file name");
 
-    // Should contain the Bash command rendered Claude Code style
+    // Should contain the Bash command rendering
     assert!(
         full.contains("bash command"),
         "Should contain bash command indicator"
@@ -875,7 +999,7 @@ fn session_recorder_produces_highlight_reel() {
 
 #[test]
 fn session_recorder_empty_jsonl() {
-    use claudectl::session_recorder::SessionRecorder;
+    use codexctl::session_recorder::SessionRecorder;
 
     let jsonl_file = tempfile::NamedTempFile::new().unwrap();
     let output_file = tempfile::NamedTempFile::new().unwrap();
@@ -900,7 +1024,7 @@ fn session_recorder_empty_jsonl() {
 
 #[test]
 fn recorder_cast_file_creation() {
-    use claudectl::recorder::Recorder;
+    use codexctl::recorder::Recorder;
 
     let output_file = tempfile::NamedTempFile::new().unwrap();
     let output_path = output_file.path().to_str().unwrap().to_string() + ".cast";
@@ -939,22 +1063,22 @@ fn recorder_cast_file_creation() {
 use std::sync::Mutex;
 static HOME_LOCK: Mutex<()> = Mutex::new(());
 
-/// Helper: build a fake ~/.claude layout in a temp dir and run resolve_jsonl_paths.
+/// Helper: build a fake ~/.codex layout in a temp dir and run resolve_jsonl_paths.
 /// Holds HOME_LOCK for the duration.
 fn resolve_with_layout(
     cwd: &str,
     session_id: &str,
     slug_on_disk: &str,
-) -> (ClaudeSession, tempfile::TempDir) {
+) -> (CodexSession, tempfile::TempDir) {
     let _guard = HOME_LOCK.lock().unwrap();
 
     let home = tempfile::tempdir().unwrap();
     let original_home = std::env::var("HOME").ok();
     unsafe { std::env::set_var("HOME", home.path()) };
 
-    let project_dir = home.path().join(".claude/projects").join(slug_on_disk);
+    let project_dir = home.path().join(".codex/sessions").join(slug_on_disk);
     std::fs::create_dir_all(&project_dir).unwrap();
-    let jsonl_content = r#"{"type":"assistant","message":{"model":"claude-opus-4-6","stop_reason":"end_turn","usage":{"input_tokens":1,"cache_creation_input_tokens":523,"cache_read_input_tokens":79425,"output_tokens":937}}}"#;
+    let jsonl_content = r#"{"type":"assistant","message":{"model":"codex-opus-4-6","stop_reason":"end_turn","usage":{"input_tokens":1,"cache_creation_input_tokens":523,"cache_read_input_tokens":79425,"output_tokens":937}}}"#;
     std::fs::write(
         project_dir.join(format!("{session_id}.jsonl")),
         jsonl_content,
@@ -967,7 +1091,7 @@ fn resolve_with_layout(
         cwd: cwd.to_string(),
         started_at: 1776421121745,
     };
-    let mut session = ClaudeSession::from_raw(raw);
+    let mut session = CodexSession::from_raw(raw);
     discovery::resolve_jsonl_paths(std::slice::from_mut(&mut session));
 
     // Restore HOME
@@ -1030,11 +1154,11 @@ fn resolve_jsonl_encoding_mismatch_fallback() {
 
     // JSONL under a slug that does NOT match cwd_to_slug(cwd)
     let wrong_slug = "-some-other-encoding-of-the-cwd";
-    let project_dir = home.path().join(".claude/projects").join(wrong_slug);
+    let project_dir = home.path().join(".codex/sessions").join(wrong_slug);
     std::fs::create_dir_all(&project_dir).unwrap();
     std::fs::write(
         project_dir.join(format!("{session_id}.jsonl")),
-        r#"{"type":"assistant","message":{"model":"claude-opus-4-6","stop_reason":"end_turn","usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#,
+        r#"{"type":"assistant","message":{"model":"codex-opus-4-6","stop_reason":"end_turn","usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#,
     ).unwrap();
 
     let raw = RawSession {
@@ -1043,7 +1167,7 @@ fn resolve_jsonl_encoding_mismatch_fallback() {
         cwd: cwd.to_string(),
         started_at: 0,
     };
-    let mut session = ClaudeSession::from_raw(raw);
+    let mut session = CodexSession::from_raw(raw);
     discovery::resolve_jsonl_paths(std::slice::from_mut(&mut session));
 
     if let Some(h) = original_home {
@@ -1084,7 +1208,7 @@ fn resolve_jsonl_telemetry_available_after_resolution() {
 // and a pending-outcome file, runs the reaper, then asserts on the resulting
 // outcomes/ and pending-outcomes/ directories. HOME is restored on teardown.
 
-use claudectl::brain::outcomes;
+use codexctl::brain::outcomes;
 
 struct HomeGuard {
     original: Option<String>,
@@ -1112,7 +1236,7 @@ fn isolated_home() -> HomeGuard {
 
 fn write_decision_jsonl(line: &str) {
     let path = std::env::var("HOME").unwrap();
-    let dir = std::path::PathBuf::from(path).join(".claudectl/brain");
+    let dir = std::path::PathBuf::from(path).join(".codexctl/brain");
     std::fs::create_dir_all(&dir).unwrap();
     let mut f = std::fs::OpenOptions::new()
         .create(true)
@@ -1518,246 +1642,4 @@ fn reaper_test_failure_respects_fanout_window() {
         stats.test_failures_attributed, 0,
         "edits outside the fan-out window should not be tagged"
     );
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// #249: brain-gate.sh continueOnBlock envelope
-// ────────────────────────────────────────────────────────────────────────────
-//
-// Each test sets HOME and PATH to a tempdir, drops a stub `claudectl` shell
-// script that emits a scripted JSON response, runs `brain-gate.sh` with a
-// hook payload on stdin, and asserts on the resulting envelope.
-
-use std::path::Path;
-use std::process::{Command, Stdio};
-
-fn hook_script_path() -> std::path::PathBuf {
-    // CARGO_MANIFEST_DIR points at the crate root regardless of where `cargo
-    // test` was invoked from.
-    let manifest = std::env::var("CARGO_MANIFEST_DIR")
-        .expect("CARGO_MANIFEST_DIR is set by cargo when running tests");
-    std::path::PathBuf::from(manifest).join("claude-plugin/hooks/scripts/brain-gate.sh")
-}
-
-/// Drop a stub `claudectl` executable into `dir/bin/`. The stub prints
-/// `stdout_body` verbatim (one line). Returns the bin/ directory to prepend
-/// onto PATH.
-fn install_stub_claudectl(dir: &Path, stdout_body: &str) -> std::path::PathBuf {
-    let bin = dir.join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
-    let stub = bin.join("claudectl");
-    let script = format!("#!/usr/bin/env bash\ncat <<'CTL_EOF'\n{stdout_body}\nCTL_EOF\n");
-    std::fs::write(&stub, script).unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    let mut perms = std::fs::metadata(&stub).unwrap().permissions();
-    perms.set_mode(0o755);
-    std::fs::set_permissions(&stub, perms).unwrap();
-    bin
-}
-
-/// Run brain-gate.sh with the given stdin payload, returning (stdout, status).
-fn run_brain_gate(
-    home: &Path,
-    stub_bin: Option<&Path>,
-    stdin_payload: &str,
-) -> (String, std::process::ExitStatus) {
-    let mut cmd = Command::new("bash");
-    cmd.arg(hook_script_path());
-    cmd.env("HOME", home);
-    if let Some(bin) = stub_bin {
-        let original_path = std::env::var("PATH").unwrap_or_default();
-        cmd.env("PATH", format!("{}:{original_path}", bin.display()));
-    } else {
-        // Force claudectl off the PATH so the hook exits early.
-        cmd.env("PATH", "/usr/bin:/bin");
-    }
-    cmd.stdin(Stdio::piped());
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
-    let mut child = cmd.spawn().expect("spawn bash");
-    // BrokenPipe is expected when the hook exits before reading stdin (e.g.
-    // the missing-claudectl path returns at line 21 of brain-gate.sh, before
-    // the `cat` that consumes stdin). Treat it like the parent's job is done.
-    match child
-        .stdin
-        .as_mut()
-        .unwrap()
-        .write_all(stdin_payload.as_bytes())
-    {
-        Ok(_) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {}
-        Err(e) => panic!("write_all failed: {e:?}"),
-    }
-    let output = child.wait_with_output().expect("hook output");
-    (
-        String::from_utf8(output.stdout).expect("utf8 stdout"),
-        output.status,
-    )
-}
-
-#[test]
-fn brain_gate_deny_emits_continue_on_block_envelope() {
-    let tmp = tempfile::tempdir().unwrap();
-    let bin = install_stub_claudectl(
-        tmp.path(),
-        r#"{"action":"deny","reasoning":"writes look like an AWS access key","confidence":0.95,"source":"brain","below_threshold":false}"#,
-    );
-
-    let (stdout, status) = run_brain_gate(
-        tmp.path(),
-        Some(&bin),
-        r#"{"tool_name":"Bash","tool_input":{"command":"echo secret"}}"#,
-    );
-    assert!(status.success(), "hook exited non-zero: {status:?}");
-
-    let v: serde_json::Value = serde_json::from_str(&stdout)
-        .unwrap_or_else(|e| panic!("hook stdout not JSON: {e}\n{stdout}"));
-
-    // Legacy fields for older Claude Code runtimes.
-    assert_eq!(v["decision"], "deny");
-    assert!(
-        v["reason"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("AWS access key"),
-        "legacy reason missing brain reasoning: {stdout}",
-    );
-
-    // New continueOnBlock envelope so the reasoning surfaces in Claude's
-    // next turn (#249).
-    let hso = &v["hookSpecificOutput"];
-    assert_eq!(hso["hookEventName"], "PreToolUse");
-    assert_eq!(hso["permissionDecision"], "deny");
-    assert_eq!(hso["continueOnBlock"], serde_json::Value::Bool(true));
-    assert!(
-        hso["permissionDecisionReason"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("AWS access key"),
-    );
-    assert!(
-        hso["systemMessage"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("AWS access key"),
-    );
-}
-
-#[test]
-fn brain_gate_confident_approve_uses_legacy_envelope_only() {
-    let tmp = tempfile::tempdir().unwrap();
-    let bin = install_stub_claudectl(
-        tmp.path(),
-        r#"{"action":"approve","reasoning":"safe read","confidence":0.95,"source":"brain","below_threshold":false}"#,
-    );
-    let (stdout, status) = run_brain_gate(
-        tmp.path(),
-        Some(&bin),
-        r#"{"tool_name":"Bash","tool_input":{"command":"ls"}}"#,
-    );
-    assert!(status.success());
-
-    let v: serde_json::Value = serde_json::from_str(&stdout).expect("approve JSON");
-    assert_eq!(v["decision"], "approve");
-    // We don't need hookSpecificOutput on a confident approval — the tool
-    // call sails through with no extra context noise.
-    assert!(v.get("hookSpecificOutput").is_none(), "stdout: {stdout}");
-}
-
-#[test]
-fn brain_gate_below_threshold_emits_advisory_additional_context() {
-    let tmp = tempfile::tempdir().unwrap();
-    let bin = install_stub_claudectl(
-        tmp.path(),
-        r#"{"action":"approve","reasoning":"writing to .env — confidence low","confidence":0.4,"source":"brain","below_threshold":true}"#,
-    );
-    let (stdout, status) = run_brain_gate(
-        tmp.path(),
-        Some(&bin),
-        r#"{"tool_name":"Write","tool_input":{"file_path":".env"}}"#,
-    );
-    assert!(status.success());
-
-    let v: serde_json::Value = serde_json::from_str(&stdout).expect("advisory JSON");
-    // No decision → does not block; just surfaces context to Claude.
-    assert!(v.get("decision").is_none(), "stdout: {stdout}");
-    let ctx = v["hookSpecificOutput"]["additionalContext"]
-        .as_str()
-        .unwrap_or_default();
-    assert!(
-        ctx.contains("uncertain"),
-        "advisory ctx missing prefix: {ctx}"
-    );
-    assert!(
-        ctx.contains("writing to .env"),
-        "advisory ctx missing reasoning: {ctx}"
-    );
-}
-
-#[test]
-fn brain_gate_off_mode_produces_no_output() {
-    let tmp = tempfile::tempdir().unwrap();
-    let bin = install_stub_claudectl(
-        tmp.path(),
-        r#"{"action":"deny","reasoning":"would have blocked","confidence":0.99,"source":"brain","below_threshold":false}"#,
-    );
-    // Flip gate off.
-    let gate_dir = tmp.path().join(".claudectl/brain");
-    std::fs::create_dir_all(&gate_dir).unwrap();
-    std::fs::write(gate_dir.join("gate-mode"), "off").unwrap();
-
-    let (stdout, status) = run_brain_gate(
-        tmp.path(),
-        Some(&bin),
-        r#"{"tool_name":"Bash","tool_input":{"command":"echo secret"}}"#,
-    );
-    assert!(status.success());
-    assert!(
-        stdout.is_empty(),
-        "gate=off must emit nothing, got: {stdout:?}"
-    );
-}
-
-#[test]
-fn brain_gate_missing_claudectl_falls_through_silently() {
-    let tmp = tempfile::tempdir().unwrap();
-    // No stub installed → claudectl not on PATH.
-    let (stdout, status) = run_brain_gate(
-        tmp.path(),
-        None,
-        r#"{"tool_name":"Bash","tool_input":{"command":"rm -rf /"}}"#,
-    );
-    assert!(status.success());
-    assert!(
-        stdout.is_empty(),
-        "missing claudectl must fall through, got: {stdout:?}",
-    );
-}
-
-#[test]
-fn brain_gate_deny_preserves_special_chars_in_reasoning() {
-    // Brain returns reasoning that includes characters that would have broken
-    // the old sed-based extraction or an unescaped printf: embedded double
-    // quotes, a backslash, and a newline.
-    let tmp = tempfile::tempdir().unwrap();
-    // The brain's own JSON escapes the special chars; the stub emits it raw.
-    let stub_output = r#"{"action":"deny","reasoning":"saw \"AKIA\" prefix and a path C:\\Users\\secret\nrejecting","confidence":0.97,"source":"brain","below_threshold":false}"#;
-    let bin = install_stub_claudectl(tmp.path(), stub_output);
-    let (stdout, status) = run_brain_gate(
-        tmp.path(),
-        Some(&bin),
-        r#"{"tool_name":"Bash","tool_input":{"command":"echo k"}}"#,
-    );
-    assert!(status.success());
-
-    // The hook's stdout must still parse as JSON. This is the regression
-    // gate: prior implementation embedded reasoning into a printf format
-    // string and would corrupt output on quotes/newlines.
-    let v: serde_json::Value = serde_json::from_str(&stdout)
-        .unwrap_or_else(|e| panic!("hook stdout not JSON: {e}\n{stdout}"));
-    assert_eq!(v["decision"], "deny");
-    let reason = v["hookSpecificOutput"]["permissionDecisionReason"]
-        .as_str()
-        .unwrap_or_default();
-    assert!(reason.contains("AKIA"), "reason lost content: {reason}");
 }

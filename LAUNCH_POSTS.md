@@ -6,7 +6,7 @@ Start here:
 
 - GitHub release notes
 - GitHub Discussions
-- `r/ClaudeCode`
+- `r/CodexCode`
 - DEV
 - X
 
@@ -27,13 +27,13 @@ Reason:
 - Publish the release
 - Update the README and landing page
 - Open a GitHub Discussion
-- Post to `r/ClaudeCode`
+- Post to `r/CodexCode`
 - Post to X
 
 ### Day 2
 
 - Publish the DEV post
-- Reply to relevant Claude Code threads with the demo GIF
+- Reply to relevant Codex threads with the demo GIF
 
 ### Next feature release
 
@@ -44,13 +44,13 @@ Reason:
 
 Title:
 
-`claudectl`: orchestrate a swarm of Claude Code agents with a local-LLM brain that learns from you
+`codexctl`: orchestrate a swarm of Codex agents with a local-LLM brain that learns from you
 
 Body:
 
-I kept losing track of which Claude Code session was blocked, waiting for approval, or quietly burning budget, so I built `claudectl`.
+I kept losing track of which Codex session was blocked, waiting for approval, or quietly burning budget, so I built `codexctl`.
 
-It is a local dashboard for supervising multiple Claude Code sessions from one terminal.
+It is a local dashboard for supervising multiple Codex sessions from one terminal.
 
 Useful if you run several sessions at once and want to:
 
@@ -63,29 +63,29 @@ Useful if you run several sessions at once and want to:
 Quick start:
 
 ```bash
-brew install mercurialsolo/tap/claudectl
-claudectl --demo
+brew install aleadag/tap/codexctl
+codexctl --demo
 ```
 
 Repo:
 
-- https://github.com/mercurialsolo/claudectl
+- https://github.com/aleadag/codexctl
 
 ## Reddit
 
 Subreddit:
 
-- `r/ClaudeCode`
+- `r/CodexCode`
 
 Title:
 
-I built a terminal dashboard for supervising multiple Claude Code sessions
+I built a terminal dashboard for supervising multiple Codex sessions
 
 Body:
 
-Running multiple Claude Code tabs and losing track of which one is blocked, waiting for approval, or quietly burning money got old fast.
+Running multiple Codex tabs and losing track of which one is blocked, waiting for approval, or quietly burning money got old fast.
 
-So I built `claudectl`, a local dashboard for supervising Claude Code from one terminal.
+So I built `codexctl`, a local dashboard for supervising Codex from one terminal.
 
 It is useful if you run several sessions at once and want to:
 
@@ -98,33 +98,33 @@ It is useful if you run several sessions at once and want to:
 Quick start:
 
 ```bash
-brew install mercurialsolo/tap/claudectl
-claudectl --demo
+brew install aleadag/tap/codexctl
+codexctl --demo
 ```
 
 Repo:
 
-- https://github.com/mercurialsolo/claudectl
+- https://github.com/aleadag/codexctl
 
-If this matches how you use Claude Code, I’d like to know what breaks first for you once you have 3 or more sessions open.
+If this matches how you use Codex, I’d like to know what breaks first for you once you have 3 or more sessions open.
 
 ## DEV
 
 Title:
 
-Orchestrate a swarm of Claude Code agents with a local-LLM brain that learns from you
+Orchestrate a swarm of Codex agents with a local-LLM brain that learns from you
 
 Body:
 
-When I started running several Claude Code sessions in parallel, the operational failure mode was obvious:
+When I started running several Codex sessions in parallel, the operational failure mode was obvious:
 
 - one tab was blocked on a permission prompt
 - another was chewing through budget
 - another looked alive but was actually stalled
 
-Claude Code is strong at execution. It is not built to supervise five terminals at once.
+Codex is strong at execution. It is not built to supervise five terminals at once.
 
-So I built `claudectl`, a local operator layer for Claude Code. It gives me one dashboard to:
+So I built `codexctl`, a local operator layer for Codex. It gives me one dashboard to:
 
 - see every session
 - approve prompts without tab hunting
@@ -135,67 +135,67 @@ So I built `claudectl`, a local operator layer for Claude Code. It gives me one 
 Quick start:
 
 ```bash
-brew install mercurialsolo/tap/claudectl
-claudectl --demo
+brew install aleadag/tap/codexctl
+codexctl --demo
 ```
 
 Repo:
 
-- https://github.com/mercurialsolo/claudectl
+- https://github.com/aleadag/codexctl
 
 ## X
 
 Post:
 
-I got tired of tab-hunting 5 Claude Code sessions, so I built `claudectl`.
+I got tired of tab-hunting 5 Codex sessions, so I built `codexctl`.
 
 It shows which agent is blocked, waiting for approval, over budget, or stalled, and lets me intervene from one terminal dashboard.
 
 ```bash
-brew install mercurialsolo/tap/claudectl
-claudectl --demo
+brew install aleadag/tap/codexctl
+codexctl --demo
 ```
 
 Repo:
-https://github.com/mercurialsolo/claudectl
+https://github.com/aleadag/codexctl
 
 Attach:
 
 - `docs/assets/github-social-preview.png`
-- or a short GIF from `docs/assets/claudectl-demo-hero.gif`
+- or a short GIF from `docs/assets/codexctl-demo-hero.gif`
 
 ## Show HN
 
 Title:
 
-Show HN: claudectl – orchestrate a swarm of Claude Code agents with a local-LLM brain that learns from you
+Show HN: codexctl – orchestrate a swarm of Codex agents with a local-LLM brain that learns from you
 
 Body:
 
-If you run several Claude Code sessions at once, `claudectl` shows which one is blocked, waiting for approval, over budget, or stalled, and lets you intervene from one terminal dashboard.
+If you run several Codex sessions at once, `codexctl` shows which one is blocked, waiting for approval, over budget, or stalled, and lets you intervene from one terminal dashboard.
 
 It is local-only, zero-config, and currently supports macOS and Linux terminals including Ghostty, tmux, Kitty, Warp, iTerm2, and GNOME Terminal.
 
 Quick start:
 
 ```bash
-brew install mercurialsolo/tap/claudectl
-claudectl --demo
+brew install aleadag/tap/codexctl
+codexctl --demo
 ```
 
 Repo:
 
-- https://github.com/mercurialsolo/claudectl
+- https://github.com/aleadag/codexctl
 
 ## Lobsters
 
 Title:
 
-claudectl: a terminal control plane for Claude Code sessions
+codexctl: a terminal control plane for Codex sessions
 
 Summary:
 
-`claudectl` is a Rust CLI for supervising multiple Claude Code sessions from one terminal. It tracks session state, surfaces blocked prompts and spend, supports terminal switching and input for supported terminals, and can orchestrate dependency-ordered task graphs.
+`codexctl` is a Rust CLI for supervising multiple Codex sessions from one terminal. It tracks session state, surfaces blocked prompts and spend, supports terminal switching and input for supported terminals, and can orchestrate dependency-ordered task graphs.
 
 Best attached artifact:
 

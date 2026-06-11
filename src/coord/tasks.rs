@@ -87,7 +87,7 @@ pub struct TaskRow {
     pub depends_on: Vec<String>,
     /// Per-task policy JSON. Whatever the supervisor wrote at `ASSIGNED`
     /// time is what the brain-gate hook reads from
-    /// `~/.claudectl/coord/session-policy/<session>.json`.
+    /// `~/.codexctl/coord/session-policy/<session>.json`.
     pub policy: Option<serde_json::Value>,
     /// Declared verifier list (#347). Run in order on `VERIFYING`,
     /// short-circuit on first FAIL. Empty list ⇒ the task graduates to

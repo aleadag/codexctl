@@ -59,7 +59,7 @@ fn eval_lease_conflict_prevention() -> EvalResult {
     let lease1 = Lease {
         id: "l1".into(),
         owner_session_id: "sess_a".into(),
-        owner_agent: "claude-code".into(),
+        owner_agent: "codex".into(),
         resource_kind: "path_glob".into(),
         resource_value: "src/app.rs".into(),
         mode: LeaseMode::Exclusive,
@@ -99,7 +99,7 @@ fn eval_lease_release() -> EvalResult {
     let lease = Lease {
         id: "l_rel".into(),
         owner_session_id: "sess_a".into(),
-        owner_agent: "claude-code".into(),
+        owner_agent: "codex".into(),
         resource_kind: "file".into(),
         resource_value: "src/main.rs".into(),
         mode: LeaseMode::Exclusive,
@@ -135,7 +135,7 @@ fn eval_lease_expiry() -> EvalResult {
     let lease = Lease {
         id: "l_exp".into(),
         owner_session_id: "sess_a".into(),
-        owner_agent: "claude-code".into(),
+        owner_agent: "codex".into(),
         resource_kind: "file".into(),
         resource_value: "src/old.rs".into(),
         mode: LeaseMode::Exclusive,
@@ -339,7 +339,7 @@ fn eval_memory_insert_and_search() -> EvalResult {
     let record = MemoryRecord {
         id: "mem_eval".into(),
         mem_type: "workflow".into(),
-        scope: serde_json::json!({"project": "claudectl"}),
+        scope: serde_json::json!({"project": "codexctl"}),
         subjects: vec![Subject {
             kind: "path".into(),
             value: "src/health.rs".into(),

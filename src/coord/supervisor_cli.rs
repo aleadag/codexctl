@@ -2,10 +2,10 @@
 // reconciler reads but doesn't yet act on (it's the bridge surface PR8
 // will use for graceful shutdown).
 #![allow(dead_code)]
-//! `claudectl supervisor` subcommand surface (#349 / RFC §10).
+//! `codexctl supervisor` subcommand surface (#349 / RFC §10).
 //!
 //! Operator-facing verbs over the coord task ledger. Every command
-//! reads `~/.claudectl/coord/coord.db` directly — the bus MCP server
+//! reads `~/.codexctl/coord/coord.db` directly — the bus MCP server
 //! isn't required for these — so an operator can poke at fleet state
 //! even when the headless daemon is down.
 
@@ -62,8 +62,8 @@ pub enum SupervisorCommand {
     Cancel { task_id: String },
     /// Set a "drain" marker so the reconciler stops issuing new
     /// assignments while keeping running tasks alive. The marker is a
-    /// sentinel file at `~/.claudectl/coord/drain`. Remove with
-    /// `claudectl supervisor undrain`.
+    /// sentinel file at `~/.codexctl/coord/drain`. Remove with
+    /// `codexctl supervisor undrain`.
     Drain,
     /// Clear the drain marker so the reconciler resumes new
     /// assignments.
@@ -232,7 +232,7 @@ pub fn drain_marker_path() -> PathBuf {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/tmp"));
-    home.join(".claudectl").join("coord").join("drain")
+    home.join(".codexctl").join("coord").join("drain")
 }
 
 pub fn is_draining() -> bool {

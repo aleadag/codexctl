@@ -42,7 +42,7 @@ pub trait SideEffects: VerifierBackend {
         hop_count: u32,
     ) -> Result<String, String>;
 
-    /// Launch a fresh Claude Code session in `cwd` with `prompt`.
+    /// Launch a fresh Codex session in `cwd` with `prompt`.
     /// Returns the session_id so the actuator can record it on the
     /// attempt. The crash-safety guarantee means callers MUST treat a
     /// returned session_id as durable — restarting the daemon shouldn't

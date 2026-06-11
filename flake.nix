@@ -1,5 +1,5 @@
 {
-  description = "Orchestrate a swarm of Claude Code agents with a local-LLM brain that learns from you.";
+  description = "Orchestrate Codex sessions with a local-LLM brain that learns from you.";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -13,16 +13,16 @@
       in
       {
         packages.default = pkgs.rustPlatform.buildRustPackage {
-          pname = "claudectl";
+          pname = "codexctl";
           version = "0.16.0";
           src = ./.;
           cargoLock.lockFile = ./Cargo.lock;
 
           meta = with pkgs.lib; {
-            description = "Orchestrate a swarm of Claude Code agents with a local-LLM brain that learns from you.";
-            homepage = "https://github.com/mercurialsolo/claudectl";
+            description = "Orchestrate Codex sessions with a local-LLM brain that learns from you.";
+            homepage = "https://github.com/aleadag/codexctl";
             license = licenses.mit;
-            mainProgram = "claudectl";
+            mainProgram = "codexctl";
             platforms = platforms.unix;
           };
         };
@@ -33,6 +33,7 @@
             cargo
             clippy
             rustfmt
+            sqlite
           ];
         };
       }

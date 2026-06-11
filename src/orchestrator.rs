@@ -335,7 +335,7 @@ pub fn run_tasks(task_file: TaskFile, parallel: bool) -> io::Result<()> {
                 task.def.clone()
             };
 
-            match launch_claude_session(&launch_def, &run_dir, Arc::clone(&print_lock), attempt) {
+            match launch_codex_session(&launch_def, &run_dir, Arc::clone(&print_lock), attempt) {
                 Ok(launched) => {
                     let pid = launched.child.id();
                     task.attempts_started = attempt;
@@ -489,7 +489,7 @@ pub fn run_tasks(task_file: TaskFile, parallel: bool) -> io::Result<()> {
         let _ = Command::new("osascript")
             .args([
                 "-e",
-                &format!("display notification \"{msg}\" with title \"claudectl run\""),
+                &format!("display notification \"{msg}\" with title \"codexctl run\""),
             ])
             .spawn();
     }
@@ -711,7 +711,7 @@ fn queue_retry(task: &mut TaskRun, reason: &str) -> bool {
     true
 }
 
-fn launch_claude_session(
+fn launch_codex_session(
     task: &TaskDef,
     run_dir: &Path,
     print_lock: Arc<Mutex<()>>,
@@ -719,14 +719,14 @@ fn launch_claude_session(
 ) -> io::Result<LaunchedTask> {
     let cwd = task.cwd.as_deref().unwrap_or(".");
 
-    let mut args = vec!["--print".to_string()];
+    let mut args = vec!["exec".to_string()];
     if let Some(ref resume) = task.resume {
-        args.push("--resume".into());
+        args.push("resume".into());
         args.push(resume.clone());
     }
     args.push(task.prompt.clone());
 
-    let mut child = Command::new("claude")
+    let mut child = Command::new("codex")
         .args(&args)
         .current_dir(cwd)
         .stdin(Stdio::null())
@@ -946,7 +946,7 @@ fn print_final_summary(tasks: &[TaskRun]) {
 }
 
 fn create_run_dir() -> io::Result<PathBuf> {
-    let base = std::env::current_dir()?.join(".claudectl-runs");
+    let base = std::env::current_dir()?.join(".codexctl-runs");
     fs::create_dir_all(&base)?;
     let now_ms = now_epoch_ms();
     let run_dir = base.join(format!("run-{now_ms}-{}", std::process::id()));

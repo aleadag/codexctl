@@ -12,13 +12,13 @@
 //!
 //! Why an exporter is the bridge from solo tool to team infra:
 //!
-//! - `claudectl_tasks_by_state{state="RUNNING"} 4`
-//! - `claudectl_fleet_cost_usd_total 12.45`
-//! - `claudectl_retries_total{cause="verify_fail"} 7`
-//! - `claudectl_verifier_pass_rate{kind="brain"} 0.83`
+//! - `codexctl_tasks_by_state{state="RUNNING"} 4`
+//! - `codexctl_fleet_cost_usd_total 12.45`
+//! - `codexctl_retries_total{cause="verify_fail"} 7`
+//! - `codexctl_verifier_pass_rate{kind="brain"} 0.83`
 //!
 //! Dashboards (Grafana, Datadog) read these without any
-//! claudectl-specific glue.
+//! codexctl-specific glue.
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -235,39 +235,39 @@ pub fn snapshot(conn: &Connection) -> Result<MetricSnapshot, String> {
 pub fn format_prometheus(snap: &MetricSnapshot) -> String {
     let mut out = String::new();
 
-    out.push_str("# HELP claudectl_tasks_by_state Tasks bucketed by current state.\n");
-    out.push_str("# TYPE claudectl_tasks_by_state gauge\n");
+    out.push_str("# HELP codexctl_tasks_by_state Tasks bucketed by current state.\n");
+    out.push_str("# TYPE codexctl_tasks_by_state gauge\n");
     for (state, n) in &snap.tasks_by_state {
         out.push_str(&format!(
-            "claudectl_tasks_by_state{{state=\"{state}\"}} {n}\n"
+            "codexctl_tasks_by_state{{state=\"{state}\"}} {n}\n"
         ));
     }
 
-    out.push_str("# HELP claudectl_fleet_cost_usd_total Cumulative USD spend across attempts and verifiers.\n");
-    out.push_str("# TYPE claudectl_fleet_cost_usd_total counter\n");
+    out.push_str("# HELP codexctl_fleet_cost_usd_total Cumulative USD spend across attempts and verifiers.\n");
+    out.push_str("# TYPE codexctl_fleet_cost_usd_total counter\n");
     out.push_str(&format!(
-        "claudectl_fleet_cost_usd_total {}\n",
+        "codexctl_fleet_cost_usd_total {}\n",
         snap.fleet_cost_usd_total
     ));
 
     out.push_str(
-        "# HELP claudectl_retries_total Transitions into RETRYING / RESUMING bucketed by cause.\n",
+        "# HELP codexctl_retries_total Transitions into RETRYING / RESUMING bucketed by cause.\n",
     );
-    out.push_str("# TYPE claudectl_retries_total counter\n");
+    out.push_str("# TYPE codexctl_retries_total counter\n");
     for (cause, n) in &snap.retries_by_cause {
         out.push_str(&format!(
-            "claudectl_retries_total{{cause=\"{}\"}} {n}\n",
+            "codexctl_retries_total{{cause=\"{}\"}} {n}\n",
             escape_label(cause)
         ));
     }
 
     out.push_str(
-        "# HELP claudectl_verifier_pass_rate Verifier verdicts: passes / total per verifier kind.\n",
+        "# HELP codexctl_verifier_pass_rate Verifier verdicts: passes / total per verifier kind.\n",
     );
-    out.push_str("# TYPE claudectl_verifier_pass_rate gauge\n");
+    out.push_str("# TYPE codexctl_verifier_pass_rate gauge\n");
     for (kind, rate) in &snap.verifier_pass_rate {
         out.push_str(&format!(
-            "claudectl_verifier_pass_rate{{kind=\"{kind}\"}} {rate}\n"
+            "codexctl_verifier_pass_rate{{kind=\"{kind}\"}} {rate}\n"
         ));
     }
 
@@ -333,12 +333,12 @@ mod tests {
             verifier_pass_rate: vec![("run".into(), 0.83)],
         };
         let text = format_prometheus(&snap);
-        assert!(text.contains("# HELP claudectl_tasks_by_state"));
-        assert!(text.contains("# TYPE claudectl_tasks_by_state gauge"));
-        assert!(text.contains(r#"claudectl_tasks_by_state{state="RUNNING"} 3"#));
-        assert!(text.contains("claudectl_fleet_cost_usd_total 12.45"));
-        assert!(text.contains(r#"claudectl_retries_total{cause="verify_fail"} 2"#));
-        assert!(text.contains(r#"claudectl_verifier_pass_rate{kind="run"} 0.83"#));
+        assert!(text.contains("# HELP codexctl_tasks_by_state"));
+        assert!(text.contains("# TYPE codexctl_tasks_by_state gauge"));
+        assert!(text.contains(r#"codexctl_tasks_by_state{state="RUNNING"} 3"#));
+        assert!(text.contains("codexctl_fleet_cost_usd_total 12.45"));
+        assert!(text.contains(r#"codexctl_retries_total{cause="verify_fail"} 2"#));
+        assert!(text.contains(r#"codexctl_verifier_pass_rate{kind="run"} 0.83"#));
     }
 
     #[test]

@@ -12,7 +12,7 @@ pub const AUTOPSY: &str = "autopsy";
 
 /// Load a prompt template by name. Checks user overrides first, falls back to built-in.
 pub fn load(name: &str) -> String {
-    // Check user override: ~/.claudectl/brain/prompts/{name}.md
+    // Check user override: ~/.codexctl/brain/prompts/{name}.md
     if let Some(path) = user_prompt_path(name) {
         if let Ok(content) = fs::read_to_string(&path) {
             if !content.trim().is_empty() {
@@ -39,7 +39,7 @@ fn user_prompt_path(name: &str) -> Option<PathBuf> {
     let home = std::env::var("HOME").ok()?;
     Some(
         PathBuf::from(home)
-            .join(".claudectl")
+            .join(".codexctl")
             .join("brain")
             .join("prompts")
             .join(format!("{name}.md")),
@@ -80,7 +80,7 @@ pub fn list_prompts() -> Vec<(String, String)> {
 // Built-in prompt templates
 // ────────────────────────────────────────────────────────────────────────────
 
-const ADVISORY_PROMPT: &str = r#"You are a session supervisor for Claude Code. Analyze the session state and recent conversation to decide what action to take. Consider the state of other active sessions when making decisions.
+const ADVISORY_PROMPT: &str = r#"You are a session supervisor for Codex. Analyze the session state and recent conversation to decide what action to take. Consider the state of other active sessions when making decisions.
 
 ## Session State
 {{session_summary}}{{git_context}}{{global_session_map}}{{coordination_context}}{{hive_context}}
@@ -91,7 +91,7 @@ const ADVISORY_PROMPT: &str = r#"You are a session supervisor for Claude Code. A
 ## Decision
 {{decision_prompt}}"#;
 
-const ORCHESTRATION_PROMPT: &str = r#"You are a session orchestrator for Claude Code. You have {{session_count}} active sessions.
+const ORCHESTRATION_PROMPT: &str = r#"You are a session orchestrator for Codex. You have {{session_count}} active sessions.
 
 ## Active Sessions
 {{session_map}}
@@ -124,14 +124,14 @@ Rules:
 Respond with JSON:
 {"decomposable": true/false, "reasoning": "why or why not", "tasks": [{"name": "short-name", "prompt": "full prompt text", "depends_on": ["other-task-name"]}]}"#;
 
-const SUMMARIZE_PROMPT: &str = r#"Summarize this output from session '{{source_project}}' for another Claude Code session working on: {{target_task}}
+const SUMMARIZE_PROMPT: &str = r#"Summarize this output from session '{{source_project}}' for another Codex session working on: {{target_task}}
 
 Keep ONLY what's relevant to the target task. Be concise — this will be injected into another session's context. Max 500 words.
 
 Output to summarize:
 {{source_output}}"#;
 
-const AUTOPSY_PROMPT: &str = r#"You are analyzing a completed Claude Code session post-mortem. Given the session statistics and detected issues, suggest what the session should have done differently.
+const AUTOPSY_PROMPT: &str = r#"You are analyzing a completed Codex session post-mortem. Given the session statistics and detected issues, suggest what the session should have done differently.
 
 ## Session Summary
 {{session_summary}}

@@ -481,7 +481,7 @@ fn sybil_check(store: &HiveStore, from_peer: &str, units: &[KnowledgeUnit], loca
 fn sync_state_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     PathBuf::from(home)
-        .join(".claudectl")
+        .join(".codexctl")
         .join("hive")
         .join("sync_state.json")
 }

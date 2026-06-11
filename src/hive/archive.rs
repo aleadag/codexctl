@@ -16,7 +16,7 @@ use super::{KnowledgeContent, KnowledgeUnit, epoch_secs, semantic_key};
 
 fn hive_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    PathBuf::from(home).join(".claudectl").join("hive")
+    PathBuf::from(home).join(".codexctl").join("hive")
 }
 
 fn archive_path() -> PathBuf {

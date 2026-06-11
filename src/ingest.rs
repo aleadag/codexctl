@@ -1,8 +1,8 @@
-//! `claudectl ingest --hook <name>` (#345, RFC v2 §6).
+//! `codexctl ingest --hook <name>` (#345, RFC v2 §6).
 //!
 //! Reads a hook payload from stdin and appends it to the coord
 //! `hook_events` table. Bash hooks call this as
-//! `claudectl ingest --hook PostToolUse 2>/dev/null || true`. The
+//! `codexctl ingest --hook PostToolUse 2>/dev/null || true`. The
 //! `|| true` is deliberate — ingest is best-effort, which is exactly
 //! why JSONL tail + `ps` stay authoritative. The latency win is what
 //! makes the supervisor's reconciler react in one tick instead of
@@ -38,12 +38,12 @@ const KNOWN_HOOKS: &[&str] = &[
 /// `2>/dev/null` — they want a clean exit code.
 pub fn run(hook: &str) -> io::Result<i32> {
     if !KNOWN_HOOKS.contains(&hook) {
-        eprintln!("claudectl ingest: unknown hook '{hook}' (expected one of {KNOWN_HOOKS:?})");
+        eprintln!("codexctl ingest: unknown hook '{hook}' (expected one of {KNOWN_HOOKS:?})");
         return Ok(1);
     }
     let mut payload = String::new();
     io::stdin().read_to_string(&mut payload)?;
-    // Empty stdin is a no-op — some Claude Code hook invocations send
+    // Empty stdin is a no-op — some Codex hook invocations send
     // nothing and we shouldn't fail on that.
     if payload.trim().is_empty() {
         return Ok(0);
@@ -61,7 +61,7 @@ pub fn run(hook: &str) -> io::Result<i32> {
         let conn = match store::open() {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("claudectl ingest: coord open failed: {e}");
+                eprintln!("codexctl ingest: coord open failed: {e}");
                 return Ok(1);
             }
         };
@@ -74,7 +74,7 @@ pub fn run(hook: &str) -> io::Result<i32> {
             ingested_at: crate::logger::timestamp_now(),
         };
         if let Err(e) = append(&conn, &ev) {
-            eprintln!("claudectl ingest: append failed: {e}");
+            eprintln!("codexctl ingest: append failed: {e}");
             return Ok(1);
         }
         // Flush stderr — some test harnesses buffer and we want errors
@@ -87,13 +87,13 @@ pub fn run(hook: &str) -> io::Result<i32> {
     {
         let _ = parsed; // suppress dead-code warning
         let _ = append; // suppress import warning
-        eprintln!("claudectl ingest: coord feature not compiled in");
+        eprintln!("codexctl ingest: coord feature not compiled in");
         Ok(1)
     }
 }
 
 /// What we lift out of the hook payload for indexed querying. Hook
-/// schemas evolve under Claude Code's control, so we keep this minimal
+/// schemas evolve under Codex's control, so we keep this minimal
 /// and tolerant: missing fields default to `None`, and the raw JSON is
 /// what the reconciler reads when it needs full context.
 #[derive(Debug, Default, Deserialize)]

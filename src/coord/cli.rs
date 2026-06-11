@@ -520,7 +520,7 @@ fn cmd_claim(
     let lease = Lease {
         id: lease_id.clone(),
         owner_session_id: session_id.to_string(),
-        owner_agent: "claude-code".into(),
+        owner_agent: "codex".into(),
         resource_kind: "path_glob".into(),
         resource_value: resource.to_string(),
         mode,
@@ -1026,7 +1026,7 @@ fn cmd_promote(project_name: &str, json_mode: bool) -> io::Result<()> {
 
 fn cmd_context(session_id: &str, json_mode: bool) -> io::Result<()> {
     // Build a minimal session for the injection engine
-    let session = crate::session::ClaudeSession::from_raw(crate::session::RawSession {
+    let session = crate::session::CodexSession::from_raw(crate::session::RawSession {
         pid: 0,
         session_id: session_id.to_string(),
         cwd: std::env::current_dir()
@@ -1085,7 +1085,7 @@ fn cmd_adapters(filter: Option<&str>, json_mode: bool) -> io::Result<()> {
     if filtered.is_empty() {
         if let Some(name) = filter {
             eprintln!("Unknown adapter: '{name}'");
-            eprintln!("Available: claude-code, codex");
+            eprintln!("Available: codex");
         }
         return Ok(());
     }

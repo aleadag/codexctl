@@ -100,7 +100,7 @@ pub enum HiveCommand {
     Install {
         /// Knowledge unit ID to install
         unit_id: String,
-        /// Target directory (default: ~/.claude)
+        /// Target directory (default: ~/.codex)
         #[arg(long)]
         target: Option<String>,
         /// Force install even if compatibility checks fail
@@ -122,7 +122,7 @@ pub enum HiveCommand {
     Accept {
         /// Knowledge unit ID to accept
         unit_id: String,
-        /// Target directory (default: ~/.claude)
+        /// Target directory (default: ~/.codex)
         #[arg(long)]
         target: Option<String>,
         /// Force accept even if compatibility checks fail
@@ -650,7 +650,7 @@ fn cmd_review(unfreeze: Option<&str>, json_mode: bool) -> io::Result<()> {
             let reason = p.freeze_reason.as_deref().unwrap_or("(no reason recorded)");
             println!("  • {} — {reason}", p.peer_id);
         }
-        println!("  Clear with: claudectl hive review --unfreeze <peer_id>");
+        println!("  Clear with: codexctl hive review --unfreeze <peer_id>");
         println!();
     }
 
@@ -1087,7 +1087,7 @@ fn cmd_peer_effectiveness(json_mode: bool) -> io::Result<()> {
     Ok(())
 }
 
-/// `claudectl hive clusters [--problem <key>]`
+/// `codexctl hive clusters [--problem <key>]`
 fn cmd_clusters(problem_filter: Option<&str>, json_mode: bool) -> io::Result<()> {
     let store = HiveStore::load();
     let units = store.all_units();
@@ -1157,7 +1157,7 @@ fn cmd_clusters(problem_filter: Option<&str>, json_mode: bool) -> io::Result<()>
     Ok(())
 }
 
-/// `claudectl hive cluster <problem_key>`
+/// `codexctl hive cluster <problem_key>`
 fn cmd_cluster_show(problem_key: &str, json_mode: bool) -> io::Result<()> {
     let store = HiveStore::load();
     let units = store.all_units();
@@ -1233,7 +1233,7 @@ fn truncate_col_cli(s: &str, width: usize) -> String {
     }
 }
 
-/// `claudectl hive on|off`
+/// `codexctl hive on|off`
 fn cmd_set_mode(mode: &str, json_mode: bool) -> io::Result<()> {
     super::write_mode_override(mode)?;
     let cfg = crate::config::Config::load();
@@ -1257,13 +1257,13 @@ fn cmd_set_mode(mode: &str, json_mode: bool) -> io::Result<()> {
         }
         println!();
         println!(
-            "Tip: edit ~/.claudectl/hive/mode (or rerun) to change this; the file overrides config."
+            "Tip: edit ~/.codexctl/hive/mode (or rerun) to change this; the file overrides config."
         );
     }
     Ok(())
 }
 
-/// `claudectl hive preview` — what would broadcast on the next gossip tick.
+/// `codexctl hive preview` — what would broadcast on the next gossip tick.
 fn cmd_preview(json_mode: bool) -> io::Result<()> {
     let store = HiveStore::load();
     let cfg = crate::config::Config::load();
@@ -1371,7 +1371,7 @@ fn cmd_preview(json_mode: bool) -> io::Result<()> {
             print_preview_row(u);
         }
         println!();
-        println!("  Expose with: claudectl hive expose <id>  (or --all)");
+        println!("  Expose with: codexctl hive expose <id>  (or --all)");
         println!();
     }
     if !blocked.is_empty() {
@@ -1398,7 +1398,7 @@ fn short_id(id: &str) -> &str {
     if id.len() > 12 { &id[..12] } else { id }
 }
 
-/// `claudectl hive expose [unit_id] [--all]`
+/// `codexctl hive expose [unit_id] [--all]`
 fn cmd_expose(unit_id: Option<&str>, all: bool, json_mode: bool) -> io::Result<()> {
     apply_exposure(
         unit_id,
@@ -1408,7 +1408,7 @@ fn cmd_expose(unit_id: Option<&str>, all: bool, json_mode: bool) -> io::Result<(
     )
 }
 
-/// `claudectl hive hide [unit_id] [--all]`
+/// `codexctl hive hide [unit_id] [--all]`
 fn cmd_hide(unit_id: Option<&str>, all: bool, json_mode: bool) -> io::Result<()> {
     apply_exposure(
         unit_id,
@@ -1483,7 +1483,7 @@ fn apply_exposure(
     Ok(())
 }
 
-/// `claudectl hive status`
+/// `codexctl hive status`
 fn cmd_status(json_mode: bool) -> io::Result<()> {
     let store = HiveStore::load();
     let all = store.all_units();
@@ -1568,7 +1568,7 @@ fn cmd_status(json_mode: bool) -> io::Result<()> {
         }
         if conflict_count > 0 {
             println!();
-            println!("  Merge conflicts: {conflict_count} (see ~/.claudectl/hive/conflicts.jsonl)");
+            println!("  Merge conflicts: {conflict_count} (see ~/.codexctl/hive/conflicts.jsonl)");
         }
         #[cfg(feature = "relay")]
         if let Some(ref id) = relay_identity {
@@ -1595,7 +1595,7 @@ fn cmd_status(json_mode: bool) -> io::Result<()> {
 fn conflict_line_count() -> usize {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     let path = std::path::PathBuf::from(home)
-        .join(".claudectl")
+        .join(".codexctl")
         .join("hive")
         .join("conflicts.jsonl");
     std::fs::read_to_string(&path)
@@ -1603,7 +1603,7 @@ fn conflict_line_count() -> usize {
         .unwrap_or(0)
 }
 
-/// `claudectl hive knowledge [--scope X] [--from peer]`
+/// `codexctl hive knowledge [--scope X] [--from peer]`
 fn cmd_knowledge(
     from_filter: Option<&str>,
     scope_filter: Option<&str>,
@@ -1666,14 +1666,14 @@ fn cmd_knowledge(
     Ok(())
 }
 
-/// `claudectl hive export`
+/// `codexctl hive export`
 fn cmd_export() -> io::Result<()> {
     let store = HiveStore::load();
     println!("{}", store.export_json());
     Ok(())
 }
 
-/// `claudectl hive import <file>`
+/// `codexctl hive import <file>`
 fn cmd_import(path: &str) -> io::Result<()> {
     let content =
         std::fs::read_to_string(path).map_err(|e| io::Error::other(format!("read {path}: {e}")))?;
@@ -1691,7 +1691,7 @@ fn cmd_import(path: &str) -> io::Result<()> {
     Ok(())
 }
 
-/// `claudectl hive forget <unit_id>`
+/// `codexctl hive forget <unit_id>`
 fn cmd_forget(unit_id: &str) -> io::Result<()> {
     let mut store = HiveStore::load();
 
@@ -1708,7 +1708,7 @@ fn cmd_forget(unit_id: &str) -> io::Result<()> {
     Ok(())
 }
 
-/// `claudectl hive trust [peer_id] [level]`
+/// `codexctl hive trust [peer_id] [level]`
 fn cmd_trust(peer: Option<&str>, level: Option<f64>, json_mode: bool) -> io::Result<()> {
     let mut trust_store = super::trust::TrustStore::load();
 
@@ -1877,7 +1877,7 @@ pub fn share_artifact_from_path(
     share_inner(content_type, path, scope_str)
 }
 
-/// `claudectl hive share <type> <path> [--scope X]`
+/// `codexctl hive share <type> <path> [--scope X]`
 fn cmd_share(content_type: &str, path: &str, scope_str: &str, json_mode: bool) -> io::Result<()> {
     let (unit_id, summary) = share_inner(content_type, path, scope_str)?;
     if json_mode {
@@ -2131,13 +2131,13 @@ pub fn write_artifact_files(
     }
 }
 
-/// Default `~/.claude` install root.
+/// Default `~/.codex` install root.
 pub fn default_install_dir() -> std::path::PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    std::path::PathBuf::from(home).join(".claude")
+    std::path::PathBuf::from(home).join(".codex")
 }
 
-/// `claudectl hive install <unit_id> [--target dir] [--force]`
+/// `codexctl hive install <unit_id> [--target dir] [--force]`
 fn cmd_install(
     unit_id: &str,
     target: Option<&str>,
@@ -2159,7 +2159,7 @@ fn cmd_install(
     if tier == super::trust::TrustTier::Ignored {
         return Err(io::Error::other(format!(
             "source peer '{}' is in Ignored tier (trust < 0.2). \
-             Set higher trust first: claudectl hive trust {} 0.5",
+             Set higher trust first: codexctl hive trust {} 0.5",
             unit.source_peer, unit.source_peer,
         )));
     }
@@ -2291,7 +2291,7 @@ fn cmd_install(
     Ok(())
 }
 
-/// `claudectl hive shared [--type X] [--show-ignored]`
+/// `codexctl hive shared [--type X] [--show-ignored]`
 fn cmd_shared(
     content_type_filter: Option<&str>,
     show_ignored: bool,
@@ -2356,7 +2356,7 @@ fn cmd_shared(
         println!("{}", serde_json::to_string_pretty(&items).unwrap());
     } else if units.is_empty() {
         println!("No shared skills, commands, or hooks available.");
-        println!("Share content with: claudectl hive share <skill|command|hook> <path>");
+        println!("Share content with: codexctl hive share <skill|command|hook> <path>");
     } else {
         println!(
             "{:<12} {:<8} {:<16} {:<16} {:<6} CONTENT",
@@ -2383,7 +2383,7 @@ fn cmd_shared(
         }
         println!();
         println!(
-            "{} items total. Install with: claudectl hive install <id>",
+            "{} items total. Install with: codexctl hive install <id>",
             units.len()
         );
     }
@@ -2417,7 +2417,7 @@ fn content_name(content: &super::KnowledgeContent) -> String {
 // Archive and distillation commands
 // ────────────────────────────────────────────────────────────────────────────
 
-/// `claudectl hive archive [--prune Nd]`
+/// `codexctl hive archive [--prune Nd]`
 fn cmd_archive(prune: Option<&str>, json_mode: bool) -> io::Result<()> {
     if let Some(val) = prune {
         let days_str = val.trim_end_matches('d');
@@ -2454,14 +2454,14 @@ fn cmd_archive(prune: Option<&str>, json_mode: bool) -> io::Result<()> {
             println!("    Source: {} archive units", m.source_archive_units);
         } else {
             println!();
-            println!("  No curriculum yet. Run: claudectl hive distill");
+            println!("  No curriculum yet. Run: codexctl hive distill");
         }
     }
 
     Ok(())
 }
 
-/// `claudectl hive distill`
+/// `codexctl hive distill`
 fn cmd_distill(json_mode: bool) -> io::Result<()> {
     println!("Running cold distillation...");
     let report = super::archive::distill_archive()
@@ -2485,7 +2485,7 @@ fn cmd_distill(json_mode: bool) -> io::Result<()> {
     Ok(())
 }
 
-/// `claudectl hive curriculum`
+/// `codexctl hive curriculum`
 fn cmd_curriculum(json_mode: bool) -> io::Result<()> {
     let curriculum = super::archive::load_curriculum();
     let meta = super::archive::load_curriculum_meta();
@@ -2500,7 +2500,7 @@ fn cmd_curriculum(json_mode: bool) -> io::Result<()> {
     }
 
     if curriculum.is_empty() {
-        println!("No curriculum yet. Run: claudectl hive distill");
+        println!("No curriculum yet. Run: codexctl hive distill");
         return Ok(());
     }
 
@@ -2542,7 +2542,7 @@ fn cmd_curriculum(json_mode: bool) -> io::Result<()> {
 // Inbound accept controls
 // ────────────────────────────────────────────────────────────────────────────
 
-/// `claudectl hive accept-mode [manual|trusted|all]`
+/// `codexctl hive accept-mode [manual|trusted|all]`
 fn cmd_accept_mode(mode: Option<&str>, json_mode: bool) -> io::Result<()> {
     use super::accept::AcceptMode;
 
@@ -2580,7 +2580,7 @@ fn cmd_accept_mode(mode: Option<&str>, json_mode: bool) -> io::Result<()> {
     Ok(())
 }
 
-/// `claudectl hive pending [--type X]` — list shared artifacts not yet accepted.
+/// `codexctl hive pending [--type X]` — list shared artifacts not yet accepted.
 fn cmd_pending(content_type_filter: Option<&str>, json_mode: bool) -> io::Result<()> {
     let store = HiveStore::load();
     let trust_store = super::trust::TrustStore::load();
@@ -2634,7 +2634,7 @@ fn cmd_pending(content_type_filter: Option<&str>, json_mode: bool) -> io::Result
     }
 
     if pending.is_empty() {
-        println!("No pending artifacts. Run `claudectl hive shared` to see all received items.");
+        println!("No pending artifacts. Run `codexctl hive shared` to see all received items.");
         return Ok(());
     }
 
@@ -2660,7 +2660,7 @@ fn cmd_pending(content_type_filter: Option<&str>, json_mode: bool) -> io::Result
     }
     println!();
     println!(
-        "{} pending. Accept with: claudectl hive accept <id>",
+        "{} pending. Accept with: codexctl hive accept <id>",
         pending.len()
     );
 

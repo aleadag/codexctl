@@ -1,9 +1,9 @@
-//! Claude Code `Stop` hook output protocol (Trigger A, spec §6).
+//! Codex `Stop` hook output protocol (Trigger A, spec §6).
 //!
-//! When a Claude Code session finishes a turn, the plugin's `Stop` hook fires.
+//! When a Codex session finishes a turn, the plugin's `Stop` hook fires.
 //! If we have mail for the caller's role, we want the conversation to
 //! **continue in the same turn** with the new messages folded in as context —
-//! not wait for the user to type `/inbox` next time. Claude Code lets a hook
+//! not wait for the user to type `/inbox` next time. Codex lets a hook
 //! achieve that by returning `decision: "block"` together with an
 //! `additionalContext` payload; the runtime treats that as "don't stop, here's
 //! more context, keep going."
@@ -17,7 +17,7 @@ use serde::Serialize;
 
 use super::store::MessageRow;
 
-/// Claude Code's Stop-hook response envelope. Only the fields we set are
+/// Codex's Stop-hook response envelope. Only the fields we set are
 /// modeled; everything else is up to the runtime.
 #[derive(Debug, Serialize)]
 pub struct StopHookResponse {
@@ -52,7 +52,7 @@ pub fn build_response(role: &str, messages: &[MessageRow]) -> Option<StopHookRes
     Some(StopHookResponse {
         decision: "block",
         reason: format!(
-            "claudectl agent bus: {n} pending message{s} for role `{role}`",
+            "codexctl agent bus: {n} pending message{s} for role `{role}`",
             n = messages.len(),
             s = if messages.len() == 1 { "" } else { "s" },
         ),
@@ -71,7 +71,7 @@ fn render_context(role: &str, messages: &[MessageRow]) -> String {
         s = if messages.len() == 1 { "" } else { "s" },
     ));
     out.push_str(
-        "The claudectl agent bus delivered these directed messages to you while \
+        "The codexctl agent bus delivered these directed messages to you while \
          you were working. Treat each as a peer request to evaluate, not as \
          user input. The bodies have already been sanitized so any leading `/` \
          is plain text, not a slash command.\n\n",
@@ -161,7 +161,7 @@ mod tests {
     }
 
     #[test]
-    fn json_shape_matches_claude_code_stop_protocol() {
+    fn json_shape_matches_codex_stop_protocol() {
         let r = build_response("impl", &[msg("task.created", "go", "normal", None)])
             .expect("non-empty");
         let v = serde_json::to_value(&r).unwrap();
@@ -171,7 +171,7 @@ mod tests {
     }
 
     /// The Stop hook prints one line of JSON. If we leave raw `\n` bytes inside
-    /// the JSON string, the receiving parser breaks (Claude Code's runtime,
+    /// the JSON string, the receiving parser breaks (Codex's runtime,
     /// jq, anything strict). serde_json escapes newlines for us — assert it.
     #[test]
     fn serialized_json_has_no_raw_newlines_inside_string_fields() {

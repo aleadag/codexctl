@@ -1,11 +1,11 @@
-//! Agent bus — durable directory + mailbox for running Claude Code instances.
+//! Agent bus — durable directory + mailbox for running Codex instances.
 //!
 //! See `docs/AGENT_BUS.md` for the design spec. This module implements phases
 //! 1–4 of that spec's build order:
 //!
 //! * §3 `whoami` and `list_agents` discovery tools.
 //! * §3 directed `publish` / `read_inbox` messaging.
-//! * §4 SQLite-backed persistent mailbox at `~/.claudectl/bus/bus.db`.
+//! * §4 SQLite-backed persistent mailbox at `~/.codexctl/bus/bus.db`.
 //! * §5 cwd-inferred role resolution, with explicit `--role` fallback.
 //!
 //! Pub/sub claim protocol (§3), `Stop`-hook continue-in-turn delivery (§6),

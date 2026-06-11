@@ -1,4 +1,4 @@
-// Remote worker: accepts delegated tasks, spawns local claude sessions, reports status.
+// Remote worker: accepts delegated tasks, spawns local Codex sessions, reports status.
 
 use std::collections::HashMap;
 use std::process::{Child, Command, Stdio};
@@ -55,7 +55,7 @@ impl RemoteWorker {
         }
     }
 
-    /// Accept a new delegated task. Spawns a `claude` session.
+    /// Accept a new delegated task. Spawns a Codex exec session.
     pub fn accept_task(
         &mut self,
         task_id: &str,
@@ -71,15 +71,14 @@ impl RemoteWorker {
         let work_dir = cwd.unwrap_or(".");
         let now = Instant::now();
 
-        // Spawn claude --print with the prompt
-        let child = Command::new("claude")
-            .args(["--print", prompt])
+        let child = Command::new("codex")
+            .args(["exec", prompt])
             .current_dir(work_dir)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-            .map_err(|e| format!("spawn claude: {e}"))?;
+            .map_err(|e| format!("spawn codex: {e}"))?;
 
         let pid = child.id();
 
@@ -269,7 +268,7 @@ mod tests {
     #[test]
     fn worker_rejects_duplicate_task() {
         let mut worker = RemoteWorker::new("test-peer");
-        // First accept will fail because `claude` binary likely doesn't exist in test,
+        // First accept will fail because `codex` binary likely doesn't exist in test,
         // but we can test the duplicate check separately.
         let ctx = DelegationContext::default();
 

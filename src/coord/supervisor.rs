@@ -36,7 +36,7 @@ pub enum Action {
     /// Write a `task` message to the role's mailbox. Becomes `ASSIGNED`
     /// once the bus insert lands.
     AssignViaMailbox { task_id: String, role: String },
-    /// Spawn a Claude Code session in `cwd` with the task prompt — used
+    /// Spawn a Codex session in `cwd` with the task prompt — used
     /// when the role's mailbox went unclaimed past `claim_timeout`.
     Spawn { task_id: String, cwd: PathBuf },
     /// Verifier gate: run a shell/brain/agent verifier for the attempt.
@@ -69,7 +69,7 @@ pub enum Action {
 }
 
 /// Knobs governing reconciler behavior. Loaded from
-/// `~/.claudectl/coord/policy.toml` in a later PR; this PR ships the
+/// `~/.codexctl/coord/policy.toml` in a later PR; this PR ships the
 /// type and the defaults so the reconciler can be wired in without
 /// a config-loading hop.
 #[derive(Debug, Clone)]
@@ -332,7 +332,7 @@ impl Supervisor {
 
 impl HealthActionMap {
     /// Map a `HealthCheck::name` string to its configured action. Names
-    /// match the constants in `claudectl-core::health` — adding a new
+    /// match the constants in `codexctl-core::health` — adding a new
     /// check there means adding a branch here too; the test suite
     /// asserts the table is exhaustive over the known set.
     pub fn for_check(&self, name: &str) -> HealthAction {

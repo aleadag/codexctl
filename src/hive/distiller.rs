@@ -705,7 +705,7 @@ mod tests {
         let units = distill_to_knowledge(
             &prefs,
             "test-peer",
-            Some("claudectl"),
+            Some("codexctl"),
             &ExportThresholds::default(),
         );
 
@@ -716,7 +716,7 @@ mod tests {
                     assert_eq!(unit.scope, KnowledgeScope::Universal);
                 }
                 _ => {
-                    assert_eq!(unit.scope, KnowledgeScope::Project("claudectl".into()));
+                    assert_eq!(unit.scope, KnowledgeScope::Project("codexctl".into()));
                 }
             }
         }

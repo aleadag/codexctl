@@ -1,37 +1,35 @@
-//! `claudectl init` — opinionated onboarding wizard.
+//! `codexctl init` — opinionated onboarding wizard.
 //!
-//! Tracking issue: <https://github.com/mercurialsolo/claudectl/issues/257>.
+//! Tracking issue: <https://github.com/aleadag/codexctl/issues/257>.
 //!
 //! This module owns the single canonical first-run flow for getting a
-//! claudectl install ready: weekly budget cap, local-LLM brain detection,
-//! Claude Code hook install, agent-bus role binding, and curated skill
-//! suggestions. The deferred `claudectl setup` wizard (AGENT_BUS.md §8) folds
+//! codexctl install ready: weekly budget cap, local-LLM brain detection,
+//! Codex hook install, agent-bus role binding, and curated skill suggestions.
+//! The deferred `codexctl setup` wizard (AGENT_BUS.md §8) folds
 //! in here as the "bus" phase rather than existing as a parallel command.
 //!
 //! Public surface:
 //!
-//! * [`run_wizard`] — interactive flow. The default `claudectl init`.
+//! * [`run_wizard`] — interactive flow. The default `codexctl init`.
 //! * [`run_non_interactive`] — same flow with pre-filled answers. For CI and
 //!   dotfile automation.
 //! * [`run_check`] — drift report comparing the recorded marker against
 //!   current environment detection.
-//! * [`run_remove`] — uninstall every claudectl-managed artifact.
+//! * [`run_remove`] — uninstall every codexctl-managed artifact.
 //! * [`run_reset`] — clear the marker so the next `init` run prompts again.
 //!
 //! Module layout:
 //!
-//! * `hooks.rs` — the legacy `--init` / `--uninstall` hook writer (moved here
-//!   unchanged; phases delegate to it for the plugin step).
-//! * `marker.rs` — `~/.claudectl/onboarding.json` read/write.
+//! * `hooks.rs` — the legacy `--init` / `--uninstall` hook writer.
+//! * `marker.rs` — `~/.codexctl/onboarding.json` read/write.
 //! * `prompt.rs` — minimal stdin/stdout prompt helpers.
-//! * `state.rs` — environment detection (probes ollama, settings.json, bus
+//! * `state.rs` — environment detection (probes ollama, hooks.json, bus
 //!   roles, etc.).
 //! * `phases.rs` — `Phase` trait + Budget/Brain/Plugin/Bus/Skills impls.
 
 pub mod hooks;
 pub mod marker;
 pub mod phases;
-pub mod plugin_assets;
 pub mod prompt;
 pub mod state;
 
@@ -72,9 +70,7 @@ pub fn run_wizard() -> io::Result<()> {
 
     persist_marker(new_records, &stamp)?;
     println!();
-    println!(
-        "Onboarding complete. Re-run with `claudectl init --check` any time to inspect drift."
-    );
+    println!("Onboarding complete. Re-run with `codexctl init --check` any time to inspect drift.");
     Ok(())
 }
 
@@ -114,12 +110,12 @@ pub fn run_check() -> io::Result<()> {
     let recorded = marker::load(&marker::default_path())?;
 
     if recorded.is_none() {
-        println!("claudectl has not been onboarded — run `claudectl init` to begin.");
+        println!("codexctl has not been onboarded — run `codexctl init` to begin.");
         return Err(io::Error::other("not onboarded"));
     }
     let recorded = recorded.unwrap();
 
-    println!("claudectl init --check");
+    println!("codexctl init --check");
     println!(
         "  recorded version : {}",
         if recorded.version.is_empty() {
@@ -164,7 +160,7 @@ pub fn run_check() -> io::Result<()> {
     if drift_count > 0 {
         println!();
         println!("⚠  {drift_count} phase(s) have drifted from the recorded onboarding.");
-        println!("   Run `claudectl init` to re-apply, or `claudectl init --reset` to start over.");
+        println!("   Run `codexctl init` to re-apply, or `codexctl init --reset` to start over.");
         return Err(io::Error::other(format!("{drift_count} phase(s) drifted")));
     }
     println!();
@@ -172,9 +168,9 @@ pub fn run_check() -> io::Result<()> {
     Ok(())
 }
 
-/// Remove every claudectl-managed artifact. Phases that own user state (the
+/// Remove every codexctl-managed artifact. Phases that own user state (the
 /// bus DB, the config file's `budget` line) decline to delete it — we don't
-/// erase a user's setup, only artifacts claudectl actively manages.
+/// erase a user's setup, only artifacts codexctl actively manages.
 pub fn run_remove() -> io::Result<()> {
     let registry = phases::registry();
     let mut errors = Vec::new();
@@ -201,32 +197,29 @@ pub fn run_remove() -> io::Result<()> {
 /// installed artifacts.
 pub fn run_reset() -> io::Result<()> {
     marker::clear(&marker::default_path())?;
-    println!("Cleared onboarding marker — `claudectl init` will start from scratch next run.");
+    println!("Cleared onboarding marker — `codexctl init` will start from scratch next run.");
     Ok(())
 }
 
 /// Re-sync everything the previous `init` wrote so it tracks the current
-/// binary (#327). Used after `brew upgrade claudectl` / `cargo install
-/// claudectl --force` — the new binary embeds newer plugin assets, may
-/// expect a different schema, and might have a fresher marker version,
-/// but the on-disk artifacts were written by the old binary.
+/// binary (#327). Used after `brew upgrade codexctl` / `cargo install
+/// codexctl --force` — the new binary may expect a different schema and might
+/// have a fresher marker version, but the on-disk artifacts were written by
+/// the old binary.
 ///
-/// Four refresh paths, in order — failures don't abort the rest so a
+/// Three refresh paths, in order — failures don't abort the rest so a
 /// half-broken install can still partially recover:
 ///
-/// 1. Hook entries in `~/.claude/settings.json` — re-runs `init::hooks::run_init`
+/// 1. Hook entries in `~/.codex/hooks.json` — re-runs `init::hooks::run_init`
 ///    which is idempotent.
-/// 2. Plugin files in `~/.claude/plugins/claudectl/` — re-writes from
-///    embedded `include_str!` contents. We checksum each file before
-///    writing so the report distinguishes "updated" from "no change".
-/// 3. DB migrations — opening the bus and coord stores runs any pending
+/// 2. DB migrations — opening the bus and coord stores runs any pending
 ///    `ADD COLUMN` migrations as a side effect of `migrate(&conn)`.
-/// 4. Onboarding marker version bump — if the recorded version differs
+/// 3. Onboarding marker version bump — if the recorded version differs
 ///    from the running binary's `CARGO_PKG_VERSION`, rewrite the version
 ///    field (other phase records preserved).
 pub fn run_upgrade() -> io::Result<()> {
-    println!("claudectl init upgrade");
-    println!("=======================");
+    println!("codexctl init upgrade");
+    println!("======================");
     println!();
 
     let mut had_error = false;
@@ -234,7 +227,7 @@ pub fn run_upgrade() -> io::Result<()> {
     // 1. Hook entries. `hooks::run_init` prints its own report; we follow
     // it with our progress line so the operator sees both the file path
     // touched and the per-step ✓ summary.
-    println!("  [1/4] Claude Code hook entries");
+    println!("  [1/3] Codex hook entries");
     match hooks::run_init(false, false) {
         Ok(()) => println!("        \u{2713} refreshed"),
         Err(e) => {
@@ -243,21 +236,8 @@ pub fn run_upgrade() -> io::Result<()> {
         }
     }
 
-    // 2. Plugin files (embedded → disk)
-    print!("  [2/4] Embedded plugin files ..................... ");
-    match upgrade_plugin_assets() {
-        Ok(Some((updated, unchanged))) => {
-            println!("\u{2713} {updated} updated, {unchanged} unchanged");
-        }
-        Ok(None) => println!("\u{2014} HOME not set, skipped"),
-        Err(e) => {
-            println!("\u{2717} {e}");
-            had_error = true;
-        }
-    }
-
-    // 3. DB migrations (opening the stores triggers `migrate()`)
-    print!("  [3/4] DB schema migrations ...................... ");
+    // 2. DB migrations (opening the stores triggers `migrate()`)
+    print!("  [2/3] DB schema migrations ...................... ");
     match upgrade_db_migrations() {
         Ok(()) => println!("\u{2713} schema current"),
         Err(e) => {
@@ -266,8 +246,8 @@ pub fn run_upgrade() -> io::Result<()> {
         }
     }
 
-    // 4. Onboarding marker version stamp
-    print!("  [4/4] Onboarding marker version ................. ");
+    // 3. Onboarding marker version stamp
+    print!("  [3/3] Onboarding marker version ................. ");
     match upgrade_marker_version() {
         Ok(Some((from, to))) => println!("\u{2713} {from} \u{2192} {to}"),
         Ok(None) => println!("\u{2014} already current"),
@@ -280,45 +260,11 @@ pub fn run_upgrade() -> io::Result<()> {
     println!();
     if had_error {
         return Err(io::Error::other(
-            "one or more upgrade steps failed — run `claudectl doctor` for details",
+            "one or more upgrade steps failed — run `codexctl doctor` for details",
         ));
     }
-    println!("Upgrade complete. Run `claudectl doctor` to verify.");
+    println!("Upgrade complete. Run `codexctl doctor` to verify.");
     Ok(())
-}
-
-/// Re-write embedded plugin assets, returning `(updated, unchanged)` row
-/// counts. We compare against the on-disk contents before writing so the
-/// upgrade report can be honest about what actually changed.
-fn upgrade_plugin_assets() -> io::Result<Option<(usize, usize)>> {
-    let Some(dest) = plugin_assets::default_install_dir() else {
-        return Ok(None);
-    };
-    let mut updated = 0;
-    let mut unchanged = 0;
-    for asset in plugin_assets::ASSETS {
-        let target = dest.join(asset.rel_path);
-        let same = std::fs::read_to_string(&target)
-            .map(|on_disk| on_disk == asset.contents)
-            .unwrap_or(false);
-        if same {
-            unchanged += 1;
-            continue;
-        }
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&target, asset.contents)?;
-        #[cfg(unix)]
-        if asset.rel_path.ends_with(".sh") {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(&target)?.permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&target, perms)?;
-        }
-        updated += 1;
-    }
-    Ok(Some((updated, unchanged)))
 }
 
 /// Touch the bus + coord stores so their `migrate(&conn)` calls run any
@@ -355,8 +301,8 @@ fn upgrade_marker_version() -> io::Result<Option<(String, String)>> {
     Ok(Some((from, current)))
 }
 
-/// Hard uninstall: `--remove` plus delete `~/.claudectl/` and
-/// `~/.config/claudectl/config.toml`. Used to start from a truly clean
+/// Hard uninstall: `--remove` plus delete `~/.codexctl/` and
+/// `~/.config/codexctl/config.toml`. Used to start from a truly clean
 /// slate (e.g. for reinstall testing or recovering from corrupted state).
 ///
 /// User confirms before any deletion unless `assume_yes` is set. Each
@@ -364,19 +310,19 @@ fn upgrade_marker_version() -> io::Result<Option<(String, String)>> {
 /// a successful one is a no-op rather than an error.
 pub fn run_purge(assume_yes: bool) -> io::Result<()> {
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-    let claudectl_dir = home.as_ref().map(|h| h.join(".claudectl"));
+    let codexctl_dir = home.as_ref().map(|h| h.join(".codexctl"));
     let config_path = crate::config::Config::global_path();
 
     println!("This will delete:");
-    println!("  • Claude Code hooks claudectl installed (`~/.claude/settings.json` entries)");
-    if let Some(dir) = claudectl_dir.as_ref() {
+    println!("  • Codex hooks codexctl installed (`~/.codex/hooks.json` entries)");
+    if let Some(dir) = codexctl_dir.as_ref() {
         println!(
             "  • {} (bus DB, brain decisions, hive, relay, coord)",
             dir.display()
         );
     }
     if let Some(cfg) = config_path.as_ref() {
-        println!("  • {} (claudectl config file)", cfg.display());
+        println!("  • {} (codexctl config file)", cfg.display());
     }
     println!();
     println!("User-edited files outside these paths are preserved. To remove only");
@@ -390,7 +336,7 @@ pub fn run_purge(assume_yes: bool) -> io::Result<()> {
 
     // First, the soft uninstall — strips hook entries and clears the marker.
     // We run this with `?` only after the destructive deletions so a failure
-    // here (e.g. settings.json edit conflict) doesn't abort the directory
+    // here (e.g. hooks.json edit conflict) doesn't abort the directory
     // wipes that follow.
     let remove_errors = match run_remove_silent() {
         Ok(()) => Vec::new(),
@@ -398,7 +344,7 @@ pub fn run_purge(assume_yes: bool) -> io::Result<()> {
     };
 
     let mut errors = remove_errors;
-    if let Some(dir) = claudectl_dir.as_ref() {
+    if let Some(dir) = codexctl_dir.as_ref() {
         if let Err(e) = remove_dir_if_present(dir) {
             errors.push(format!("{}: {e}", dir.display()));
         } else {
@@ -411,7 +357,7 @@ pub fn run_purge(assume_yes: bool) -> io::Result<()> {
         } else {
             println!("  removed: {}", cfg.display());
         }
-        // Also try the parent ~/.config/claudectl/ dir — only succeeds if
+        // Also try the parent ~/.config/codexctl/ dir — only succeeds if
         // it's now empty (we don't recursively delete the parent because
         // it could contain user-authored files we don't know about).
         if let Some(parent) = cfg.parent() {
@@ -421,7 +367,7 @@ pub fn run_purge(assume_yes: bool) -> io::Result<()> {
 
     if errors.is_empty() {
         println!();
-        println!("Purge complete. `claudectl init` will start fresh.");
+        println!("Purge complete. `codexctl init` will start fresh.");
         Ok(())
     } else {
         Err(io::Error::other(format!(
@@ -475,7 +421,7 @@ fn remove_file_if_present(path: &std::path::Path) -> io::Result<()> {
 fn print_banner(registry: &[Box<dyn Phase>]) {
     println!();
     println!(
-        "claudectl init — opinionated onboarding ({} phases)",
+        "codexctl init — opinionated onboarding ({} phases)",
         registry.len()
     );
     println!("══════════════════════════════════════════════════════════════");
@@ -564,68 +510,6 @@ mod drift_tests {
 mod tests {
     use super::*;
 
-    /// Mirror of `upgrade_plugin_assets` but writing to an explicit dest
-    /// instead of `default_install_dir()`. Used by the upgrade tests so
-    /// we can drive them with a tempdir.
-    fn upgrade_plugin_assets_at(dest: &std::path::Path) -> io::Result<(usize, usize)> {
-        let mut updated = 0;
-        let mut unchanged = 0;
-        for asset in plugin_assets::ASSETS {
-            let target = dest.join(asset.rel_path);
-            let same = std::fs::read_to_string(&target)
-                .map(|on_disk| on_disk == asset.contents)
-                .unwrap_or(false);
-            if same {
-                unchanged += 1;
-                continue;
-            }
-            if let Some(parent) = target.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(&target, asset.contents)?;
-            updated += 1;
-        }
-        Ok((updated, unchanged))
-    }
-
-    #[test]
-    fn upgrade_first_pass_writes_every_file() {
-        let tmp = tempfile::tempdir().unwrap();
-        let (updated, unchanged) = upgrade_plugin_assets_at(tmp.path()).unwrap();
-        assert_eq!(
-            unchanged, 0,
-            "tempdir was empty — nothing should be 'unchanged'"
-        );
-        assert_eq!(updated, plugin_assets::ASSETS.len());
-    }
-
-    #[test]
-    fn upgrade_second_pass_writes_nothing() {
-        let tmp = tempfile::tempdir().unwrap();
-        upgrade_plugin_assets_at(tmp.path()).unwrap();
-        let (updated, unchanged) = upgrade_plugin_assets_at(tmp.path()).unwrap();
-        assert_eq!(updated, 0, "second pass should be a no-op");
-        assert_eq!(unchanged, plugin_assets::ASSETS.len());
-    }
-
-    #[test]
-    fn upgrade_rewrites_a_locally_modified_file() {
-        // The realistic case for `init upgrade` after `brew upgrade`:
-        // some files match the embedded contents, others don't.
-        let tmp = tempfile::tempdir().unwrap();
-        upgrade_plugin_assets_at(tmp.path()).unwrap();
-        // Tamper with one file. role.md is a stable target — it always
-        // ships and isn't going to be renamed without intent.
-        let role_md = tmp.path().join("commands/role.md");
-        std::fs::write(&role_md, "wrong contents\n").unwrap();
-        let (updated, unchanged) = upgrade_plugin_assets_at(tmp.path()).unwrap();
-        assert_eq!(updated, 1);
-        assert_eq!(unchanged, plugin_assets::ASSETS.len() - 1);
-        // And the file should now match the embedded version.
-        let restored = std::fs::read_to_string(&role_md).unwrap();
-        assert!(restored.contains("name: role"));
-    }
-
     #[test]
     fn upgrade_marker_helper_bumps_a_stale_version() {
         let tmp = tempfile::tempdir().unwrap();
@@ -660,7 +544,7 @@ mod tests {
     #[test]
     fn remove_dir_if_present_wipes_existing_tree() {
         let tmp = tempfile::tempdir().unwrap();
-        let target = tmp.path().join("claudectl");
+        let target = tmp.path().join("codexctl");
         std::fs::create_dir_all(target.join("brain")).unwrap();
         std::fs::create_dir_all(target.join("bus")).unwrap();
         std::fs::write(target.join("brain").join("d.jsonl"), "{}").unwrap();

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AcceptMode {
-    /// Hold all incoming artifacts; user must `claudectl hive accept <id>`.
+    /// Hold all incoming artifacts; user must `codexctl hive accept <id>`.
     Manual,
     /// Auto-install only when source peer is in the Confirmed trust tier.
     Trusted,
@@ -40,7 +40,7 @@ impl AcceptMode {
 fn accept_mode_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     PathBuf::from(home)
-        .join(".claudectl")
+        .join(".codexctl")
         .join("hive")
         .join("accept-mode")
 }
@@ -76,7 +76,7 @@ pub struct InstallRecord {
 fn installed_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     PathBuf::from(home)
-        .join(".claudectl")
+        .join(".codexctl")
         .join("hive")
         .join("installed.json")
 }

@@ -402,13 +402,13 @@ pub const MAX_HOOK_CONFIG_BYTES: usize = 4 * 1024;
 /// Compatibility requirements for a shared artifact.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ArtifactRequires {
-    /// CLI binaries that must be on PATH (e.g., ["claudectl", "jq"]).
+    /// CLI binaries that must be on PATH (e.g., ["codexctl", "jq"]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cli: Vec<String>,
     /// Target OS labels (e.g., ["macos", "linux"]). Empty = any OS.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub os: Vec<String>,
-    /// Minimum claudectl version (e.g., "0.42.0"). None = any.
+    /// Minimum codexctl version (e.g., "0.42.0"). None = any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_version: Option<String>,
 }
@@ -701,11 +701,11 @@ pub fn epoch_secs() -> u64 {
 // On/off override (mirrors brain's gate-mode pattern)
 // ────────────────────────────────────────────────────────────────────────────
 
-/// Path to the hive mode override file (`~/.claudectl/hive/mode`).
+/// Path to the hive mode override file (`~/.codexctl/hive/mode`).
 pub fn mode_path() -> std::path::PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     std::path::PathBuf::from(home)
-        .join(".claudectl")
+        .join(".codexctl")
         .join("hive")
         .join("mode")
 }
@@ -795,7 +795,7 @@ pub fn signal_new_knowledge(count: u32) {
 // ────────────────────────────────────────────────────────────────────────────
 
 /// Environment variables safe to keep in shared hook configs.
-const SAFE_ENV_VARS: &[&str] = &["HOME", "PWD", "PATH", "CLAUDE_PLUGIN_ROOT", "USER", "SHELL"];
+const SAFE_ENV_VARS: &[&str] = &["HOME", "PWD", "PATH", "CODEX_PLUGIN_ROOT", "USER", "SHELL"];
 
 /// Credential-like key prefixes (case-insensitive match).
 const CREDENTIAL_KEYS: &[&str] = &[
@@ -978,7 +978,7 @@ pub enum CompatIssue {
         current: String,
         required: Vec<String>,
     },
-    /// The local claudectl version is too old.
+    /// The local codexctl version is too old.
     VersionTooOld { current: String, required: String },
 }
 
@@ -1010,7 +1010,7 @@ impl std::fmt::Display for CompatIssue {
                 )
             }
             Self::VersionTooOld { current, required } => {
-                write!(f, "claudectl {current} too old, requires >= {required}")
+                write!(f, "codexctl {current} too old, requires >= {required}")
             }
         }
     }
@@ -1411,8 +1411,8 @@ mod tests {
         unit.scope = KnowledgeScope::Language("rust".into());
         assert_eq!(semantic_key(&unit), "lang:rust/pattern:Bash:cargo fmt");
 
-        unit.scope = KnowledgeScope::Project("claudectl".into());
-        assert_eq!(semantic_key(&unit), "proj:claudectl/pattern:Bash:cargo fmt");
+        unit.scope = KnowledgeScope::Project("codexctl".into());
+        assert_eq!(semantic_key(&unit), "proj:codexctl/pattern:Bash:cargo fmt");
     }
 
     #[test]
@@ -1826,15 +1826,15 @@ mod tests {
 
     #[test]
     fn sanitize_keeps_safe_vars() {
-        let input = "path: $HOME/.claudectl and ${CLAUDE_PLUGIN_ROOT}/hooks";
+        let input = "path: $HOME/.codexctl and ${CODEX_PLUGIN_ROOT}/hooks";
         let result = sanitize_hook_config(input);
         assert!(result.contains("$HOME"));
-        assert!(result.contains("${CLAUDE_PLUGIN_ROOT}"));
+        assert!(result.contains("${CODEX_PLUGIN_ROOT}"));
     }
 
     #[test]
     fn sanitize_strips_absolute_paths() {
-        let input = "file: /Users/barada/.claudectl/config";
+        let input = "file: /Users/barada/.codexctl/config";
         let result = sanitize_hook_config(input);
         assert!(result.contains("$HOME"));
         assert!(!result.contains("/Users/barada"));
@@ -1876,13 +1876,13 @@ mod tests {
     #[test]
     fn artifact_requires_serde_roundtrip() {
         let req = ArtifactRequires {
-            cli: vec!["claudectl".into(), "jq".into()],
+            cli: vec!["codexctl".into(), "jq".into()],
             os: vec!["macos".into()],
             min_version: Some("0.42.0".into()),
         };
         let json = serde_json::to_string(&req).unwrap();
         let back: ArtifactRequires = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.cli, vec!["claudectl", "jq"]);
+        assert_eq!(back.cli, vec!["codexctl", "jq"]);
         assert_eq!(back.os, vec!["macos"]);
         assert_eq!(back.min_version.as_deref(), Some("0.42.0"));
     }
@@ -1950,7 +1950,7 @@ mod tests {
 # Usage
 
 ```bash
-claudectl --list
+codexctl --list
 jq '.sessions[]' output.json
 cargo test --all
 ```
@@ -1958,7 +1958,7 @@ cargo test --all
 Some text.
 "#;
         let deps = detect_cli_deps(body);
-        assert!(deps.contains(&"claudectl".to_string()));
+        assert!(deps.contains(&"codexctl".to_string()));
         assert!(deps.contains(&"jq".to_string()));
         assert!(deps.contains(&"cargo".to_string()));
     }
@@ -1981,11 +1981,11 @@ if [ -f test ]; then echo ok; fi
     fn detect_cli_deps_handles_pipes() {
         let body = r#"
 ```bash
-claudectl --json | jq '.[] | .cost'
+codexctl --json | jq '.[] | .cost'
 ```
 "#;
         let deps = detect_cli_deps(body);
-        assert!(deps.contains(&"claudectl".to_string()));
+        assert!(deps.contains(&"codexctl".to_string()));
         assert!(deps.contains(&"jq".to_string()));
     }
 
@@ -1997,7 +1997,7 @@ import json
 ```
 
 ```bash
-claudectl --list
+codexctl --list
 ```
 
 ```rust
@@ -2005,23 +2005,23 @@ fn main() {}
 ```
 "#;
         let deps = detect_cli_deps(body);
-        assert_eq!(deps, vec!["claudectl"]);
+        assert_eq!(deps, vec!["codexctl"]);
     }
 
     #[test]
     fn detect_cli_deps_handles_env_assignments() {
         let body = r#"
 ```bash
-FOO=bar claudectl --list
+FOO=bar codexctl --list
 ```
 "#;
         let deps = detect_cli_deps(body);
-        assert!(deps.contains(&"claudectl".to_string()));
+        assert!(deps.contains(&"codexctl".to_string()));
     }
 
     #[test]
     fn detect_os_deps_macos() {
-        let body = "Install with: brew install claudectl";
+        let body = "Install with: brew install codexctl";
         assert_eq!(detect_os_deps(body), vec!["macos"]);
     }
 
@@ -2033,7 +2033,7 @@ FOO=bar claudectl --list
 
     #[test]
     fn detect_os_deps_none() {
-        let body = "Just run claudectl";
+        let body = "Just run codexctl";
         assert!(detect_os_deps(body).is_empty());
     }
 

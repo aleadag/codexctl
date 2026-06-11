@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use crate::session::{self, ClaudeSession};
+use crate::session::{self, CodexSession};
 use crate::transcript::{self, TranscriptBlock, TranscriptEvent};
 
 /// Compact context for the brain LLM, built from session state + recent transcript.
@@ -36,8 +36,8 @@ pub struct BrainContext {
 /// Build a compact context for the brain from a session's state and JSONL transcript.
 /// Pass all sessions for cross-session awareness.
 pub fn build_context(
-    session: &ClaudeSession,
-    all_sessions: &[ClaudeSession],
+    session: &CodexSession,
+    all_sessions: &[CodexSession],
     max_tokens: u32,
 ) -> BrainContext {
     let session_summary = format_session_summary(session);
@@ -60,7 +60,7 @@ pub fn build_context(
     }
 }
 
-fn format_session_summary(session: &ClaudeSession) -> String {
+fn format_session_summary(session: &CodexSession) -> String {
     let context_pct = if session.context_max > 0 {
         (session.context_tokens as f64 / session.context_max as f64 * 100.0) as u32
     } else {
@@ -104,7 +104,7 @@ fn format_session_summary(session: &ClaudeSession) -> String {
     summary
 }
 
-fn format_decision_prompt(session: &ClaudeSession) -> String {
+fn format_decision_prompt(session: &CodexSession) -> String {
     match session.status {
         crate::session::SessionStatus::NeedsInput => {
             let tool = session.pending_tool_name.as_deref().unwrap_or("unknown");
@@ -132,12 +132,12 @@ fn format_decision_prompt(session: &ClaudeSession) -> String {
 }
 
 /// Format a compact map of all sessions (public, for orchestration prompts).
-pub fn format_global_session_map_public(sessions: &[ClaudeSession]) -> String {
+pub fn format_global_session_map_public(sessions: &[CodexSession]) -> String {
     format_global_session_map(0, sessions)
 }
 
 /// Format a compact map of all active sessions for cross-session awareness.
-fn format_global_session_map(current_pid: u32, sessions: &[ClaudeSession]) -> String {
+fn format_global_session_map(current_pid: u32, sessions: &[CodexSession]) -> String {
     if sessions.len() <= 1 {
         return String::new();
     }
@@ -189,7 +189,7 @@ fn format_global_session_map(current_pid: u32, sessions: &[ClaudeSession]) -> St
 
 /// Read recent transcript entries from the JSONL file, compacted to fit budget.
 /// Keeps the last N full messages and summarizes older ones as one-liners.
-fn read_recent_transcript(session: &ClaudeSession, max_tokens: u32) -> String {
+fn read_recent_transcript(session: &CodexSession, max_tokens: u32) -> String {
     let Some(ref jsonl_path) = session.jsonl_path else {
         return "(no transcript available)".into();
     };
@@ -511,16 +511,16 @@ pub fn format_brain_prompt(ctx: &BrainContext) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::{ClaudeSession, RawSession, SessionStatus, TelemetryStatus};
+    use crate::session::{CodexSession, RawSession, SessionStatus, TelemetryStatus};
 
-    fn make_session() -> ClaudeSession {
+    fn make_session() -> CodexSession {
         let raw = RawSession {
             pid: 100,
             session_id: "test".into(),
             cwd: "/tmp/my-project".into(),
             started_at: 0,
         };
-        let mut s = ClaudeSession::from_raw(raw);
+        let mut s = CodexSession::from_raw(raw);
         s.status = SessionStatus::NeedsInput;
         s.telemetry_status = TelemetryStatus::Available;
         s.model = "opus-4.6".into();

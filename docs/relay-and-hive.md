@@ -1,12 +1,12 @@
-# Relay and Hive: Cross-Machine Collaboration for claudectl
+# Relay and Hive: Cross-Machine Collaboration for codexctl
 
 Status: Draft
 
-This document specifies a relay transport, remote coordination protocol, and hive mind knowledge-sharing system that extends claudectl from a local session supervisor into a distributed collaboration plane across machines, accounts, and teams.
+This document specifies a relay transport, remote coordination protocol, and hive mind knowledge-sharing system that extends codexctl from a local session supervisor into a distributed collaboration plane across machines, accounts, and teams.
 
 ## Thesis
 
-Coding agents learn in isolation. Each claudectl brain distills preferences, detects friction patterns, and builds accuracy — but that knowledge dies at the machine boundary. Two developers working on the same project, or even the same developer across a laptop and a CI runner, cannot share what their brains have learned.
+Coding agents learn in isolation. Each codexctl brain distills preferences, detects friction patterns, and builds accuracy — but that knowledge dies at the machine boundary. Two developers working on the same project, or even the same developer across a laptop and a CI runner, cannot share what their brains have learned.
 
 This design introduces three layers:
 
@@ -21,12 +21,12 @@ Each layer is independently useful. Relay alone enables task offloading. Relay +
 The coordination layer (see `coordination-layer.md`) solves multi-agent coordination on a single machine. It does not solve:
 
 - offloading a task to a remote machine with spare capacity
-- two developers' Claude Code instances collaborating on shared work
+- two developers' Codex instances collaborating on shared work
 - sharing brain learnings across machines so corrections propagate
 - bootstrapping a new machine's brain with the team's accumulated wisdom
 - global cost tracking across distributed sessions
 
-These problems require a network layer. But claudectl's constraints (no async runtime in the relay path, lean runtime crate count, ~3.5 MB default binary, local-first) mean we cannot bolt on a web framework or message broker. The relay is built entirely on `std::net`. (The async-runtime exception lives only in the `bus` feature — see CLAUDE.md.)
+These problems require a network layer. But codexctl's constraints (no async runtime in the relay path, lean runtime crate count, ~3.5 MB default binary, local-first) mean we cannot bolt on a web framework or message broker. The relay is built entirely on `std::net`. (The async-runtime exception lives only in the `bus` feature — see AGENTS.md.)
 
 ## Design Principles
 
@@ -40,7 +40,7 @@ The deny-first principle extends to knowledge. If a peer's knowledge unit confli
 
 ### Zero new dependencies
 
-The relay uses `std::net::TcpListener` and `std::net::TcpStream`. Authentication uses HMAC-SHA256 implemented inline (the algorithm is simple enough to not warrant a crate). If operators need encryption, they tunnel through SSH or WireGuard — that is an infrastructure concern, not claudectl's.
+The relay uses `std::net::TcpListener` and `std::net::TcpStream`. Authentication uses HMAC-SHA256 implemented inline (the algorithm is simple enough to not warrant a crate). If operators need encryption, they tunnel through SSH or WireGuard — that is an infrastructure concern, not codexctl's.
 
 ### Gossip over consensus
 
@@ -56,7 +56,7 @@ The relay transport is useful without the hive mind. Remote task delegation is u
 - Real-time file synchronization between machines
 - Shared terminal/TUI streaming
 - Cross-machine JSONL log streaming (status updates are sufficient)
-- Support for non-claudectl peers (the protocol is claudectl-specific)
+- Support for non-codexctl peers (the protocol is codexctl-specific)
 - Encryption at the transport layer (use SSH tunnels or VPN)
 - Automatic peer discovery (peers are explicitly configured)
 
@@ -66,7 +66,7 @@ The relay transport is useful without the hive mind. Remote task delegation is u
 
 ### Overview
 
-The relay is a TCP socket layer that allows two claudectl instances to exchange structured JSON messages. It handles connection lifecycle, authentication, heartbeats, and reconnection.
+The relay is a TCP socket layer that allows two codexctl instances to exchange structured JSON messages. It handles connection lifecycle, authentication, heartbeats, and reconnection.
 
 ### Module Structure
 
@@ -84,9 +84,9 @@ Feature-gated behind `relay` in Cargo.toml (like `coord` is gated behind `coord`
 ### Data Types
 
 ```rust
-/// Unique identity for a claudectl instance in the network.
+/// Unique identity for a codexctl instance in the network.
 /// Derived from hostname + a random suffix, generated on first run.
-/// Stored in ~/.claudectl/relay/identity.
+/// Stored in ~/.codexctl/relay/identity.
 struct PeerId(String);
 
 /// Every message over the wire.
@@ -126,7 +126,7 @@ Rationale: NDJSON is trivially debuggable (`nc host port` shows readable message
 
 ### Authentication: HMAC Challenge-Response
 
-Pairing uses a pre-shared key (PSK) generated by `claudectl relay pair`. The PSK is a 32-byte random value, displayed as a human-friendly code (e.g., `kx7f-m2np-9a3d-w1vz`).
+Pairing uses a pre-shared key (PSK) generated by `codexctl relay pair`. The PSK is a 32-byte random value, displayed as a human-friendly code (e.g., `kx7f-m2np-9a3d-w1vz`).
 
 ```
 Connection handshake:
@@ -147,7 +147,7 @@ If HMAC verification fails:
 
 The HMAC-SHA256 implementation is inlined (~60 lines of Rust for the algorithm). No external crate needed.
 
-PSK storage: `~/.claudectl/relay/peers/<peer_id>.key` — one file per paired peer, containing the shared key. The file is chmod 600.
+PSK storage: `~/.codexctl/relay/peers/<peer_id>.key` — one file per paired peer, containing the shared key. The file is chmod 600.
 
 ### Connection Lifecycle
 
@@ -174,7 +174,7 @@ Deduplication:
 
 ### Threading Model
 
-claudectl is synchronous with no async runtime. The relay uses dedicated threads:
+codexctl is synchronous with no async runtime. The relay uses dedicated threads:
 
 - **Listener thread**: Runs `TcpListener::accept()` in a loop. On new connection, spawns a reader thread for that peer.
 - **Reader thread** (per peer): Reads lines from the `TcpStream`, parses into `RelayMessage`, dispatches to the appropriate handler via a `crossbeam`-free channel (use `std::sync::mpsc`).
@@ -184,7 +184,7 @@ No new threading crate needed — `std::thread`, `std::sync::mpsc`, and `Arc<Mut
 
 ### Configuration
 
-In `.claudectl.toml` or `~/.config/claudectl/config.toml`:
+In `.codexctl.toml` or `~/.config/codexctl/config.toml`:
 
 ```toml
 [relay]
@@ -199,13 +199,13 @@ reconnect_max_secs = 60
 ### CLI
 
 ```bash
-claudectl relay serve                    # start listener (foreground, for testing)
-claudectl relay pair                     # generate a new PSK, display as code
-claudectl relay accept <code>            # store a PSK from a peer's pair command
-claudectl relay connect <host:port>      # connect to a remote peer
-claudectl relay peers                    # list connected/known peers
-claudectl relay disconnect <peer_id>     # drop a connection
-claudectl relay forget <peer_id>         # remove peer and its PSK
+codexctl relay serve                    # start listener (foreground, for testing)
+codexctl relay pair                     # generate a new PSK, display as code
+codexctl relay accept <code>            # store a PSK from a peer's pair command
+codexctl relay connect <host:port>      # connect to a remote peer
+codexctl relay peers                    # list connected/known peers
+codexctl relay disconnect <peer_id>     # drop a connection
+codexctl relay forget <peer_id>         # remove peer and its PSK
 ```
 
 When the TUI or brain is running, the relay starts automatically if `relay.enabled = true` in config.
@@ -213,7 +213,7 @@ When the TUI or brain is running, the relay starts automatically if `relay.enabl
 ### Persistence
 
 ```
-~/.claudectl/relay/
+~/.codexctl/relay/
   identity              — this instance's PeerId (generated once)
   peers/
     <peer_id>.key       — PSK for each paired peer (chmod 600)
@@ -258,7 +258,7 @@ Controller (Machine A)                       Worker (Machine B)
     │                                             │
     │                                             ├── validate context
     │                                             ├── git clone/pull if needed
-    │                                             ├── spawn `claude` session
+    │                                             ├── spawn `codex` session
     │                                             │
     │ ◄──────────────────────────── TaskStatus ────┤
     │   { task_id, state: "running",              │
@@ -323,7 +323,7 @@ On the worker side, a delegated task follows the same lifecycle as a local orche
 
 1. **Receive** `DelegateTask` → validate, store in local coord DB
 2. **Prepare** → `git clone`/`git pull` to the specified ref if `git_remote` provided
-3. **Spawn** → launch `claude` session with the prompt and cwd
+3. **Spawn** → launch `codex` session with the prompt and cwd
 4. **Monitor** → local brain watches the session, sends periodic `TaskStatus`
 5. **Complete** → send `TaskHandoff` with summary, artifacts, and final git ref
 6. **Cleanup** → mark task as completed in local coord DB
@@ -337,7 +337,7 @@ The controller's TUI shows delegated tasks with a peer indicator:
 ```
 ┌─ Sessions ───────────────────────────────────────────────────────────┐
 │ PID    Status      Project           Cost    Tokens   Peer          │
-│ 12345  working     claudectl         $0.42   18.2k    (local)       │
+│ 12345  working     codexctl         $0.42   18.2k    (local)       │
 │ ──     working     auth-service      $0.18    7.1k    machineB ↗    │
 │ ──     completed   deploy-staging    $0.05    2.3k    ci-runner ↗   │
 └──────────────────────────────────────────────────────────────────────┘
@@ -357,7 +357,7 @@ pub struct CostEntry {
 }
 ```
 
-The `claudectl stats` and `claudectl history` commands show local vs delegated costs:
+The `codexctl stats` and `codexctl history` commands show local vs delegated costs:
 
 ```
 Total spend: $12.47
@@ -373,10 +373,10 @@ The controller can send interrupts to delegated tasks:
 
 ```bash
 # Nudge a remote task
-claudectl relay interrupt <task_id> nudge "dependency resolved, check blockers"
+codexctl relay interrupt <task_id> nudge "dependency resolved, check blockers"
 
 # Stop a remote task
-claudectl relay interrupt <task_id> stop "no longer needed, scope changed"
+codexctl relay interrupt <task_id> stop "no longer needed, scope changed"
 ```
 
 These map to `TaskInterrupt` messages. The worker receives them and applies them to the local session via the existing interrupt bus.
@@ -387,14 +387,14 @@ These map to `TaskInterrupt` messages. The worker receives them and applies them
 
 ### Overview
 
-The hive mind is a gossip-based knowledge sharing system that allows connected claudectl brains to learn from each other's corrections, preferences, and insights. Each brain remains sovereign — local knowledge always takes precedence — but peer knowledge enriches the decision-making context.
+The hive mind is a gossip-based knowledge sharing system that allows connected codexctl brains to learn from each other's corrections, preferences, and insights. Each brain remains sovereign — local knowledge always takes precedence — but peer knowledge enriches the decision-making context.
 
 ### Module Structure
 
 ```
 src/hive/
   mod.rs          — KnowledgeUnit, KnowledgeScope, KnowledgeContent, re-exports
-  store.rs        — local hive knowledge store (~/.claudectl/hive/)
+  store.rs        — local hive knowledge store (~/.codexctl/hive/)
   distiller.rs    — convert DistilledPreferences/Insights → KnowledgeUnits
   merger.rs       — conflict resolution, trust-weighted merge
   gossip.rs       — sync protocol, snapshot generation, propagation
@@ -666,7 +666,7 @@ Trust affects how peer knowledge enters the brain prompt:
 - `trust < 0.2`: Knowledge is stored but not injected into prompts
 
 Trust can be adjusted:
-- Manually: `claudectl hive trust <peer_id> 0.8`
+- Manually: `codexctl hive trust <peer_id> 0.8`
 - Automatically: when local brain agrees with peer knowledge (trust drifts up) or disagrees (trust drifts down). Drift rate: ±0.01 per concordant/discordant decision, clamped to [0.0, 1.0].
 
 ### Brain Prompt Integration
@@ -691,7 +691,7 @@ The brain sees both sections and can weigh them appropriately. Local preferences
 ### Persistence
 
 ```
-~/.claudectl/hive/
+~/.codexctl/hive/
   knowledge.jsonl       — all accepted knowledge units (append-only)
   sync_state.json       — per-peer sync cursors (last_sync_epoch per peer)
   trust.json            — per-peer trust levels
@@ -706,58 +706,58 @@ The brain sees both sections and can weigh them appropriately. Local preferences
 
 ```bash
 # Serve: start the relay listener
-claudectl relay serve [--port 9847] [--foreground]
+codexctl relay serve [--port 9847] [--foreground]
 
 # Pair: generate a pre-shared key
-claudectl relay pair
+codexctl relay pair
 # Output: PAIR CODE: kx7f-m2np-9a3d-w1vz
 #         Share this code with the peer you want to connect.
 
 # Accept: store a PSK from another peer
-claudectl relay accept <code>
+codexctl relay accept <code>
 
 # Connect: establish connection to a remote peer
-claudectl relay connect <host:port>
+codexctl relay connect <host:port>
 
 # Peers: list known/connected peers
-claudectl relay peers [--json]
+codexctl relay peers [--json]
 
 # Delegate: send a task to a remote peer
-claudectl relay delegate <peer_id> "<prompt>" [--cwd /path] [--git-ref branch]
+codexctl relay delegate <peer_id> "<prompt>" [--cwd /path] [--git-ref branch]
 
 # Status: show all remote tasks
-claudectl relay status [--json]
+codexctl relay status [--json]
 
 # Interrupt: send interrupt to a remote task
-claudectl relay interrupt <task_id> <type> [reason]
+codexctl relay interrupt <task_id> <type> [reason]
 
 # Disconnect/forget
-claudectl relay disconnect <peer_id>
-claudectl relay forget <peer_id>
+codexctl relay disconnect <peer_id>
+codexctl relay forget <peer_id>
 ```
 
 ### Hive commands
 
 ```bash
 # Status: show hive network stats
-claudectl hive status
+codexctl hive status
 
 # Knowledge: list shared knowledge units
-claudectl hive knowledge [--scope universal|language:rust|project:foo]
-claudectl hive knowledge [--from <peer_id>]
-claudectl hive knowledge [--json]
+codexctl hive knowledge [--scope universal|language:rust|project:foo]
+codexctl hive knowledge [--from <peer_id>]
+codexctl hive knowledge [--json]
 
 # Trust: get/set peer trust
-claudectl hive trust                         # show all
-claudectl hive trust <peer_id>              # show one
-claudectl hive trust <peer_id> <0.0-1.0>   # set
+codexctl hive trust                         # show all
+codexctl hive trust <peer_id>              # show one
+codexctl hive trust <peer_id> <0.0-1.0>   # set
 
 # Export/Import: offline knowledge transfer
-claudectl hive export > knowledge.json
-claudectl hive import knowledge.json
+codexctl hive export > knowledge.json
+codexctl hive import knowledge.json
 
 # Forget: remove a specific knowledge unit
-claudectl hive forget <unit_id>
+codexctl hive forget <unit_id>
 ```
 
 ### TUI Integration
@@ -791,7 +791,7 @@ The detail panel for a delegated task shows peer info:
 
 ## Configuration
 
-All relay and hive settings in `.claudectl.toml`:
+All relay and hive settings in `.codexctl.toml`:
 
 ```toml
 [relay]
@@ -838,7 +838,7 @@ The documentation should prominently recommend one of these approaches.
 
 ### Command injection
 
-The relay receives prompts and executes them via `claude` CLI on the worker side. This is inherently powerful — a connected peer can run arbitrary prompts. The trust model partially mitigates this (low-trust peers can be limited), but the primary protection is the pairing step: you only pair with machines you trust.
+The relay receives prompts and executes them via the `codex` CLI on the worker side. This is inherently powerful — a connected peer can run arbitrary prompts. The trust model partially mitigates this (low-trust peers can be limited), but the primary protection is the pairing step: you only pair with machines you trust.
 
 Future hardening options (not in v1):
 - Allow-list of permitted prompt patterns per peer
@@ -860,7 +860,7 @@ A compromised or malicious peer could send bad knowledge units to shift the brai
 
 ### Phase 1: Relay Transport
 Ship the TCP pipe with PSK auth, heartbeats, reconnect.
-No coordination or hive — just the ability to connect two claudectl instances.
+No coordination or hive — just the ability to connect two codexctl instances.
 Test: two machines can pair, connect, exchange heartbeats, reconnect after disconnect.
 
 ### Phase 2: Remote Task Delegation
@@ -903,7 +903,7 @@ where:
   opad = 0x5c repeated 64 times
 ```
 
-SHA-256 itself is ~150 lines of Rust (pure computation, no I/O, no allocations beyond a fixed buffer). Together with the HMAC wrapper, this is ~200 lines — well within claudectl's "inline over crate" ethos.
+SHA-256 itself is ~150 lines of Rust (pure computation, no I/O, no allocations beyond a fixed buffer). Together with the HMAC wrapper, this is ~200 lines — well within codexctl's "inline over crate" ethos.
 
 Alternative: if the `coord` feature is enabled, `rusqlite` bundles SQLite which includes a SHA-256 implementation. We could potentially reuse it, but the inline approach is cleaner and doesn't create a cross-feature dependency.
 

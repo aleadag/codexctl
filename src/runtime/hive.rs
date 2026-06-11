@@ -4,8 +4,8 @@
 
 use std::collections::HashSet;
 
-use claudectl_core::runtime::{HiveActions, HiveViewSnapshot};
-use claudectl_core::skills::DiscoveredSkill;
+use codexctl_core::runtime::{HiveActions, HiveViewSnapshot};
+use codexctl_core::skills::DiscoveredSkill;
 
 pub struct LiveHiveActions;
 

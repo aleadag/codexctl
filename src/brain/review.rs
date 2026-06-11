@@ -1,10 +1,10 @@
 //! Interactive review of brain decisions.
 //!
-//! `claudectl brain review` surfaces the highest-value decisions to triage:
+//! `codexctl brain review` surfaces the highest-value decisions to triage:
 //! brain-was-right counterfactuals, Critical-tier safety hits, and
 //! high-confidence calibration misses. The user marks each as canonical
 //! (teaching material) or skips. Canonical marks are stored in
-//! `~/.claudectl/brain/canonical.jsonl` and get a large score boost in
+//! `~/.codexctl/brain/canonical.jsonl` and get a large score boost in
 //! few-shot retrieval — turning each review pass into supervised training.
 //!
 //! Implementation is plain stdin/stdout. A full ratatui screen integrated
@@ -31,7 +31,7 @@ pub fn build_queue(decisions: &[DecisionRecord]) -> Vec<ReviewItem> {
     // compute_counterfactuals (and the other compute_* helpers) operate on
     // the core `DecisionSummary` DTO since the metrics surface is shared
     // with the TUI. Project once at the call site.
-    let summaries: Vec<claudectl_core::runtime::DecisionSummary> =
+    let summaries: Vec<codexctl_core::runtime::DecisionSummary> =
         decisions.iter().map(Into::into).collect();
     let cfs = compute_counterfactuals(&summaries);
 
@@ -110,7 +110,7 @@ pub fn run_interactive() -> usize {
         println!("  - The brain has been right on every confident call (great).");
         println!("  - Outcome attribution hasn't kicked in yet (try after more usage).");
         println!();
-        println!("Run `claudectl --brain-stats scorecard` to see overall health.");
+        println!("Run `codexctl --brain-stats scorecard` to see overall health.");
         return 0;
     }
 
@@ -267,7 +267,7 @@ pub fn mark_by_id(decision_id: &str, note: Option<&str>) -> Result<(), String> {
 pub fn print_queue() {
     let decisions = read_all_decisions();
     let queue = build_queue(&decisions);
-    let summaries: Vec<claudectl_core::runtime::DecisionSummary> =
+    let summaries: Vec<codexctl_core::runtime::DecisionSummary> =
         decisions.iter().map(Into::into).collect();
     let tier_stats = compute_tier_stats(&summaries);
 

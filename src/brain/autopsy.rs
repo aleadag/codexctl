@@ -865,7 +865,7 @@ fn autopsies_dir() -> PathBuf {
     super::decisions::decisions_dir().join("autopsies")
 }
 
-/// Save an autopsy report to ~/.claudectl/brain/autopsies/{session_id}.json.
+/// Save an autopsy report to ~/.codexctl/brain/autopsies/{session_id}.json.
 pub fn save_report(report: &AutopsyReport) -> Result<PathBuf, String> {
     let dir = autopsies_dir();
     let _ = fs::create_dir_all(&dir);
@@ -911,7 +911,7 @@ mod tests {
 
     fn make_assistant_with_tool_use(tool: &str, input_json: &str) -> String {
         format!(
-            r#"{{"type":"assistant","message":{{"role":"assistant","model":"claude-sonnet-4-6-20260401","stop_reason":"tool_use","usage":{{"input_tokens":1000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":200}},"content":[{{"type":"tool_use","name":"{tool}","input":{input_json}}}]}}}}"#
+            r#"{{"type":"assistant","message":{{"role":"assistant","model":"codex-sonnet-4-6-20260401","stop_reason":"tool_use","usage":{{"input_tokens":1000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":200}},"content":[{{"type":"tool_use","name":"{tool}","input":{input_json}}}]}}}}"#
         )
     }
 

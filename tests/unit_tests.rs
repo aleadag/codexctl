@@ -3,7 +3,7 @@ use std::time::Duration;
 // Test session status display and sorting
 #[test]
 fn test_session_status_sort_order() {
-    use claudectl::session::SessionStatus;
+    use codexctl::session::SessionStatus;
     assert!(SessionStatus::NeedsInput.sort_key() < SessionStatus::Processing.sort_key());
     assert!(SessionStatus::Processing.sort_key() < SessionStatus::WaitingInput.sort_key());
     assert!(SessionStatus::WaitingInput.sort_key() < SessionStatus::Unknown.sort_key());
@@ -13,7 +13,7 @@ fn test_session_status_sort_order() {
 
 #[test]
 fn test_session_status_display() {
-    use claudectl::session::SessionStatus;
+    use codexctl::session::SessionStatus;
     assert_eq!(SessionStatus::NeedsInput.to_string(), "Needs Input");
     assert_eq!(SessionStatus::Processing.to_string(), "Processing");
     assert_eq!(SessionStatus::WaitingInput.to_string(), "Waiting");
@@ -24,14 +24,14 @@ fn test_session_status_display() {
 
 #[test]
 fn test_session_from_raw() {
-    use claudectl::session::{ClaudeSession, RawSession};
+    use codexctl::session::{CodexSession, RawSession};
     let raw = RawSession {
         pid: 12345,
         session_id: "abc-123".to_string(),
         cwd: "/Users/test/projects/my-app".to_string(),
         started_at: 0,
     };
-    let session = ClaudeSession::from_raw(raw);
+    let session = CodexSession::from_raw(raw);
     assert_eq!(session.pid, 12345);
     assert_eq!(session.project_name, "my-app");
     assert_eq!(session.display_name(), "my-app");
@@ -39,28 +39,28 @@ fn test_session_from_raw() {
 
 #[test]
 fn test_session_display_name_prefers_session_name() {
-    use claudectl::session::{ClaudeSession, RawSession};
+    use codexctl::session::{CodexSession, RawSession};
     let raw = RawSession {
         pid: 1,
         session_id: "x".to_string(),
         cwd: "/tmp/foo".to_string(),
         started_at: 0,
     };
-    let mut session = ClaudeSession::from_raw(raw);
+    let mut session = CodexSession::from_raw(raw);
     session.session_name = "my-custom-name".to_string();
     assert_eq!(session.display_name(), "my-custom-name");
 }
 
 #[test]
 fn test_format_elapsed() {
-    use claudectl::session::{ClaudeSession, RawSession};
+    use codexctl::session::{CodexSession, RawSession};
     let raw = RawSession {
         pid: 1,
         session_id: "x".to_string(),
         cwd: "/tmp".to_string(),
         started_at: 0,
     };
-    let mut session = ClaudeSession::from_raw(raw);
+    let mut session = CodexSession::from_raw(raw);
     session.elapsed = Duration::from_secs(3661);
     assert_eq!(session.format_elapsed(), "01:01:01");
 
@@ -70,14 +70,14 @@ fn test_format_elapsed() {
 
 #[test]
 fn test_format_tokens() {
-    use claudectl::session::{ClaudeSession, RawSession, TelemetryStatus};
+    use codexctl::session::{CodexSession, RawSession, TelemetryStatus};
     let raw = RawSession {
         pid: 1,
         session_id: "x".to_string(),
         cwd: "/tmp".to_string(),
         started_at: 0,
     };
-    let mut session = ClaudeSession::from_raw(raw);
+    let mut session = CodexSession::from_raw(raw);
 
     assert_eq!(session.format_tokens(), "n/a");
 
@@ -90,14 +90,14 @@ fn test_format_tokens() {
 
 #[test]
 fn test_format_cost() {
-    use claudectl::session::{ClaudeSession, RawSession, TelemetryStatus};
+    use codexctl::session::{CodexSession, RawSession, TelemetryStatus};
     let raw = RawSession {
         pid: 1,
         session_id: "x".to_string(),
         cwd: "/tmp".to_string(),
         started_at: 0,
     };
-    let mut session = ClaudeSession::from_raw(raw);
+    let mut session = CodexSession::from_raw(raw);
 
     assert_eq!(session.format_cost(), "n/a");
 
@@ -112,7 +112,7 @@ fn test_format_cost() {
 
 #[test]
 fn test_cwd_to_project_name() {
-    use claudectl::session::{ClaudeSession, RawSession};
+    use codexctl::session::{CodexSession, RawSession};
     let cases = vec![
         ("/Users/foo/bar/my-project", "my-project"),
         ("/tmp", "tmp"),
@@ -125,7 +125,7 @@ fn test_cwd_to_project_name() {
             cwd: cwd.to_string(),
             started_at: 0,
         };
-        let session = ClaudeSession::from_raw(raw);
+        let session = CodexSession::from_raw(raw);
         assert_eq!(session.project_name, expected, "cwd={cwd}");
     }
 }

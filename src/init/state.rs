@@ -102,14 +102,14 @@ fn probe_http(url: &str) -> bool {
         .unwrap_or(false)
 }
 
-// ---------------- Plugin (Claude Code hooks) --------------------------------
+// ---------------- Codex hooks ------------------------------------------------
 
 /// Plugin is "installed" when our hooks are present in
-/// `~/.claude/settings.json` (global scope). Reuses the existing detection
+/// `~/.codex/hooks.json` (global scope). Reuses the existing detection
 /// logic from `hooks.rs` so it stays consistent with what `--init` writes.
 pub fn detect_plugin() -> PhaseStatus {
     let path = hooks::user_settings_path();
-    match hooks::settings_contain_claudectl_hooks(&path) {
+    match hooks::settings_contain_codexctl_hooks(&path) {
         Some(true) => PhaseStatus::Installed {
             details: format!("hooks in {}", path.display()),
         },
@@ -141,8 +141,8 @@ pub fn detect_bus() -> PhaseStatus {
 
 // ---------------- Skills (curated list) -------------------------------------
 
-/// Skills installation is owned by Claude Code itself (`/plugin install`),
-/// not by claudectl. We treat the phase as "installed" only when the user
+/// Skills installation is owned by Codex itself (`/plugin install`),
+/// not by codexctl. We treat the phase as "installed" only when the user
 /// recorded acknowledging the suggestions, via the marker — so detection
 /// here always returns NotInstalled and the wizard relies on the marker for
 /// idempotency.
@@ -200,7 +200,7 @@ impl EnvironmentReport {
 }
 
 #[allow(dead_code)]
-pub(crate) fn _claude_config_dir_for_tests() -> PathBuf {
+pub(crate) fn _codex_config_dir_for_tests() -> PathBuf {
     hooks::user_settings_path()
 }
 

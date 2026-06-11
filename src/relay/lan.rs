@@ -1,4 +1,4 @@
-// LAN broadcast discovery: find nearby claudectl instances via UDP.
+// LAN broadcast discovery: find nearby codexctl instances via UDP.
 
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
@@ -105,7 +105,7 @@ pub fn start_announcer(
 // Scanner: listen for nearby announcements
 // ────────────────────────────────────────────────────────────────────────────
 
-/// Scan the LAN for claudectl instances. Listens for `duration` seconds.
+/// Scan the LAN for codexctl instances. Listens for `duration` seconds.
 pub fn scan_lan(duration: Duration, own_identity: &str) -> Vec<DiscoveredPeer> {
     let socket = match UdpSocket::bind(format!("0.0.0.0:{LAN_PORT}")) {
         Ok(s) => s,

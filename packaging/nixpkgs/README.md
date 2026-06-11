@@ -6,7 +6,7 @@ Unlike Homebrew and the AUR, the actual package definition must land in the
 `nixpkgs` repository, typically at:
 
 ```text
-pkgs/by-name/cl/claudectl/package.nix
+pkgs/by-name/cl/codexctl/package.nix
 ```
 
 ## Suggested package expression
@@ -18,12 +18,12 @@ release in the `nixpkgs` PR:
 { lib, rustPlatform, fetchFromGitHub }:
 
 rustPlatform.buildRustPackage rec {
-  pname = "claudectl";
+  pname = "codexctl";
   version = "0.16.0";
 
   src = fetchFromGitHub {
-    owner = "mercurialsolo";
-    repo = "claudectl";
+    owner = "aleadag";
+    repo = "codexctl";
     rev = "v${version}";
     hash = lib.fakeHash;
   };
@@ -31,10 +31,10 @@ rustPlatform.buildRustPackage rec {
   cargoHash = lib.fakeHash;
 
   meta = {
-    description = "Orchestrate a swarm of Claude Code agents with a local-LLM brain that learns from you.";
-    homepage = "https://github.com/mercurialsolo/claudectl";
+    description = "Orchestrate a swarm of Codex agents with a local-LLM brain that learns from you.";
+    homepage = "https://github.com/aleadag/codexctl";
     license = lib.licenses.mit;
-    mainProgram = "claudectl";
+    mainProgram = "codexctl";
     platforms = lib.platforms.unix;
   };
 }
@@ -45,7 +45,7 @@ rustPlatform.buildRustPackage rec {
 1. Copy the package expression into a `nixpkgs` checkout.
 2. Build once with `lib.fakeHash` values to get the real `src.hash` and
    `cargoHash` suggestions from Nix.
-3. Replace the fake hashes, rebuild, and confirm `claudectl --help` runs.
+3. Replace the fake hashes, rebuild, and confirm `codexctl --help` runs.
 4. Run the normal `nixpkgs` validation tools for the new package.
 5. Open the upstream `nixpkgs` PR and link it from issue `#82`.
 

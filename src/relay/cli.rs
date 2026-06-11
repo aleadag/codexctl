@@ -110,7 +110,7 @@ pub enum RelayCommand {
         input: Vec<String>,
     },
 
-    /// Scan LAN for nearby claudectl instances
+    /// Scan LAN for nearby codexctl instances
     Discover,
 }
 
@@ -147,7 +147,7 @@ pub fn dispatch_command(command: &RelayCommand, json_mode: bool) -> io::Result<(
     }
 }
 
-/// `claudectl relay serve [--port PORT] [--http-port PORT] [--auth-token TOKEN]`
+/// `codexctl relay serve [--port PORT] [--http-port PORT] [--auth-token TOKEN]`
 /// Start the relay listener in the foreground.
 fn cmd_serve(port: u16, http_port: Option<u16>, auth_token: Option<&str>) -> io::Result<()> {
     let mut port = port;
@@ -437,7 +437,7 @@ fn cmd_serve(port: u16, http_port: Option<u16>, auth_token: Option<&str>) -> io:
     Ok(())
 }
 
-/// `claudectl relay pair`
+/// `codexctl relay pair`
 /// Generate a new PSK and display it.
 fn cmd_pair(json_mode: bool) -> io::Result<()> {
     let identity = load_or_create_identity();
@@ -457,7 +457,7 @@ fn cmd_pair(json_mode: bool) -> io::Result<()> {
         println!();
         println!("Share this code with the peer you want to connect.");
         println!(
-            "They should run: claudectl relay accept {} {}",
+            "They should run: codexctl relay accept {} {}",
             code, identity
         );
     }
@@ -472,7 +472,7 @@ fn cmd_pair(json_mode: bool) -> io::Result<()> {
     Ok(())
 }
 
-/// `claudectl relay accept <code> <peer_id>`
+/// `codexctl relay accept <code> <peer_id>`
 /// Accept a pairing code from another peer.
 fn cmd_accept(code: &str, peer_id: &str) -> io::Result<()> {
     if !is_valid_peer_id(peer_id) || peer_id == PENDING_PEER_ID {
@@ -488,7 +488,7 @@ fn cmd_accept(code: &str, peer_id: &str) -> io::Result<()> {
 
     println!("Paired with peer: {}", peer_id);
     println!("PSK stored. You can now connect with:");
-    println!("  claudectl relay connect <host>:<port>");
+    println!("  codexctl relay connect <host>:<port>");
 
     Ok(())
 }
@@ -585,7 +585,7 @@ fn reconnect_peer(
     Ok(())
 }
 
-/// `claudectl relay connect <host:port>`
+/// `codexctl relay connect <host:port>`
 /// Connect to a remote relay.
 fn cmd_connect(addr_str: &str) -> io::Result<()> {
     let addr: SocketAddr = addr_str
@@ -624,12 +624,12 @@ fn cmd_connect(addr_str: &str) -> io::Result<()> {
 
     eprintln!("Could not connect to {}", addr_str);
     eprintln!("Make sure you have paired with this peer first:");
-    eprintln!("  1. Remote runs: claudectl relay pair");
-    eprintln!("  2. You run:     claudectl relay accept <code> <peer-id>");
+    eprintln!("  1. Remote runs: codexctl relay pair");
+    eprintln!("  2. You run:     codexctl relay accept <code> <peer-id>");
     Err(io::Error::other("connection failed"))
 }
 
-/// `claudectl relay peers`
+/// `codexctl relay peers`
 /// List known peers and their status.
 fn cmd_peers(json_mode: bool) -> io::Result<()> {
     let identity = load_or_create_identity();
@@ -657,7 +657,7 @@ fn cmd_peers(json_mode: bool) -> io::Result<()> {
         println!("Identity: {}", identity);
         println!();
         if known.is_empty() {
-            println!("No paired peers. Run 'claudectl relay pair' to get started.");
+            println!("No paired peers. Run 'codexctl relay pair' to get started.");
         } else {
             println!("{:<20} {:<24} PAIRED", "PEER", "ADDRESS");
             println!("{}", "─".repeat(56));
@@ -679,19 +679,19 @@ fn cmd_peers(json_mode: bool) -> io::Result<()> {
     Ok(())
 }
 
-/// `claudectl relay disconnect <peer_id>`
+/// `codexctl relay disconnect <peer_id>`
 fn cmd_disconnect(peer_id: &str) -> io::Result<()> {
     // In standalone CLI mode, we can't disconnect a live connection
     // (that's handled by the TUI/serve loop). Just inform the user.
     println!("Note: to disconnect a live connection, stop the relay serve/connect process.");
     println!(
-        "To remove the pairing entirely, use: claudectl relay forget {}",
+        "To remove the pairing entirely, use: codexctl relay forget {}",
         peer_id
     );
     Ok(())
 }
 
-/// `claudectl relay forget <peer_id>`
+/// `codexctl relay forget <peer_id>`
 /// Remove all data for a peer.
 fn cmd_forget(peer_id: &str) -> io::Result<()> {
     if load_peer_psk(peer_id).is_none() {
@@ -703,7 +703,7 @@ fn cmd_forget(peer_id: &str) -> io::Result<()> {
     Ok(())
 }
 
-/// `claudectl relay identity`
+/// `codexctl relay identity`
 /// Show this instance's relay identity.
 fn cmd_identity(json_mode: bool) -> io::Result<()> {
     let identity = load_or_create_identity();
@@ -719,7 +719,7 @@ fn cmd_identity(json_mode: bool) -> io::Result<()> {
 // Phase 2: Delegation commands
 // ────────────────────────────────────────────────────────────────────────────
 
-/// `claudectl relay delegate <peer_id> "<prompt>" [--cwd /path] [--git-ref branch]`
+/// `codexctl relay delegate <peer_id> "<prompt>" [--cwd /path] [--git-ref branch]`
 fn cmd_delegate(
     peer_id: &str,
     prompt: &str,
@@ -757,13 +757,13 @@ fn cmd_delegate(
         }
         println!();
         println!("Note: In standalone CLI mode, the message is built but not sent.");
-        println!("Use `claudectl relay serve` or TUI mode for live delegation.");
+        println!("Use `codexctl relay serve` or TUI mode for live delegation.");
     }
 
     Ok(())
 }
 
-/// `claudectl relay status`
+/// `codexctl relay status`
 /// Show status of delegated tasks.
 fn cmd_task_status(json_mode: bool) -> io::Result<()> {
     // In standalone CLI mode, we don't have a live relay connection.
@@ -781,13 +781,13 @@ fn cmd_task_status(json_mode: bool) -> io::Result<()> {
         println!("Relay identity: {}", identity);
         println!();
         println!("No active delegated tasks.");
-        println!("Live task status requires `claudectl relay serve` or TUI mode.");
+        println!("Live task status requires `codexctl relay serve` or TUI mode.");
     }
 
     Ok(())
 }
 
-/// `claudectl relay interrupt <task_id> <type> [reason]`
+/// `codexctl relay interrupt <task_id> <type> [reason]`
 fn cmd_interrupt(task_id: &str, interrupt_type: &str, reason: &[String]) -> io::Result<()> {
     let reason_str = reason.join(" ");
 
@@ -807,7 +807,7 @@ fn cmd_interrupt(task_id: &str, interrupt_type: &str, reason: &[String]) -> io::
     println!("  Message ID: {}", msg.id);
     println!();
     println!("Note: In standalone CLI mode, the message is built but not sent.");
-    println!("Use `claudectl relay serve` or TUI mode for live interrupts.");
+    println!("Use `codexctl relay serve` or TUI mode for live interrupts.");
 
     Ok(())
 }
@@ -816,7 +816,7 @@ fn cmd_interrupt(task_id: &str, interrupt_type: &str, reason: &[String]) -> io::
 // Discovery commands: invite, join, discover
 // ────────────────────────────────────────────────────────────────────────────
 
-/// `claudectl relay invite [--qr] [--words]`
+/// `codexctl relay invite [--qr] [--words]`
 fn cmd_invite(show_qr: bool, show_words: bool, json_mode: bool) -> io::Result<()> {
     let identity = load_or_create_identity();
     let cfg = crate::config::Config::load();
@@ -871,11 +871,11 @@ fn cmd_invite(show_qr: bool, show_words: bool, json_mode: bool) -> io::Result<()
     // Join instructions
     println!("Share any of the above with your peer. They run:");
     println!();
-    println!("  claudectl relay join {}", relay_code);
+    println!("  codexctl relay join {}", relay_code);
     if show_words {
-        println!("  claudectl relay join {}", word_phrase);
+        println!("  codexctl relay join {}", word_phrase);
     }
-    println!("  claudectl relay join {}", invite_link);
+    println!("  codexctl relay join {}", invite_link);
     println!();
 
     // QR code
@@ -893,10 +893,10 @@ fn cmd_invite(show_qr: bool, show_words: bool, json_mode: bool) -> io::Result<()
     Ok(())
 }
 
-/// `claudectl relay join <code|link|words>`
+/// `codexctl relay join <code|link|words>`
 fn cmd_join(input: &[String]) -> io::Result<()> {
     if input.is_empty() {
-        eprintln!("Usage: claudectl relay join <relay-code | invite-link | word-phrase>");
+        eprintln!("Usage: codexctl relay join <relay-code | invite-link | word-phrase>");
         return Err(io::Error::other("missing argument"));
     }
 
@@ -953,11 +953,11 @@ fn cmd_join(input: &[String]) -> io::Result<()> {
     Ok(())
 }
 
-/// `claudectl relay discover`
+/// `codexctl relay discover`
 fn cmd_discover(json_mode: bool) -> io::Result<()> {
     let identity = load_or_create_identity();
 
-    println!("Scanning LAN for claudectl instances (3 seconds)...");
+    println!("Scanning LAN for codexctl instances (3 seconds)...");
     println!();
 
     let peers = super::lan::scan_lan(std::time::Duration::from_secs(3), identity.as_str());
@@ -978,10 +978,10 @@ fn cmd_discover(json_mode: bool) -> io::Result<()> {
     }
 
     if peers.is_empty() {
-        println!("No claudectl instances found on the local network.");
+        println!("No codexctl instances found on the local network.");
         println!();
-        println!("Make sure peers are running: claudectl relay serve");
-        println!("Or use invite codes: claudectl relay invite");
+        println!("Make sure peers are running: codexctl relay serve");
+        println!("Or use invite codes: codexctl relay invite");
     } else {
         println!("Found {} instance(s):", peers.len());
         println!();
@@ -1002,8 +1002,8 @@ fn cmd_discover(json_mode: bool) -> io::Result<()> {
             );
         }
         println!();
-        println!("To pair, run: claudectl relay invite on the remote machine,");
-        println!("then:         claudectl relay join <code> here.");
+        println!("To pair, run: codexctl relay invite on the remote machine,");
+        println!("then:         codexctl relay join <code> here.");
     }
 
     Ok(())

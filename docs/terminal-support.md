@@ -1,6 +1,6 @@
 # Terminal Support
 
-Run `claudectl doctor` to check your terminal's capabilities along with the rest of the install (PATH, hooks, plugin files, brain endpoint, bus, session discovery). The legacy `claudectl --doctor` flag still works for the terminal-only report.
+Run `codexctl doctor` to check your terminal's capabilities along with the rest of the install (PATH, hooks, plugin files, brain endpoint, bus, session discovery). The legacy `codexctl --doctor` flag still works for the terminal-only report.
 
 ## Compatibility Matrix
 
@@ -22,4 +22,4 @@ Run `claudectl doctor` to check your terminal's capabilities along with the rest
 - **Windows Terminal**: WSL-only, currently covers visible launch, not remote tab control.
 - **Kitty**: Requires `allow_remote_control yes` in `~/.config/kitty/kitty.conf`.
 - **Warp, iTerm2, Terminal.app**: Require macOS Automation/Accessibility permission in System Settings > Privacy & Security.
-- **tmux**: Assumes claudectl can reach the same tmux server as the Claude panes.
+- **tmux**: Assumes codexctl can reach the same tmux server as the Codex panes.

@@ -28,7 +28,7 @@ pub(crate) fn launch_session(
     match launch::launch(&request) {
         Ok(target) => {
             println!(
-                "Launched Claude session in {} at {}{}",
+                "Launched Codex session in {} at {}{}",
                 target,
                 request.cwd_path.display(),
                 request.option_summary()
@@ -43,34 +43,23 @@ fn print_doctor_transcripts() {
     println!();
     println!("Transcript Discovery");
 
-    let sessions_dir = discovery::projects_dir().parent().unwrap().join("sessions");
-    let projects_dir = discovery::projects_dir();
+    let sessions_dir = discovery::projects_dir();
 
-    // Check sessions directory
     let sessions_exists = sessions_dir.exists();
     println!(
-        "  [{}] sessions dir: {}",
+        "  [{}] Codex sessions dir: {}",
         if sessions_exists { "ok" } else { "!!" },
         sessions_dir.display()
     );
 
-    // Check projects directory
-    let projects_exists = projects_dir.exists();
-    println!(
-        "  [{}] projects dir: {}",
-        if projects_exists { "ok" } else { "!!" },
-        projects_dir.display()
-    );
-
     if !sessions_exists {
-        println!("      No session pointer files found — Claude Code may not have run yet");
+        println!("      No Codex transcripts found — Codex may not have run yet");
         return;
     }
 
-    // Scan sessions and attempt resolution
     let mut sessions = discovery::scan_sessions();
     if sessions.is_empty() {
-        println!("  [--] no session pointer files found");
+        println!("  [--] no Codex transcripts found");
         return;
     }
 
@@ -81,11 +70,10 @@ fn print_doctor_transcripts() {
         .collect();
 
     if alive.is_empty() {
-        println!("  [--] no active Claude Code sessions");
+        println!("  [--] no active Codex sessions");
         return;
     }
 
-    // Resolve JSONL paths for alive sessions
     let mut alive_sessions: Vec<_> = alive.into_iter().cloned().collect();
     for s in &mut alive_sessions {
         discovery::resolve_jsonl_paths(std::slice::from_mut(s));
@@ -93,8 +81,6 @@ fn print_doctor_transcripts() {
 
     for s in &alive_sessions {
         let found = s.jsonl_path.is_some();
-        let slug = s.cwd.trim_end_matches('/').replace('/', "-");
-        let expected_dir = projects_dir.join(&slug);
 
         println!(
             "  [{}] PID {} ({})",
@@ -103,23 +89,12 @@ fn print_doctor_transcripts() {
             s.project_name
         );
         println!("      cwd:  {}", s.cwd);
-        println!("      slug: {slug}");
+        println!("      session: {}", s.session_id);
         if let Some(ref path) = s.jsonl_path {
             println!("      jsonl: {}", path.display());
         } else {
             println!(
-                "      expected dir: {} (exists={})",
-                expected_dir.display(),
-                expected_dir.exists()
-            );
-            let expected_file = expected_dir.join(format!("{}.jsonl", s.session_id));
-            println!(
-                "      expected file: {} (exists={})",
-                expected_file.display(),
-                expected_file.exists()
-            );
-            println!(
-                "      fix: check that Claude Code's project directory slug matches the cwd encoding above"
+                "      fix: check that the rollout JSONL still exists under ~/.codex/sessions"
             );
         }
     }
@@ -191,7 +166,7 @@ pub(crate) fn print_doctor() -> io::Result<()> {
         }
     } else {
         println!("  Config: not configured");
-        println!("  To enable: add [brain] section to .claudectl.toml or use --brain flag");
+        println!("  To enable: add [brain] section to .codexctl.toml or use --brain flag");
     }
 
     Ok(())
@@ -205,7 +180,7 @@ pub(crate) fn validate_config() -> io::Result<()> {
 
     let files: Vec<PathBuf> = [
         config::Config::global_path(),
-        Some(PathBuf::from(".claudectl.toml")),
+        Some(PathBuf::from(".codexctl.toml")),
     ]
     .into_iter()
     .flatten()
@@ -256,16 +231,16 @@ pub(crate) fn validate_config() -> io::Result<()> {
 }
 
 pub(crate) fn write_config_init() -> io::Result<()> {
-    let path = std::path::PathBuf::from(".claudectl.toml");
+    let path = std::path::PathBuf::from(".codexctl.toml");
     if path.exists() {
-        eprintln!("Error: .claudectl.toml already exists. Remove it first or edit directly.");
-        return Err(io::Error::other(".claudectl.toml already exists"));
+        eprintln!("Error: .codexctl.toml already exists. Remove it first or edit directly.");
+        return Err(io::Error::other(".codexctl.toml already exists"));
     }
 
     let template = config::Config::template_string();
     std::fs::write(&path, template).map_err(|e| io::Error::other(format!("write: {e}")))?;
-    println!("Created .claudectl.toml with annotated defaults.");
-    println!("Edit the file to customize, then run `claudectl --config-validate` to check.");
+    println!("Created .codexctl.toml with annotated defaults.");
+    println!("Edit the file to customize, then run `codexctl --config-validate` to check.");
     Ok(())
 }
 
@@ -367,7 +342,7 @@ pub(crate) fn run_brain_briefing(cli: &Cli) -> io::Result<()> {
     let opts = brain::briefing::BriefingOptions {
         project,
         max_decisions: None,
-        include_claude_md_check: true,
+        include_agents_md_check: true,
     };
     let briefing = brain::briefing::build_briefing(&opts, &cwd);
     if cli.json {
@@ -385,14 +360,14 @@ pub(crate) fn run_brain_briefing(cli: &Cli) -> io::Result<()> {
     Ok(())
 }
 
-/// Propose CLAUDE.md additions from high-confidence brain preferences (#199).
+/// Propose AGENTS.md additions from high-confidence brain preferences (#199).
 pub(crate) fn run_brain_garden(cli: &Cli) -> io::Result<()> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let report = brain::garden::run_garden(cli.project.as_deref(), cli.apply, &cwd);
     if cli.json {
         let json = serde_json::json!({
             "project": report.project,
-            "claude_md_path": report.claude_md_path.as_ref().map(|p| p.display().to_string()),
+            "agents_md_path": report.agents_md_path.as_ref().map(|p| p.display().to_string()),
             "considered": report.considered,
             "already_covered": report.already_covered,
             "applied": report.applied,
@@ -462,20 +437,14 @@ fn resolve_jsonl_for_autopsy(session_arg: Option<&str>) -> io::Result<std::path:
             return Ok(path);
         }
 
-        // Search for session ID across all project directories
-        let projects_dir = discovery::projects_dir();
-        if projects_dir.is_dir() {
-            if let Ok(entries) = std::fs::read_dir(&projects_dir) {
-                for entry in entries.flatten() {
-                    let dir = entry.path();
-                    if !dir.is_dir() {
-                        continue;
-                    }
-                    let candidate = dir.join(format!("{arg}.jsonl"));
-                    if candidate.exists() {
-                        return Ok(candidate);
-                    }
-                }
+        // Search for the session ID across Codex rollout transcripts.
+        for candidate in collect_jsonl_files(&discovery::projects_dir()) {
+            let filename = candidate
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("");
+            if filename.contains(arg) {
+                return Ok(candidate);
             }
         }
 
@@ -489,33 +458,16 @@ fn resolve_jsonl_for_autopsy(session_arg: Option<&str>) -> io::Result<std::path:
     find_most_recent_jsonl()
 }
 
-/// Find the most recently modified JSONL file across all project directories.
+/// Find the most recently modified JSONL file across Codex session directories.
 fn find_most_recent_jsonl() -> io::Result<std::path::PathBuf> {
-    let projects_dir = discovery::projects_dir();
     let mut best: Option<(std::path::PathBuf, std::time::SystemTime)> = None;
 
-    if projects_dir.is_dir() {
-        if let Ok(project_entries) = std::fs::read_dir(&projects_dir) {
-            for project_entry in project_entries.flatten() {
-                let dir = project_entry.path();
-                if !dir.is_dir() {
-                    continue;
-                }
-                if let Ok(files) = std::fs::read_dir(&dir) {
-                    for file_entry in files.flatten() {
-                        let path = file_entry.path();
-                        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
-                            continue;
-                        }
-                        if let Ok(meta) = file_entry.metadata() {
-                            if let Ok(modified) = meta.modified() {
-                                let dominated = best.as_ref().is_none_or(|(_, t)| modified > *t);
-                                if dominated {
-                                    best = Some((path, modified));
-                                }
-                            }
-                        }
-                    }
+    for path in collect_jsonl_files(&discovery::projects_dir()) {
+        if let Ok(meta) = std::fs::metadata(&path) {
+            if let Ok(modified) = meta.modified() {
+                let dominated = best.as_ref().is_none_or(|(_, t)| modified > *t);
+                if dominated {
+                    best = Some((path, modified));
                 }
             }
         }
@@ -524,9 +476,30 @@ fn find_most_recent_jsonl() -> io::Result<std::path::PathBuf> {
     best.map(|(p, _)| p).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
-            "No JSONL transcripts found. Run some Claude Code sessions first.",
+            "No JSONL transcripts found. Run some Codex sessions first.",
         )
     })
+}
+
+fn collect_jsonl_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
+    collect_jsonl_files_inner(root, &mut files);
+    files
+}
+
+fn collect_jsonl_files_inner(root: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_jsonl_files_inner(&path, files);
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("jsonl") {
+            files.push(path);
+        }
+    }
 }
 
 pub(crate) fn run_clean(
@@ -542,114 +515,49 @@ pub(crate) fn run_clean(
         .unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
 
     // Collect active PIDs to avoid deleting live sessions
-    let active_pids: std::collections::HashSet<u32> = {
-        let app = App::new();
-        app.sessions.iter().map(|s| s.pid).collect()
-    };
-
-    let mut removed_sessions = 0u64;
     let mut removed_jsonl = 0u64;
     let mut freed_bytes = 0u64;
 
-    // Phase 1: Clean session JSON files in ~/.claude/sessions/
-    let sessions_dir = home.join(".claude/sessions");
-    if let Ok(entries) = std::fs::read_dir(&sessions_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                continue;
-            }
-            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-            let pid: u32 = match stem.parse() {
-                Ok(p) => p,
-                Err(_) => continue,
-            };
+    let sessions_dir = home.join(".codex/sessions");
+    for file_path in collect_jsonl_files(&sessions_dir) {
+        let metadata = match std::fs::metadata(&file_path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
 
-            // Never delete active sessions
-            if active_pids.contains(&pid) {
-                continue;
-            }
-
-            // Check age if --older-than is set
-            if let Some(min_age) = min_age {
-                let modified = entry.metadata().ok().and_then(|m| m.modified().ok());
-                if let Some(modified) = modified {
-                    let age = now.duration_since(modified).unwrap_or_default();
-                    if age < min_age {
-                        continue;
-                    }
-                }
-            }
-
-            let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-            if dry_run {
-                println!("  would remove: {} ({} bytes)", path.display(), size);
-            } else {
-                let _ = std::fs::remove_file(&path);
-            }
-            removed_sessions += 1;
-            freed_bytes += size;
-        }
-    }
-
-    // Phase 2: Clean JSONL transcript files in ~/.claude/projects/*/
-    let projects_dir = home.join(".claude/projects");
-    if let Ok(project_entries) = std::fs::read_dir(&projects_dir) {
-        for project_entry in project_entries.flatten() {
-            let project_path = project_entry.path();
-            if !project_path.is_dir() {
-                continue;
-            }
-            let Ok(files) = std::fs::read_dir(&project_path) else {
-                continue;
-            };
-            for file_entry in files.flatten() {
-                let file_path = file_entry.path();
-                if file_path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+        // Check age if --older-than is set
+        if let Some(min_age) = min_age {
+            let modified = metadata.modified().ok();
+            if let Some(modified) = modified {
+                let age = now.duration_since(modified).unwrap_or_default();
+                if age < min_age {
                     continue;
                 }
-
-                let metadata = match file_entry.metadata() {
-                    Ok(m) => m,
-                    Err(_) => continue,
-                };
-
-                // Check age if --older-than is set
-                if let Some(min_age) = min_age {
-                    let modified = metadata.modified().ok();
-                    if let Some(modified) = modified {
-                        let age = now.duration_since(modified).unwrap_or_default();
-                        if age < min_age {
-                            continue;
-                        }
-                    }
-                }
-
-                // If --finished only, skip JSONL files whose corresponding session is still active
-                if finished_only {
-                    // Check if any active session is using this JSONL
-                    let app = App::new();
-                    let is_active = app.sessions.iter().any(|s| {
-                        s.jsonl_path
-                            .as_ref()
-                            .map(|p| p == &file_path)
-                            .unwrap_or(false)
-                    });
-                    if is_active {
-                        continue;
-                    }
-                }
-
-                let size = metadata.len();
-                if dry_run {
-                    println!("  would remove: {} ({} bytes)", file_path.display(), size);
-                } else {
-                    let _ = std::fs::remove_file(&file_path);
-                }
-                removed_jsonl += 1;
-                freed_bytes += size;
             }
         }
+
+        // If --finished only, skip JSONL files whose corresponding session is still active
+        if finished_only {
+            let app = App::new();
+            let is_active = app.sessions.iter().any(|s| {
+                s.jsonl_path
+                    .as_ref()
+                    .map(|p| p == &file_path)
+                    .unwrap_or(false)
+            });
+            if is_active {
+                continue;
+            }
+        }
+
+        let size = metadata.len();
+        if dry_run {
+            println!("  would remove: {} ({} bytes)", file_path.display(), size);
+        } else {
+            let _ = std::fs::remove_file(&file_path);
+        }
+        removed_jsonl += 1;
+        freed_bytes += size;
     }
 
     let freed_str = if freed_bytes >= 1_073_741_824 {
@@ -665,15 +573,15 @@ pub(crate) fn run_clean(
     if dry_run {
         println!();
         println!(
-            "Dry run: would remove {} sessions + {} transcripts, freeing {}",
-            removed_sessions, removed_jsonl, freed_str
+            "Dry run: would remove {} Codex transcripts, freeing {}",
+            removed_jsonl, freed_str
         );
-    } else if removed_sessions + removed_jsonl == 0 {
+    } else if removed_jsonl == 0 {
         println!("Nothing to clean up.");
     } else {
         println!(
-            "Removed {} sessions + {} transcripts, freed {}",
-            removed_sessions, removed_jsonl, freed_str
+            "Removed {} Codex transcripts, freed {}",
+            removed_jsonl, freed_str
         );
     }
 
@@ -685,7 +593,7 @@ pub(crate) fn print_summary(since: &str) -> io::Result<()> {
     let app = App::new();
 
     if app.sessions.is_empty() {
-        println!("No active Claude sessions.");
+        println!("No active Codex sessions.");
         return Ok(());
     }
 
@@ -841,7 +749,7 @@ pub(crate) fn print_list(demo: bool, filters: &ViewFilters) -> io::Result<()> {
         if app.has_active_filters() {
             println!("No sessions match the current filters.");
         } else {
-            println!("No active Claude sessions.");
+            println!("No active Codex sessions.");
         }
         if app.has_active_filters() {
             println!("  ({})", app.filter_summary());
@@ -1284,7 +1192,10 @@ impl crate::coord::verify::VerifierBackend for LiveSideEffects {
         _model: Option<&str>,
         _budget_usd: Option<f64>,
     ) -> Result<crate::coord::verify::AgentResult, String> {
-        Err("live agent verifier not yet wired; headless `claude -p` adapter is a follow-up".into())
+        Err(
+            "live agent verifier not yet wired; headless `codex exec` adapter is a follow-up"
+                .into(),
+        )
     }
 }
 #[cfg(all(feature = "coord", feature = "bus"))]
@@ -1454,7 +1365,7 @@ fn check_context_rot(app: &App, json_mode: bool) {
     }
 }
 
-pub(crate) fn format_session(fmt: &str, s: &session::ClaudeSession) -> String {
+pub(crate) fn format_session(fmt: &str, s: &session::CodexSession) -> String {
     let cost = if s.has_usage_metrics() {
         format!("{:.2}", s.cost_usd)
     } else {
@@ -1474,12 +1385,12 @@ pub(crate) fn format_session(fmt: &str, s: &session::ClaudeSession) -> String {
 
 /// Path to the brain gate mode state file.
 pub(crate) fn brain_gate_mode_path() -> std::path::PathBuf {
-    claudectl::brain::gate_mode_path()
+    codexctl::brain::gate_mode_path()
 }
 
 /// Read the current brain gate mode from disk. Returns "on" if no file exists.
 pub(crate) fn read_brain_gate_mode() -> String {
-    claudectl::brain::read_gate_mode()
+    codexctl::brain::read_gate_mode()
 }
 
 /// Set the brain gate mode (on/off/auto) and print confirmation.
@@ -1544,13 +1455,13 @@ pub(crate) fn run_insights(cfg: &config::Config, cli: &Cli, arg: &str) -> io::Re
             let _ = brain::insights::write_insights_mode("on");
             println!("Insights mode: on");
             println!("  Auto-generating insights every 10 decisions during brain distillation.");
-            println!("  Run `claudectl --brain --insights` to view.");
+            println!("  Run `codexctl --brain --insights` to view.");
         }
         "off" => {
             let _ = brain::insights::write_insights_mode("off");
             println!("Insights mode: off");
             println!(
-                "  Auto-generation disabled. Run `claudectl --brain --insights` to generate on demand."
+                "  Auto-generation disabled. Run `codexctl --brain --insights` to generate on demand."
             );
         }
         "status" => {
@@ -1579,7 +1490,7 @@ pub(crate) fn run_insights(cfg: &config::Config, cli: &Cli, arg: &str) -> io::Re
 /// Record a tool-call outcome to the pending-outcomes spool.
 /// Reads PendingOutcome JSON from stdin if present and non-empty;
 /// otherwise builds one from CLI flags (`--tool`, `--exit-code`, …).
-/// Used by the Claude Code PostToolUse hook for #220 baselining.
+/// Used by the Codex PostToolUse hook for #220 baselining.
 pub(crate) fn run_record_outcome(cli: &Cli) -> io::Result<()> {
     use brain::outcomes::{PendingOutcome, truncate_stderr, write_pending};
     use std::io::Read;
@@ -1854,7 +1765,7 @@ pub(crate) fn run_reap_outcomes(cli: &Cli) -> io::Result<()> {
     Ok(())
 }
 
-/// Pure parser: turn a Claude Code hook payload string into a `DiffDigest`.
+/// Pure parser: turn a Codex hook payload string into a `DiffDigest`.
 /// Returns `None` on missing/blank input, invalid JSON, or missing `tool_input`.
 fn digest_from_hook_payload(
     tool_name: &str,
@@ -1869,9 +1780,9 @@ fn digest_from_hook_payload(
     Some(brain::diff_digest::build_digest(tool_name, tool_input))
 }
 
-/// Try to parse a `DiffDigest` from stdin (the raw Claude Code hook payload).
+/// Try to parse a `DiffDigest` from stdin (the raw Codex hook payload).
 ///
-/// Brain-gate.sh pipes the full tool_use JSON to `claudectl --brain-query`.
+/// Hook scripts can pipe full tool call JSON to `codexctl --brain-query`.
 /// We only read when stdin is not a TTY — otherwise `read_to_string` would
 /// block waiting for EOF. Failures here are not fatal: missing stdin just
 /// means we degrade to pre-#237 behaviour.
@@ -1889,7 +1800,7 @@ fn read_diff_digest_from_stdin(tool_name: &str) -> Option<brain::diff_digest::Di
 
 /// Standalone brain query: builds a minimal context from CLI args, calls the
 /// local LLM, and prints a JSON decision to stdout. Designed to be called
-/// by Claude Code plugin hooks (PreToolUse) for inline approve/deny.
+/// by Codex hooks for inline approve/deny.
 pub(crate) fn run_brain_query(cfg: &config::Config, cli: &Cli) -> io::Result<()> {
     // Respect brain gate mode — if off, skip immediately
     let gate_mode = read_brain_gate_mode();
@@ -1920,7 +1831,7 @@ pub(crate) fn run_brain_query(cfg: &config::Config, cli: &Cli) -> io::Result<()>
             .unwrap_or_else(|| "unknown".into())
     });
 
-    // #237: brain-gate may pipe the full Claude Code hook payload on stdin.
+    // #237: hooks may pipe the full Codex hook payload on stdin.
     // We try to parse it into a `DiffDigest` for richer prompt context and
     // structured decision-log attribution. Missing/invalid stdin is fine —
     // the rest of the flow degrades to the pre-#237 behaviour.
@@ -1935,7 +1846,7 @@ pub(crate) fn run_brain_query(cfg: &config::Config, cli: &Cli) -> io::Result<()>
         .collect();
 
     // Build a minimal synthetic session for rule matching
-    let mut synthetic = session::ClaudeSession::from_raw(session::RawSession {
+    let mut synthetic = session::CodexSession::from_raw(session::RawSession {
         pid: std::process::id(),
         session_id: "brain-query".into(),
         cwd: std::env::current_dir()

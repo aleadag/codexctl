@@ -107,7 +107,7 @@ pub struct DecisionRecord {
     /// cache without an LLM call. None for records before the field existed.
     pub cache_hit: Option<bool>,
     /// True when the user has marked this decision as canonical training
-    /// material via `claudectl brain review`. Canonical decisions get a
+    /// material via `codexctl brain review`. Canonical decisions get a
     /// large score boost in few-shot retrieval. None == not reviewed.
     pub canonical: Option<bool>,
 }
@@ -163,7 +163,7 @@ pub struct DecisionContext {
 /// pipeline once it migrates to operate on summaries. Conversion lives here
 /// because `DecisionRecord` is local to the binary crate, satisfying the
 /// orphan rules for the foreign `DecisionSummary` impl.
-impl From<&DecisionRecord> for claudectl_core::runtime::DecisionSummary {
+impl From<&DecisionRecord> for codexctl_core::runtime::DecisionSummary {
     fn from(r: &DecisionRecord) -> Self {
         Self {
             id: r.decision_id.clone().unwrap_or_default(),
@@ -254,7 +254,7 @@ impl DecisionStats {
 
 pub(super) fn decisions_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    PathBuf::from(home).join(".claudectl").join("brain")
+    PathBuf::from(home).join(".codexctl").join("brain")
 }
 
 fn decisions_path() -> PathBuf {
@@ -325,7 +325,7 @@ pub(super) fn local_hour_from_epoch(epoch_secs: i64) -> u8 {
 // ────────────────────────────────────────────────────────────────────────────
 
 /// Build a JSON snapshot of session state for embedding in a JSONL record.
-fn snapshot_context(session: &crate::session::ClaudeSession) -> serde_json::Value {
+fn snapshot_context(session: &crate::session::CodexSession) -> serde_json::Value {
     let context_pct = if session.context_max > 0 {
         ((session.context_tokens as f64 / session.context_max as f64) * 100.0) as u8
     } else {
@@ -363,7 +363,7 @@ pub fn log_decision(
     command: Option<&str>,
     suggestion: &BrainSuggestion,
     user_action: &str,
-    session: Option<&crate::session::ClaudeSession>,
+    session: Option<&crate::session::CodexSession>,
     decision_type: DecisionType,
     override_reason: Option<&str>,
 ) {
@@ -393,7 +393,7 @@ pub fn log_decision_full(
     command: Option<&str>,
     suggestion: &BrainSuggestion,
     user_action: &str,
-    session: Option<&crate::session::ClaudeSession>,
+    session: Option<&crate::session::CodexSession>,
     decision_type: DecisionType,
     override_reason: Option<&str>,
     brain_decision_ms: Option<u64>,
@@ -460,7 +460,7 @@ pub fn log_observation(
     tool: Option<&str>,
     command: Option<&str>,
     observed_action: &str, // "user_approve", "user_input", "rule_approve", "rule_deny", etc.
-    session: Option<&crate::session::ClaudeSession>,
+    session: Option<&crate::session::CodexSession>,
 ) {
     let decision_id = gen_decision_id();
     let mut record = serde_json::json!({
@@ -1072,7 +1072,7 @@ mod tests {
 
     #[test]
     fn test_snapshot_context_fields() {
-        use crate::session::{ClaudeSession, SessionStatus};
+        use crate::session::{CodexSession, SessionStatus};
         use std::collections::HashMap;
         use std::time::Duration;
 
@@ -1083,8 +1083,9 @@ mod tests {
         let mut files = HashMap::new();
         files.insert("src/main.rs".to_string(), 2u32);
 
-        let session = ClaudeSession {
+        let session = CodexSession {
             pid: 42,
+            process_backed: true,
             session_id: "test-session".into(),
             cwd: "/tmp".into(),
             project_name: "test-proj".into(),

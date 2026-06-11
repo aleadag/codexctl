@@ -19,7 +19,7 @@
 //!    isolation makes mismatches rare; this guard makes them safe when
 //!    they happen.
 //!
-//! 2. **Resume the task, not the session.** No dependence on Claude
+//! 2. **Resume the task, not the session.** No dependence on Codex
 //!    Code's session-resume internals. The next attempt is a fresh
 //!    session that reads the recovery context as its prompt.
 //!

@@ -1,11 +1,11 @@
-//! MCP server (`claudectl bus stdio`). Exposes the bus surface to Claude Code
+//! MCP server (`codexctl bus stdio`). Exposes the bus surface to Codex
 //! sessions over stdio JSON-RPC.
 //!
 //! Tools implemented (spec §3):
 //!
 //! * `whoami` — returns the calling session's role binding (or Ambiguous /
 //!   Unbound resolution).
-//! * `list_agents` — snapshot of every running Claude Code session with its
+//! * `list_agents` — snapshot of every running Codex session with its
 //!   role (if any), cwd, status, and last-seen timestamp.
 //! * `publish` — append a message to the recipient role's mailbox. Directed
 //!   send only in phase 4; subject pub/sub + claim protocol come in phase 7.
@@ -39,11 +39,11 @@ use super::store::{self, MessageRow};
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 pub struct WhoamiArgs {
     /// Optional explicit role. Wins over cwd inference. Falls back to the
-    /// `CLAUDECTL_BUS_ROLE` env var, then to cwd matching.
+    /// `CODEXCTL_BUS_ROLE` env var, then to cwd matching.
     #[serde(default)]
     pub role: Option<String>,
     /// Optional override cwd. Defaults to the process's actual cwd; provided
-    /// for tests and rare cases where the calling Claude Code session sets a
+    /// for tests and rare cases where the calling Codex session sets a
     /// per-tool working directory.
     #[serde(default)]
     pub cwd: Option<String>,
@@ -304,7 +304,7 @@ impl BusServer {
         }))
     }
 
-    #[tool(description = "List every running Claude Code session and its role binding.")]
+    #[tool(description = "List every running Codex session and its role binding.")]
     async fn list_agents(
         &self,
         Parameters(_): Parameters<ListAgentsArgs>,
@@ -525,7 +525,7 @@ impl ServerHandler for BusServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             instructions: Some(
-                "claudectl agent bus. Use list_agents to discover peers, whoami for the \
+                "codexctl agent bus. Use list_agents to discover peers, whoami for the \
                  caller's role, publish to send a directed message, read_inbox to drain \
                  your mailbox. See docs/AGENT_BUS.md."
                     .into(),

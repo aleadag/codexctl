@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::config::BrainConfig;
-use crate::session::{ClaudeSession, RawSession, SessionStatus, TelemetryStatus};
+use crate::session::{CodexSession, RawSession, SessionStatus, TelemetryStatus};
 
 use super::client;
 use super::context;
@@ -43,7 +43,7 @@ pub struct EvalResult {
     pub error: Option<String>,
 }
 
-/// Load eval scenarios from ~/.claudectl/brain/evals/ directory.
+/// Load eval scenarios from ~/.codexctl/brain/evals/ directory.
 pub fn load_scenarios() -> Vec<EvalScenario> {
     let dir = evals_dir();
     let entries = match fs::read_dir(&dir) {
@@ -173,14 +173,14 @@ fn run_one(config: &BrainConfig, scenario: &EvalScenario) -> EvalResult {
     }
 }
 
-fn build_session_from_eval(eval: &EvalSession) -> ClaudeSession {
+fn build_session_from_eval(eval: &EvalSession) -> CodexSession {
     let raw = RawSession {
         pid: 99999,
         session_id: "eval".into(),
         cwd: format!("/tmp/{}", eval.project),
         started_at: 0,
     };
-    let mut s = ClaudeSession::from_raw(raw);
+    let mut s = CodexSession::from_raw(raw);
     s.status = match eval.status.to_lowercase().as_str() {
         "needsinput" | "needs input" => SessionStatus::NeedsInput,
         "waitinginput" | "waiting" => SessionStatus::WaitingInput,
@@ -226,7 +226,7 @@ fn format_eval_decision_prompt(eval: &EvalSession) -> String {
 fn evals_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     PathBuf::from(home)
-        .join(".claudectl")
+        .join(".codexctl")
         .join("brain")
         .join("evals")
 }

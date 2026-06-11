@@ -1,4 +1,4 @@
-//! Binary-side implementations of the `claudectl-core` runtime traits.
+//! Binary-side implementations of the `codexctl-core` runtime traits.
 //!
 //! Each submodule provides a `Live*` adapter that reads from the binary
 //! crate's actual subsystem (brain, coord, bus, discovery) and projects it
@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use claudectl_core::runtime::Runtime;
+use codexctl_core::runtime::Runtime;
 
 mod actions;
 mod brain;

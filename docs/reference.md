@@ -53,12 +53,12 @@ Multi-signal inference from CPU usage, JSONL events, and timestamps:
 
 ### Skills & Hive mode (`K`)
 
-A full-screen mode for discovering Claude Code skills and managing the local hive. Two tabs, toggle with `Tab`.
+A full-screen mode for discovering Codex skills and managing the local hive. Two tabs, toggle with `Tab`.
 
-![Skills & Hive mode](assets/claudectl-demo-skills.gif){ .terminal-screenshot }
+![Skills & Hive mode](assets/codexctl-demo-skills.gif){ .terminal-screenshot }
 
 
-**Skills tab** scans `~/.claude/skills`, `~/.claude/plugins/*/skills`, and `<cwd>/.claude/skills`. A `✓` marks skills already in the local hive store. Hotkeys:
+**Skills tab** scans `~/.codex/skills`, `~/.codex/plugins/*/skills`, and `<cwd>/.codex/skills`. A `✓` marks skills already in the local hive store. Hotkeys:
 
 | Key | Action |
 |-----|--------|
@@ -68,11 +68,11 @@ A full-screen mode for discovering Claude Code skills and managing the local hiv
 | `Tab` | Switch to Hive tab |
 | `Esc`/`K`/`q` | Return to session table |
 
-**Hive tab** shows your peer identity, listener status, and known peers (read from `~/.claudectl/relay/peers/`). Hotkeys:
+**Hive tab** shows your peer identity, listener status, and known peers (read from `~/.codexctl/relay/peers/`). Hotkeys:
 
 | Key | Action |
 |-----|--------|
-| `h` | Start hive listener (spawns `claudectl relay serve` detached) |
+| `h` | Start hive listener (spawns `codexctl relay serve` detached) |
 | `i` | Generate invite — relay code, word phrase, and invite link shown inline |
 | `J` | Join via a pasted relay code, invite link, or word phrase |
 | `r` | Refresh peer list |
@@ -100,7 +100,7 @@ Long-running relay subprocesses run detached so the TUI event loop stays respons
 | `-l`, `--list` | Print session table to stdout and exit |
 | `--json` | Print JSON array of sessions and exit |
 | `-w`, `--watch` | Stream status changes to stdout (no TUI) |
-| `--headless` | Run headless with brain, coordination, and context rot prevention active (no TUI). Attach a dashboard with `claudectl` in another terminal |
+| `--headless` | Run headless with brain, coordination, and context rot prevention active (no TUI). Attach a dashboard with `codexctl` in another terminal |
 | `--format <template>` | Custom format for `--watch`. Placeholders: `{pid}`, `{project}`, `{status}`, `{cost}`, `{context}` |
 | `--summary` | Show activity summary and exit |
 | `--since <duration>` | Time window for `--summary`, `--history`, `--stats` (e.g., "8h", "24h", "7d"). Default: 24h |
@@ -117,7 +117,7 @@ Long-running relay subprocesses run detached so the TUI event loop stays respons
 
 | Flag | Description |
 |------|-------------|
-| `--new` | Launch a new Claude Code session |
+| `--new` | Launch a new Codex session |
 | `--cwd <path>` | Working directory for the new session (default: `.`) |
 | `--prompt <text>` | Prompt to send to the new session |
 | `--resume <session-id>` | Resume a previous session by ID |
@@ -194,7 +194,7 @@ Durable task lifecycles on top of the bus. See the [README's Supervisor section]
 | `supervisor status [--state STATE]` | Compact task table; optional state filter (`PENDING` / `RUNNING` / `DONE` / `NEEDS_HUMAN` / …) |
 | `supervisor logs <task_id>` | Task detail + full transition log |
 | `supervisor cancel <task_id>` | Idempotent move to CANCELLED |
-| `supervisor drain` | Set sentinel file at `~/.claudectl/coord/drain`; reconciler stops issuing new assignments |
+| `supervisor drain` | Set sentinel file at `~/.codexctl/coord/drain`; reconciler stops issuing new assignments |
 | `supervisor undrain` | Clear the drain marker |
 
 Coord schema is gated on `PRAGMA user_version`. A binary that meets a newer schema (e.g. after `brew upgrade` without a follow-up `init --upgrade`) refuses to start with the exact remediation in the error.
@@ -214,7 +214,7 @@ Connect machines, delegate tasks. See the [full relay guide](relay.md).
 | `relay serve [--port N]` | Start the relay listener for peer connections |
 | `relay invite [--qr] [--words]` | Generate invite code, link, and word phrase |
 | `relay join <code>` | Connect using any invite format (code, words, or link) |
-| `relay discover` | Scan LAN for nearby claudectl instances |
+| `relay discover` | Scan LAN for nearby codexctl instances |
 | `relay peers` | List known and connected peers |
 | `relay delegate <peer> <prompt>` | Delegate a task to a remote peer |
 | `relay identity` | Show this instance's relay identity |
@@ -254,72 +254,72 @@ Share knowledge, distill learnings. Requires relay for transport.
 | `--config` | Show resolved configuration and exit |
 | `--config-template` | Print annotated default config template to stdout |
 | `--hooks` | List configured event hooks and exit |
-| `--doctor` | **Deprecated.** Use `claudectl doctor` instead. Legacy report (terminal compat only) follows after the deprecation note |
+| `--doctor` | **Deprecated.** Use `codexctl doctor` instead. Legacy report (terminal compat only) follows after the deprecation note |
 | `--log <path>` | Write diagnostic logs to a file |
 
 ### Doctor — install + runtime health check
 
-`claudectl doctor` runs eight checks top-down and reports Pass / Advisory / Fail / Skipped with a one-line message and a fix hint for anything broken.
+`codexctl doctor` runs eight checks top-down and reports Pass / Advisory / Fail / Skipped with a one-line message and a fix hint for anything broken.
 
 | Check | What it verifies |
 |---|---|
-| binary on PATH | `which claudectl` matches the running binary |
-| Claude Code hooks | `~/.claude/settings.json` contains claudectl entries |
-| plugin files | `~/.claude/plugins/claudectl/` is populated |
+| binary on PATH | `which codexctl` matches the running binary |
+| Codex hooks | `~/.codex/hooks.json` contains codexctl entries |
+| plugin files | `~/.codex/plugins/codexctl/` is populated |
 | brain endpoint | `localhost:11434` (ollama) is reachable |
 | bus feature | compiled into the binary |
-| bus DB | `~/.claudectl/bus/bus.db` opens and is writable |
-| session discovery | at least one Claude session detected |
+| bus DB | `~/.codexctl/bus/bus.db` opens and is writable |
+| session discovery | at least one Codex session detected |
 | terminal integration | tab switching / input automation supported |
 
 ```bash
-claudectl doctor               # human-readable checklist
-claudectl doctor --json        # machine-readable for scripting
+codexctl doctor               # human-readable checklist
+codexctl doctor --json        # machine-readable for scripting
 ```
 
-Exit code 0 when every check is Pass / Advisory / Skipped; non-zero on any Fail. Failure messages include the exact command to run (e.g. `claudectl init --plugin-only` when plugin files are missing).
+Exit code 0 when every check is Pass / Advisory / Skipped; non-zero on any Fail. Failure messages include the exact command to run (e.g. `codexctl init --plugin-only` when plugin files are missing).
 
 ### Setup
 
-Two layers. The **`init` subcommand** is the canonical onboarding wizard (five phases — budget, brain, hooks, bus, skills). The **legacy `--init`/`--uninstall` flags** install/remove only the Claude Code hook entries and remain supported as the hook-only escape hatch.
+Two layers. The **`init` subcommand** is the canonical onboarding wizard (five phases — budget, brain, hooks, bus, skills). The **legacy `--init`/`--uninstall` flags** install/remove only the Codex hook entries and remain supported as the hook-only escape hatch.
 
-#### `claudectl init` — onboarding wizard (preferred)
+#### `codexctl init` — onboarding wizard (preferred)
 
 | Form | Description |
 |------|-------------|
-| `claudectl init` | Interactive five-phase wizard |
-| `claudectl init --non-interactive [--budget N] [--brain-url URL] [--bus-role NAME] [--skip-*]` | Same flow, no prompts. For CI / dotfiles |
-| `claudectl init --check` | Drift report — compares the recorded marker against current state, exits non-zero on drift |
-| `claudectl init --reset` | Clear the onboarding marker so the next run prompts fresh. Does not touch installed artifacts |
-| `claudectl init --remove` | **Soft uninstall.** Strips Claude Code hooks + clears the marker. Preserves user data (bus DB roles, brain decision logs, hive knowledge, relay identity, config file) |
-| `claudectl init --purge [--yes]` | **Hard uninstall.** `--remove` PLUS wipe `~/.claudectl/` (bus DB, brain decisions, hive, relay, coord) and `~/.config/claudectl/config.toml`. Confirms by default; `--yes` skips the prompt. Idempotent |
+| `codexctl init` | Interactive five-phase wizard |
+| `codexctl init --non-interactive [--budget N] [--brain-url URL] [--bus-role NAME] [--skip-*]` | Same flow, no prompts. For CI / dotfiles |
+| `codexctl init --check` | Drift report — compares the recorded marker against current state, exits non-zero on drift |
+| `codexctl init --reset` | Clear the onboarding marker so the next run prompts fresh. Does not touch installed artifacts |
+| `codexctl init --remove` | **Soft uninstall.** Strips Codex hooks + clears the marker. Preserves user data (bus DB roles, brain decision logs, hive knowledge, relay identity, config file) |
+| `codexctl init --purge [--yes]` | **Hard uninstall.** `--remove` PLUS wipe `~/.codexctl/` (bus DB, brain decisions, hive, relay, coord) and `~/.config/codexctl/config.toml`. Confirms by default; `--yes` skips the prompt. Idempotent |
 
-The wizard records what ran where at `~/.claudectl/onboarding.json` so `--check` can detect drift in later runs.
+The wizard records what ran where at `~/.codexctl/onboarding.json` so `--check` can detect drift in later runs.
 
 #### `--init` / `--uninstall` — hook-only (legacy)
 
 | Flag | Description |
 |------|-------------|
-| `--init` | Wire up Claude Code hooks in settings and exit |
-| `--uninstall` | Remove claudectl hooks from settings and exit |
-| `-s`, `--scope <user\|project>` | Configuration scope (default: `user`). Matches Claude Code's `--scope` convention |
+| `--init` | Wire up Codex hooks in settings and exit |
+| `--uninstall` | Remove codexctl hooks from settings and exit |
+| `-s`, `--scope <user\|project>` | Configuration scope (default: `user`). Matches Codex's `--scope` convention |
 
-`--init` writes three hooks into Claude Code's settings:
+`--init` writes three hooks into Codex's settings:
 
 | Hook | Matcher | Purpose |
 |------|---------|---------|
-| `PreToolUse` | `Bash` | Lets claudectl observe commands before execution |
-| `PostToolUse` | `*` | Notifies claudectl after every tool completion |
-| `Stop` | (all) | Notifies claudectl when a session ends |
+| `PreToolUse` | `Bash` | Lets codexctl observe commands before execution |
+| `PostToolUse` | `*` | Notifies codexctl after every tool completion |
+| `Stop` | (all) | Notifies codexctl when a session ends |
 
-The hooks call `claudectl --json` on each event. They are safe to run alongside any existing hooks — `--init` merges without overwriting.
+The hooks call `codexctl --json` on each event. They are safe to run alongside any existing hooks — `--init` merges without overwriting.
 
-`--uninstall` removes only claudectl hook entries, preserving all other settings and hooks. If the file becomes empty after removal, it is deleted.
+`--uninstall` removes only codexctl hook entries, preserving all other hooks. If the file becomes empty after removal, it is deleted.
 
 | Scope | Flag | File | Committed to git? |
 |-------|------|------|--------------------|
-| `user` (default) | `--init` | `~/.claude/settings.json` | No (user home) |
-| `project` | `--init -s project` | `.claude/settings.local.json` | No (gitignored) |
+| `user` (default) | `--init` | `~/.codex/hooks.json` | No (user home) |
+| `project` | `--init -s project` | `.codex/hooks.json` | No (gitignored) |
 
 ## Cost Tracking
 
@@ -335,22 +335,22 @@ Dark, light, and none (`--theme`). Respects `NO_COLOR` environment variable.
 
 ## How It Works
 
-claudectl reads Claude Code's local data — no API keys, no network access, no modifications to Claude Code:
+codexctl reads Codex's local data — no API keys, no network access, no modifications to Codex:
 
-- **`~/.claude/sessions/*.json`** — session metadata (PID, session ID, working directory, start time)
-- **`~/.claude/projects/{slug}/*.jsonl`** — conversation logs with token usage and events
+- **`~/.codex/sessions/*.json`** — session metadata (PID, session ID, working directory, start time)
+- **`~/.codex/projects/{slug}/*.jsonl`** — conversation logs with token usage and events
 - **`ps`** — CPU%, memory, TTY for each process
-- **`/tmp/claude-{uid}/{slug}/{sessionId}/tasks/`** — subagent task files
+- **`/tmp/codex-{uid}/{slug}/{sessionId}/tasks/`** — subagent task files
 
 Status inference combines multiple signals: `waiting_for_task` events, CPU usage thresholds, `stop_reason` fields, and message recency.
 
 ### Brain Query
 
-Query the brain for a single tool-call decision without the TUI. Used by the Claude Code plugin hook, but also useful for scripting and testing:
+Query the brain for a single tool-call decision without the TUI. Used by the Codex plugin hook, but also useful for scripting and testing:
 
 ```bash
-claudectl --brain --brain-query --tool Bash --tool-input "rm -rf /tmp"
-claudectl --brain --brain-query --tool Write --tool-input "src/main.rs" --project myapp
+codexctl --brain --brain-query --tool Bash --tool-input "rm -rf /tmp"
+codexctl --brain --brain-query --tool Write --tool-input "src/main.rs" --project myapp
 ```
 
 Output is JSON:
@@ -368,10 +368,10 @@ If the brain is unreachable, returns `{"action":"abstain","source":"error"}` so 
 Control whether the brain hook evaluates tool calls:
 
 ```bash
-claudectl --mode on                    # Brain evaluates tool calls (default)
-claudectl --mode off                   # Disable brain — all calls pass through
-claudectl --mode auto                  # Brain auto-approves above threshold
-claudectl --mode status                # Show current mode
+codexctl --mode on                    # Brain evaluates tool calls (default)
+codexctl --mode off                   # Disable brain — all calls pass through
+codexctl --mode auto                  # Brain auto-approves above threshold
+codexctl --mode status                # Show current mode
 ```
 
 | Mode | Approves safe calls | Denies dangerous calls | Low-confidence calls |
@@ -380,11 +380,11 @@ claudectl --mode status                # Show current mode
 | `auto` | Yes | Yes | Auto-approve |
 | `off` | No | No | Fall through to user |
 
-Mode is stored in `~/.claudectl/brain/gate-mode`. File absent = `on` (default).
+Mode is stored in `~/.codexctl/brain/gate-mode`. File absent = `on` (default).
 
-## Claude Code Plugin
+## Codex Plugin
 
-claudectl includes a Claude Code plugin in `claude-plugin/` that integrates the brain directly into sessions.
+codexctl includes a Codex plugin in `codex-plugin/` that integrates the brain directly into sessions.
 
 ### Plugin Components
 
@@ -398,24 +398,24 @@ claudectl includes a Claude Code plugin in `claude-plugin/` that integrates the 
 | `/brain-stats` | Command | Brain learning metrics and accuracy |
 | `/auto-insights` | Command | Show or configure auto-generated workflow insights |
 | Supervisor | Agent | Proactive session health triage |
-| Session Monitoring | Skill | Auto-activated awareness of claudectl capabilities |
+| Session Monitoring | Skill | Auto-activated awareness of codexctl capabilities |
 
 ### How the brain gate hook works
 
-1. Claude Code fires a PreToolUse event with the tool name and input
-2. The hook checks `~/.claudectl/brain/gate-mode` — if `off`, exits immediately
-3. Calls `claudectl --brain --brain-query --tool <name> --tool-input <input>`
-4. claudectl checks static deny/approve rules first (instant, no LLM)
+1. Codex fires a PreToolUse event with the tool name and input
+2. The hook checks `~/.codexctl/brain/gate-mode` — if `off`, exits immediately
+3. Calls `codexctl --brain --brain-query --tool <name> --tool-input <input>`
+4. codexctl checks static deny/approve rules first (instant, no LLM)
 5. If no rule matches, queries the local LLM brain
-6. Returns `{"decision":"approve"}` or `{"decision":"deny","reason":"..."}` to Claude Code
+6. Returns `{"decision":"approve"}` or `{"decision":"deny","reason":"..."}` to Codex
 
 In `on` mode, low-confidence brain approvals fall through to normal permission prompts. In `auto` mode, all brain approvals execute.
 
 ## Security
 
-claudectl runs entirely locally. It reads Claude Code's session files from disk and process data from `ps`. It does not:
+codexctl runs entirely locally. It reads Codex's session files from disk and process data from `ps`. It does not:
 - Send data to any server (unless you configure webhooks or the brain feature)
-- Modify Claude Code's files or behavior
+- Modify Codex's files or behavior
 - Require API keys or authentication
 - Run with elevated privileges
 
@@ -425,9 +425,9 @@ The brain feature sends session context to a **local** LLM endpoint (default `lo
 
 ## Comparison
 
-claudectl was the first tool to combine local LLM supervision with multi-session orchestration for Claude Code (shipped April 2026).
+codexctl was the first tool to combine local LLM supervision with multi-session orchestration for Codex (shipped April 2026).
 
-| Capability | Claude Code alone | With claudectl |
+| Capability | Codex alone | With codexctl |
 |-----------|:-:|:-:|
 | Local LLM auto-approve/deny | No | Brain with ollama |
 | Self-improving insights | No | Friction detection, rule suggestions |
@@ -445,12 +445,12 @@ claudectl was the first tool to combine local LLM supervision with multi-session
 | Auto-rule engine | No | Match by tool/command/project/cost |
 | Approve prompts without switching | No | Press `y` |
 | Record session highlight reels | No | Press `R` |
-| Claude Code plugin | No | `/brain`, `/sessions`, `/spend`, `/auto-insights` |
+| Codex plugin | No | `/brain`, `/sessions`, `/spend`, `/auto-insights` |
 
 | Cross-machine knowledge sharing | No | Peer-to-peer hive mind |
 | Remote task delegation | No | Delegate to connected peers |
 
-| Feature | claudectl | Static auto-approve tools | Cloud-based supervisors |
+| Feature | codexctl | Static auto-approve tools | Cloud-based supervisors |
 |---------|:---------:|:-------------------------:|:-----------------------:|
 | Local LLM brain that learns your preferences | Yes | No | No |
 | Cross-session orchestration + context routing | Yes | No | Varies |

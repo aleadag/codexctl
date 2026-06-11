@@ -26,7 +26,7 @@ pub const ALLOWED_TYPES: &[&str] = &["task", "result", "question", "status", "ha
 
 /// Maximum hop count for forwarded messages. Counts each `publish` that
 /// inherits a non-zero hop from a prior message. RFC v2 §9 anchors the
-/// ping-pong burn-loop mitigation here. Claude Code's own Stop-hook 8-block
+/// ping-pong burn-loop mitigation here. Codex's own Stop-hook 8-block
 /// cap is the runtime backstop; this is the application-level shorter leash.
 pub const DEFAULT_MAX_HOPS: u32 = 8;
 
@@ -120,7 +120,7 @@ pub fn validate_role_name(name: &str) -> Result<(), PolicyError> {
 }
 
 /// Neutralize command semantics in a message body before it can be delivered
-/// to a Claude Code session (§9). A leading `/` becomes a leading space so the
+/// to a Codex session (§9). A leading `/` becomes a leading space so the
 /// recipient reads the line as content rather than a slash command. Other
 /// control-character classes that could move the cursor or rewrite the prompt
 /// are stripped.

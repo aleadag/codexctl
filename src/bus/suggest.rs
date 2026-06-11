@@ -1,6 +1,6 @@
 //! Role suggestion from session transcripts and cwd (#309).
 //!
-//! Given a running Claude session (pid → jsonl path + cwd), produce a
+//! Given a running Codex session (pid → jsonl path + cwd), produce a
 //! ranked list of role-name candidates so the operator doesn't have to
 //! invent one cold. Pure analysis: never writes a binding, never queries
 //! the LLM. Heuristics, weighted and merged.
@@ -14,7 +14,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use claudectl_core::transcript::{TranscriptBlock, TranscriptEvent, TranscriptRole, parse_line};
+use codexctl_core::transcript::{TranscriptBlock, TranscriptEvent, TranscriptRole, parse_line};
 
 /// One ranked suggestion. `reasons` lists the signals that contributed
 /// (e.g. "cwd basename", "tool fan-out: writes-heavy", "explicit mention:
@@ -145,7 +145,7 @@ const ROLE_PHRASES: &[&str] = &[
 /// score higher; we only look in user/system text to avoid the LLM's own
 /// echoes inflating the count.
 fn from_explicit_mentions(
-    messages: &[claudectl_core::transcript::TranscriptMessage],
+    messages: &[codexctl_core::transcript::TranscriptMessage],
 ) -> Vec<(String, u32, String)> {
     let mut out = Vec::new();
     for msg in messages.iter().take(10) {
@@ -187,7 +187,7 @@ fn from_explicit_mentions(
 /// Heuristic-mapping of tool counts to a coarse role archetype. Counts are
 /// across the entire window we scanned.
 fn from_tool_shape(
-    messages: &[claudectl_core::transcript::TranscriptMessage],
+    messages: &[codexctl_core::transcript::TranscriptMessage],
 ) -> Vec<(String, u32, String)> {
     let mut writes = 0u32;
     let mut reads = 0u32;
@@ -274,7 +274,7 @@ const PATH_TOKENS: &[(&str, &str)] = &[
 /// tokens that show up. Cwd basename hits are already handled; this is
 /// the per-file granularity that tells us "session touches frontend/".
 fn from_path_patterns(
-    messages: &[claudectl_core::transcript::TranscriptMessage],
+    messages: &[codexctl_core::transcript::TranscriptMessage],
 ) -> Vec<(String, u32, String)> {
     let mut hits: HashMap<&'static str, u32> = HashMap::new();
     for msg in messages.iter() {
@@ -348,8 +348,8 @@ mod tests {
     use serde_json::json;
     use std::path::PathBuf;
 
-    fn user_text(s: &str) -> claudectl_core::transcript::TranscriptMessage {
-        claudectl_core::transcript::TranscriptMessage {
+    fn user_text(s: &str) -> codexctl_core::transcript::TranscriptMessage {
+        codexctl_core::transcript::TranscriptMessage {
             role: TranscriptRole::User,
             model: None,
             stop_reason: None,
@@ -360,8 +360,8 @@ mod tests {
     fn assistant_tool(
         name: &str,
         input: serde_json::Value,
-    ) -> claudectl_core::transcript::TranscriptMessage {
-        claudectl_core::transcript::TranscriptMessage {
+    ) -> codexctl_core::transcript::TranscriptMessage {
+        codexctl_core::transcript::TranscriptMessage {
             role: TranscriptRole::Assistant,
             model: None,
             stop_reason: None,

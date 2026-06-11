@@ -5,7 +5,7 @@
 //! added in this PR), then wraps `brain::review::ReviewItem` as
 //! `ReviewItemSummary` with the same projection.
 
-use claudectl_core::runtime::{BrainReviewView, DecisionSummary, ReviewItemSummary};
+use codexctl_core::runtime::{BrainReviewView, DecisionSummary, ReviewItemSummary};
 
 use crate::brain;
 

@@ -13,20 +13,20 @@
 #   health     - Health monitoring showcase (~20s)
 #   brain      - Brain + rules showcase (~26s)
 #   overview   - Quick dashboard overview (~12s)
-#   skills     - Skills & Hive mode (~30s, requires CLAUDECTL_DEMO_SKILLS=1)
+#   skills     - Skills & Hive mode (~30s, requires CODEXCTL_DEMO_SKILLS=1)
 #
 # Requirements:
 #   - agg (cargo install agg, or: brew install agg)
-#   - claudectl built (cargo build --release)
+#   - codexctl built (cargo build --release)
 #
 # Quick single recordings:
-#   claudectl --demo --record demo-hero.gif     # Press q to stop
-#   claudectl --demo --record demo-hero.cast    # Convert later: agg demo-hero.cast demo-hero.gif
+#   codexctl --demo --record demo-hero.gif     # Press q to stop
+#   codexctl --demo --record demo-hero.cast    # Convert later: agg demo-hero.cast demo-hero.gif
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-BINARY="./target/release/claudectl"
+BINARY="./target/release/codexctl"
 OUT_DIR="docs/assets"
 mkdir -p "$OUT_DIR"
 
@@ -35,7 +35,7 @@ if [ ! -t 0 ]; then
     echo "Error: This script must be run in an interactive terminal (needs a TTY)."
     echo ""
     echo "Quick alternative — run these directly in your terminal:"
-    echo "  claudectl --demo --record docs/assets/demo-hero.gif"
+    echo "  codexctl --demo --record docs/assets/demo-hero.gif"
     echo "  # Press q after ~30s to stop recording"
     exit 1
 fi
@@ -110,9 +110,9 @@ case "$target" in
     skills|all)
         # Skills & Hive mode — auto-opens K view, cycles Skills → Hive → Skills.
         # 30s captures ~2 full cycles of the scripted tab rotation in refresh_demo.
-        export CLAUDECTL_DEMO_SKILLS=1
-        record_gif "claudectl-demo-skills" 30 "Skills & Hive — discover, share, invite, join"
-        unset CLAUDECTL_DEMO_SKILLS
+        export CODEXCTL_DEMO_SKILLS=1
+        record_gif "codexctl-demo-skills" 30 "Skills & Hive — discover, share, invite, join"
+        unset CODEXCTL_DEMO_SKILLS
         ;;&
 
     social)

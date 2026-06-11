@@ -1,15 +1,15 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// The hooks we install into Claude Code's settings.json.
+/// The hooks we install into Codex hooks.json.
 ///
-/// We use `PostToolUse` with a wildcard matcher so claudectl sees every tool
+/// We use `PostToolUse` with a wildcard matcher so codexctl sees every tool
 /// completion, and `Stop` to catch session endings. The commands call
-/// `claudectl --json` which is a lightweight, non-TUI snapshot that the
+/// `codexctl --json` which is a lightweight, non-TUI snapshot that the
 /// brain / hooks system can consume.
 ///
-/// We also wire up `PreToolUse` for Bash commands so claudectl's rule engine
-/// can evaluate deny rules before execution.
+/// We also wire up `PermissionRequest` for Bash commands so codexctl's rule
+/// engine can evaluate approval requests before execution.
 struct HookSpec {
     event: &'static str,
     matcher: &'static str,
@@ -19,33 +19,33 @@ struct HookSpec {
 
 const HOOKS: &[HookSpec] = &[
     HookSpec {
-        event: "PreToolUse",
+        event: "PermissionRequest",
         matcher: "Bash",
-        command: "claudectl --json 2>/dev/null || true",
+        command: "codexctl --json 2>/dev/null || true",
         timeout: 5,
     },
     HookSpec {
         event: "PostToolUse",
         matcher: "*",
-        command: "claudectl --json 2>/dev/null || true",
+        command: "codexctl --json 2>/dev/null || true",
         timeout: 5,
     },
     HookSpec {
         event: "Stop",
         matcher: "",
-        command: "claudectl --json 2>/dev/null || true",
+        command: "codexctl --json 2>/dev/null || true",
         timeout: 5,
     },
 ];
 
 fn settings_path(project: bool) -> PathBuf {
     if project {
-        PathBuf::from(".claude/settings.local.json")
+        PathBuf::from(".codex/hooks.json")
     } else {
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("/tmp"));
-        home.join(".claude/settings.json")
+        home.join(".codex/hooks.json")
     }
 }
 
@@ -55,14 +55,14 @@ pub fn user_settings_path() -> PathBuf {
     settings_path(false)
 }
 
-/// Probe a settings.json on disk for claudectl-managed hooks. Returns
+/// Probe a hooks.json on disk for codexctl-managed hooks. Returns
 /// `Some(true)` when present, `Some(false)` when absent, and `None` when the
 /// file doesn't exist or can't be parsed. Used by `init::state` to keep
 /// detection consistent with what `run_init` writes.
-pub fn settings_contain_claudectl_hooks(path: &Path) -> Option<bool> {
+pub fn settings_contain_codexctl_hooks(path: &Path) -> Option<bool> {
     let raw = std::fs::read_to_string(path).ok()?;
     let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
-    Some(has_claudectl_hooks(&value))
+    Some(has_codexctl_hooks(&value))
 }
 
 fn build_hooks_value() -> serde_json::Value {
@@ -91,8 +91,8 @@ fn build_hooks_value() -> serde_json::Value {
     serde_json::Value::Object(hooks_map)
 }
 
-/// Check if claudectl hooks are already present in existing settings.
-fn has_claudectl_hooks(existing: &serde_json::Value) -> bool {
+/// Check if codexctl hooks are already present in existing settings.
+fn has_codexctl_hooks(existing: &serde_json::Value) -> bool {
     if let Some(hooks) = existing.get("hooks") {
         if let Some(obj) = hooks.as_object() {
             for (_event, matchers) in obj {
@@ -103,7 +103,7 @@ fn has_claudectl_hooks(existing: &serde_json::Value) -> bool {
                                 for hook in inner_arr {
                                     if let Some(cmd) = hook.get("command") {
                                         if let Some(s) = cmd.as_str() {
-                                            if s.contains("claudectl") {
+                                            if s.contains("codexctl") {
                                                 return true;
                                             }
                                         }
@@ -119,8 +119,8 @@ fn has_claudectl_hooks(existing: &serde_json::Value) -> bool {
     false
 }
 
-/// Merge claudectl hooks into existing settings, preserving all other keys
-/// and any non-claudectl hooks already defined.
+/// Merge codexctl hooks into existing settings, preserving all other keys
+/// and any non-codexctl hooks already defined.
 fn merge_hooks(existing: &mut serde_json::Value) {
     let new_hooks = build_hooks_value();
 
@@ -145,15 +145,15 @@ fn merge_hooks(existing: &mut serde_json::Value) {
     }
 }
 
-/// Remove claudectl hooks from a matcher entry's inner hooks array.
+/// Remove codexctl hooks from a matcher entry's inner hooks array.
 /// Returns true if any hooks remain after filtering.
-fn filter_claudectl_hooks(matcher_entry: &mut serde_json::Value) -> bool {
+fn filter_codexctl_hooks(matcher_entry: &mut serde_json::Value) -> bool {
     if let Some(inner_hooks) = matcher_entry.get_mut("hooks") {
         if let Some(arr) = inner_hooks.as_array_mut() {
             arr.retain(|hook| {
                 hook.get("command")
                     .and_then(|c| c.as_str())
-                    .is_none_or(|s| !s.contains("claudectl"))
+                    .is_none_or(|s| !s.contains("codexctl"))
             });
             return !arr.is_empty();
         }
@@ -161,9 +161,9 @@ fn filter_claudectl_hooks(matcher_entry: &mut serde_json::Value) -> bool {
     true
 }
 
-/// Remove all claudectl hook entries from settings, preserving everything else.
+/// Remove all codexctl hook entries from settings, preserving everything else.
 /// Returns the number of hook entries removed.
-fn remove_claudectl_hooks(settings: &mut serde_json::Value) -> usize {
+fn remove_codexctl_hooks(settings: &mut serde_json::Value) -> usize {
     let mut removed = 0;
 
     let Some(hooks) = settings.get_mut("hooks") else {
@@ -173,12 +173,12 @@ fn remove_claudectl_hooks(settings: &mut serde_json::Value) -> usize {
         return 0;
     };
 
-    // For each event, filter out matcher entries that contain claudectl commands
+    // For each event, filter out matcher entries that contain codexctl commands
     let mut empty_events = Vec::new();
     for (event, matchers) in hooks_obj.iter_mut() {
         if let Some(arr) = matchers.as_array_mut() {
             let before = arr.len();
-            arr.retain_mut(filter_claudectl_hooks);
+            arr.retain_mut(filter_codexctl_hooks);
             removed += before - arr.len();
             if arr.is_empty() {
                 empty_events.push(event.clone());
@@ -201,7 +201,7 @@ fn remove_claudectl_hooks(settings: &mut serde_json::Value) -> usize {
     removed
 }
 
-/// Run the uninit command: remove claudectl hooks from settings.json.
+/// Run the uninit command: remove codexctl hooks from hooks.json.
 pub fn run_uninit(project: bool) -> io::Result<()> {
     let path = settings_path(project);
 
@@ -225,15 +225,15 @@ pub fn run_uninit(project: bool) -> io::Result<()> {
         }
     };
 
-    if !has_claudectl_hooks(&settings) {
+    if !has_codexctl_hooks(&settings) {
         println!(
-            "No claudectl hooks found in {} — nothing to remove.",
+            "No codexctl hooks found in {} — nothing to remove.",
             path.display()
         );
         return Ok(());
     }
 
-    let removed = remove_claudectl_hooks(&mut settings);
+    let removed = remove_codexctl_hooks(&mut settings);
 
     // If the settings object is now empty (only had hooks), remove the file
     let is_empty = settings.as_object().is_some_and(|obj| obj.is_empty());
@@ -241,23 +241,20 @@ pub fn run_uninit(project: bool) -> io::Result<()> {
     if is_empty {
         std::fs::remove_file(&path)?;
         println!(
-            "Removed {removed} claudectl hook(s) — {} was empty and has been deleted.",
+            "Removed {removed} codexctl hook(s) — {} was empty and has been deleted.",
             path.display()
         );
     } else {
         let json = serde_json::to_string_pretty(&settings)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         std::fs::write(&path, format!("{json}\n"))?;
-        println!(
-            "Removed {removed} claudectl hook(s) from {}",
-            path.display()
-        );
+        println!("Removed {removed} codexctl hook(s) from {}", path.display());
     }
 
     Ok(())
 }
 
-/// Run the init command: write Claude Code hooks into settings.json.
+/// Run the init command: write Codex hooks into hooks.json.
 pub fn run_init(project: bool, dry_run: bool) -> io::Result<()> {
     let path = settings_path(project);
 
@@ -286,10 +283,10 @@ pub fn run_init(project: bool, dry_run: bool) -> io::Result<()> {
         serde_json::json!({})
     };
 
-    // Check for existing claudectl hooks
-    if has_claudectl_hooks(&settings) {
-        println!("claudectl hooks already configured in {}", path.display());
-        println!("To re-initialize, run `claudectl init --remove` first.");
+    // Check for existing codexctl hooks
+    if has_codexctl_hooks(&settings) {
+        println!("codexctl hooks already configured in {}", path.display());
+        println!("To re-initialize, run `codexctl init --remove` first.");
         return Ok(());
     }
 
@@ -322,15 +319,15 @@ pub fn run_init(project: bool, dry_run: bool) -> io::Result<()> {
 }
 
 fn print_success(path: &Path) {
-    println!("Initialized claudectl hooks in {}", path.display());
+    println!("Initialized codexctl hooks in {}", path.display());
     println!();
     println!("Hooks installed:");
-    println!("  PreToolUse (Bash)  — lets claudectl observe commands before execution");
-    println!("  PostToolUse (*)    — notifies claudectl after every tool completion");
-    println!("  Stop               — notifies claudectl when a session ends");
+    println!("  PermissionRequest (Bash) — lets codexctl observe approval requests");
+    println!("  PostToolUse (*)          — notifies codexctl after every tool completion");
+    println!("  Stop                     — notifies codexctl when a session ends");
     println!();
-    println!("Claude Code will now notify claudectl on each tool use.");
-    println!("Run `claudectl` to start the dashboard.");
+    println!("Codex will now notify codexctl on each tool use.");
+    println!("Run `codexctl` to start the dashboard.");
 }
 
 #[cfg(test)]
@@ -342,8 +339,8 @@ mod tests {
         let hooks = build_hooks_value();
         let obj = hooks.as_object().unwrap();
 
-        // Should have entries for PreToolUse, PostToolUse, and Stop
-        assert!(obj.contains_key("PreToolUse"));
+        // Should have entries for PermissionRequest, PostToolUse, and Stop
+        assert!(obj.contains_key("PermissionRequest"));
         assert!(obj.contains_key("PostToolUse"));
         assert!(obj.contains_key("Stop"));
 
@@ -356,39 +353,40 @@ mod tests {
                 assert!(entry.get("hooks").is_some());
                 let inner = entry["hooks"].as_array().unwrap();
                 assert_eq!(inner[0]["type"], "command");
-                assert!(inner[0]["command"].as_str().unwrap().contains("claudectl"));
+                let command = inner[0]["command"].as_str().unwrap();
+                assert!(command.contains("codexctl"));
             }
         }
     }
 
     #[test]
-    fn test_has_claudectl_hooks_empty() {
+    fn test_has_codexctl_hooks_empty() {
         let settings = serde_json::json!({});
-        assert!(!has_claudectl_hooks(&settings));
+        assert!(!has_codexctl_hooks(&settings));
     }
 
     #[test]
-    fn test_has_claudectl_hooks_present() {
+    fn test_has_codexctl_hooks_present() {
         let settings = serde_json::json!({
             "hooks": {
                 "PostToolUse": [{
                     "matcher": "*",
                     "hooks": [{
                         "type": "command",
-                        "command": "claudectl --json 2>/dev/null || true",
+                        "command": "codexctl --json 2>/dev/null || true",
                         "timeout": 5
                     }]
                 }]
             }
         });
-        assert!(has_claudectl_hooks(&settings));
+        assert!(has_codexctl_hooks(&settings));
     }
 
     #[test]
-    fn test_has_claudectl_hooks_other_hooks_only() {
+    fn test_has_codexctl_hooks_other_hooks_only() {
         let settings = serde_json::json!({
             "hooks": {
-                "PreToolUse": [{
+                "PermissionRequest": [{
                     "matcher": "Bash",
                     "hooks": [{
                         "type": "command",
@@ -398,7 +396,7 @@ mod tests {
                 }]
             }
         });
-        assert!(!has_claudectl_hooks(&settings));
+        assert!(!has_codexctl_hooks(&settings));
     }
 
     #[test]
@@ -408,7 +406,7 @@ mod tests {
 
         assert!(settings.get("hooks").is_some());
         let hooks = settings["hooks"].as_object().unwrap();
-        assert!(hooks.contains_key("PreToolUse"));
+        assert!(hooks.contains_key("PermissionRequest"));
         assert!(hooks.contains_key("PostToolUse"));
         assert!(hooks.contains_key("Stop"));
     }
@@ -418,7 +416,7 @@ mod tests {
         let mut settings = serde_json::json!({
             "allowedTools": ["Bash", "Read"],
             "hooks": {
-                "PreToolUse": [{
+                "PermissionRequest": [{
                     "matcher": "Write",
                     "hooks": [{
                         "type": "command",
@@ -437,8 +435,8 @@ mod tests {
             serde_json::json!(["Bash", "Read"])
         );
 
-        // Existing PreToolUse Write hook preserved
-        let pre = settings["hooks"]["PreToolUse"].as_array().unwrap();
+        // Existing PermissionRequest Write hook preserved
+        let pre = settings["hooks"]["PermissionRequest"].as_array().unwrap();
         assert_eq!(pre.len(), 2); // original Write + new Bash
         assert_eq!(pre[0]["matcher"], "Write");
         assert_eq!(pre[1]["matcher"], "Bash");
@@ -451,7 +449,7 @@ mod tests {
     #[test]
     fn test_run_init_creates_file() {
         let dir = tempfile::tempdir().unwrap();
-        let settings_file = dir.path().join(".claude/settings.local.json");
+        let settings_file = dir.path().join(".codex/hooks.json");
 
         // Temporarily override HOME so settings_path uses our temp dir
         // We test the file-writing logic directly instead
@@ -468,41 +466,41 @@ mod tests {
         let content = std::fs::read_to_string(&settings_file).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert!(parsed.get("hooks").is_some());
-        assert!(has_claudectl_hooks(&parsed));
+        assert!(has_codexctl_hooks(&parsed));
     }
 
     #[test]
     fn test_settings_path_global() {
         let path = settings_path(false);
         let path_str = path.to_string_lossy();
-        assert!(path_str.ends_with(".claude/settings.json"));
+        assert!(path_str.ends_with(".codex/hooks.json"));
     }
 
     #[test]
     fn test_settings_path_project() {
         let path = settings_path(true);
-        assert_eq!(path, PathBuf::from(".claude/settings.local.json"));
+        assert_eq!(path, PathBuf::from(".codex/hooks.json"));
     }
 
     #[test]
-    fn test_remove_claudectl_hooks_all() {
+    fn test_remove_codexctl_hooks_all() {
         let mut settings = serde_json::json!({});
         merge_hooks(&mut settings);
-        assert!(has_claudectl_hooks(&settings));
+        assert!(has_codexctl_hooks(&settings));
 
-        let removed = remove_claudectl_hooks(&mut settings);
-        assert_eq!(removed, 3); // PreToolUse, PostToolUse, Stop
-        assert!(!has_claudectl_hooks(&settings));
+        let removed = remove_codexctl_hooks(&mut settings);
+        assert_eq!(removed, 3); // PermissionRequest, PostToolUse, Stop
+        assert!(!has_codexctl_hooks(&settings));
         // hooks key removed entirely when empty
         assert!(settings.get("hooks").is_none());
     }
 
     #[test]
-    fn test_remove_claudectl_hooks_preserves_others() {
+    fn test_remove_codexctl_hooks_preserves_others() {
         let mut settings = serde_json::json!({
             "allowedTools": ["Bash"],
             "hooks": {
-                "PreToolUse": [
+                "PermissionRequest": [
                     {
                         "matcher": "Write",
                         "hooks": [{
@@ -515,7 +513,7 @@ mod tests {
                         "matcher": "Bash",
                         "hooks": [{
                             "type": "command",
-                            "command": "claudectl --json 2>/dev/null || true",
+                            "command": "codexctl --json 2>/dev/null || true",
                             "timeout": 5
                         }]
                     }
@@ -524,22 +522,22 @@ mod tests {
                     "matcher": "*",
                     "hooks": [{
                         "type": "command",
-                        "command": "claudectl --json 2>/dev/null || true",
+                        "command": "codexctl --json 2>/dev/null || true",
                         "timeout": 5
                     }]
                 }]
             }
         });
 
-        let removed = remove_claudectl_hooks(&mut settings);
-        assert_eq!(removed, 2); // Bash from PreToolUse + PostToolUse entry
+        let removed = remove_codexctl_hooks(&mut settings);
+        assert_eq!(removed, 2); // Bash from PermissionRequest + PostToolUse entry
 
-        // Write hook in PreToolUse preserved
-        let pre = settings["hooks"]["PreToolUse"].as_array().unwrap();
+        // Write hook in PermissionRequest preserved
+        let pre = settings["hooks"]["PermissionRequest"].as_array().unwrap();
         assert_eq!(pre.len(), 1);
         assert_eq!(pre[0]["matcher"], "Write");
 
-        // PostToolUse event removed entirely (was only claudectl)
+        // PostToolUse event removed entirely (was only codexctl)
         assert!(settings["hooks"].get("PostToolUse").is_none());
 
         // allowedTools untouched
@@ -547,10 +545,10 @@ mod tests {
     }
 
     #[test]
-    fn test_remove_claudectl_hooks_noop_when_absent() {
+    fn test_remove_codexctl_hooks_noop_when_absent() {
         let mut settings = serde_json::json!({
             "hooks": {
-                "PreToolUse": [{
+                "PermissionRequest": [{
                     "matcher": "Bash",
                     "hooks": [{
                         "type": "command",
@@ -561,18 +559,24 @@ mod tests {
             }
         });
 
-        let removed = remove_claudectl_hooks(&mut settings);
+        let removed = remove_codexctl_hooks(&mut settings);
         assert_eq!(removed, 0);
         // Original hook still present
-        assert!(settings["hooks"]["PreToolUse"].as_array().unwrap().len() == 1);
+        assert!(
+            settings["hooks"]["PermissionRequest"]
+                .as_array()
+                .unwrap()
+                .len()
+                == 1
+        );
     }
 
     #[test]
     fn test_remove_then_no_hooks_key() {
-        // Settings that only had claudectl hooks — hooks key should be removed entirely
+        // Settings that only had codexctl hooks — hooks key should be removed entirely
         let mut settings = serde_json::json!({ "permissions": {} });
         merge_hooks(&mut settings);
-        remove_claudectl_hooks(&mut settings);
+        remove_codexctl_hooks(&mut settings);
 
         assert!(settings.get("hooks").is_none());
         // Other keys preserved
@@ -582,7 +586,7 @@ mod tests {
     #[test]
     fn test_init_uninit_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
-        let settings_file = dir.path().join("settings.json");
+        let settings_file = dir.path().join("hooks.json");
 
         // Start with existing settings
         let original = serde_json::json!({
@@ -601,21 +605,21 @@ mod tests {
         let json = serde_json::to_string_pretty(&original).unwrap();
         std::fs::write(&settings_file, &json).unwrap();
 
-        // Init: merge claudectl hooks in
+        // Init: merge codexctl hooks in
         let content = std::fs::read_to_string(&settings_file).unwrap();
         let mut settings: serde_json::Value = serde_json::from_str(&content).unwrap();
         merge_hooks(&mut settings);
         let json = serde_json::to_string_pretty(&settings).unwrap();
         std::fs::write(&settings_file, &json).unwrap();
-        assert!(has_claudectl_hooks(&settings));
+        assert!(has_codexctl_hooks(&settings));
 
-        // Uninit: remove claudectl hooks
+        // Uninit: remove codexctl hooks
         let content = std::fs::read_to_string(&settings_file).unwrap();
         let mut settings: serde_json::Value = serde_json::from_str(&content).unwrap();
-        remove_claudectl_hooks(&mut settings);
+        remove_codexctl_hooks(&mut settings);
 
         // Back to original state
-        assert!(!has_claudectl_hooks(&settings));
+        assert!(!has_codexctl_hooks(&settings));
         assert_eq!(
             settings["allowedTools"],
             serde_json::json!(["Read", "Glob"])

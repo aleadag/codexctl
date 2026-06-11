@@ -97,7 +97,7 @@ pub struct PeerTrust {
     #[serde(default)]
     pub quarantined_until: u64,
     /// Manually frozen pending review (#226). Set by collision detection and
-    /// rate-anomaly flags; cleared by `claudectl hive review --unfreeze`.
+    /// rate-anomaly flags; cleared by `codexctl hive review --unfreeze`.
     /// While frozen the peer cannot drift up and is excluded from injection.
     #[serde(default)]
     pub frozen: bool,
@@ -240,7 +240,7 @@ pub struct TrustStore {
 fn trust_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     PathBuf::from(home)
-        .join(".claudectl")
+        .join(".codexctl")
         .join("hive")
         .join("trust.json")
 }
@@ -450,7 +450,7 @@ pub fn apply_collisions(
 fn collisions_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     PathBuf::from(home)
-        .join(".claudectl")
+        .join(".codexctl")
         .join("hive")
         .join("collisions.jsonl")
 }

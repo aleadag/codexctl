@@ -1,21 +1,21 @@
-# claudectl
+# codexctl
 
-> Orchestrate a swarm of Claude Code agents with a local-LLM brain that learns from you.
+> Orchestrate a swarm of Codex agents with a local-LLM brain that learns from you.
 
-claudectl is a Rust TUI that monitors all your Claude Code sessions from one terminal. It shows which agent is blocked, burning budget, waiting for approval, or stalled - and lets you intervene without tab hunting.
+codexctl is a Rust TUI that monitors all your Codex sessions from one terminal. It shows which agent is blocked, burning budget, waiting for approval, or stalled - and lets you intervene without tab hunting.
 
 ## Install
 
 ```
-brew install mercurialsolo/tap/claudectl
-cargo install claudectl
+brew install aleadag/tap/codexctl
+cargo install codexctl
 ```
 
 Setup:
 ```
-claudectl --init    # wire up Claude Code hooks (one-time)
-claudectl           # launch dashboard
-claudectl --demo    # try with fake sessions
+codexctl --init    # wire up Codex hooks (one-time)
+codexctl           # launch dashboard
+codexctl --demo    # try with fake sessions
 ```
 
 ## Key Features
@@ -36,9 +36,9 @@ claudectl --demo    # try with fake sessions
 
 ## How It Works
 
-Reads Claude Code's local files (no API keys, no network, read-only):
-- ~/.claude/sessions/*.json - session metadata
-- ~/.claude/projects/{slug}/*.jsonl - conversation logs with token usage
+Reads Codex's local files (no API keys, no network, read-only):
+- ~/.codex/sessions/*.json - session metadata
+- ~/.codex/projects/{slug}/*.jsonl - conversation logs with token usage
 - ps - CPU%, memory, TTY per process
 
 Status inference uses multiple signals: waiting_for_task events, CPU thresholds, stop_reason fields, message recency.
@@ -56,15 +56,15 @@ Terminals: ghostty, kitty, tmux, wezterm, warp, iterm2, terminal_app, gnome_term
 
 ## Docs
 
-- [Quick Start](https://mercurialsolo.github.io/claudectl/quickstart/)
-- [Configuration](https://mercurialsolo.github.io/claudectl/configuration/)
-- [Reference](https://mercurialsolo.github.io/claudectl/reference/)
-- [Terminal Support](https://mercurialsolo.github.io/claudectl/terminal-support/)
-- [Troubleshooting](https://mercurialsolo.github.io/claudectl/troubleshooting/)
-- [Relay & Hive Mind](https://mercurialsolo.github.io/claudectl/relay/)
-- [Contributing](https://mercurialsolo.github.io/claudectl/contributing/)
+- [Quick Start](https://aleadag.github.io/codexctl/quickstart/)
+- [Configuration](https://aleadag.github.io/codexctl/configuration/)
+- [Reference](https://aleadag.github.io/codexctl/reference/)
+- [Terminal Support](https://aleadag.github.io/codexctl/terminal-support/)
+- [Troubleshooting](https://aleadag.github.io/codexctl/troubleshooting/)
+- [Relay & Hive Mind](https://aleadag.github.io/codexctl/relay/)
+- [Contributing](https://aleadag.github.io/codexctl/contributing/)
 
 ## Links
 
-- Source: https://github.com/mercurialsolo/claudectl
+- Source: https://github.com/aleadag/codexctl
 - License: MIT

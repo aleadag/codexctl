@@ -1,6 +1,6 @@
 //! Bind `BrainView` to the binary's brain subsystem.
 
-use claudectl_core::runtime::{BrainGateMode, BrainView, DecisionSummary};
+use codexctl_core::runtime::{BrainGateMode, BrainView, DecisionSummary};
 
 use crate::brain;
 

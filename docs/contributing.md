@@ -5,8 +5,8 @@ Contributions are welcome.
 ## Setup
 
 ```bash
-git clone https://github.com/mercurialsolo/claudectl.git
-cd claudectl
+git clone https://github.com/aleadag/codexctl.git
+cd codexctl
 cargo build                    # whole workspace
 cargo test --all-targets
 ```
@@ -21,10 +21,10 @@ cargo fmt --all -- --check
 # Standalone per-crate checks — same as CI. Catches creeping cross-deps
 # that happen to compile inside the workspace but break the dependency
 # direction.
-cargo build -p claudectl-core
-cargo build -p claudectl-tui
-cargo test  -p claudectl-core
-cargo test  -p claudectl-tui
+cargo build -p codexctl-core
+cargo build -p codexctl-tui
+cargo test  -p codexctl-core
+cargo test  -p codexctl-tui
 ```
 
 ## Guidelines
@@ -38,20 +38,20 @@ Not all contributions are code. Hooks, docs, config presets, terminal compatibil
 
 ## Workspace layout
 
-claudectl is a three-crate Cargo workspace. Dependencies flow strictly downward — `claudectl → claudectl-tui → claudectl-core`. The runtime trait contract in `claudectl-core/src/runtime.rs` is the only seam the TUI uses to read or write brain / coord / bus state.
+codexctl is a three-crate Cargo workspace. Dependencies flow strictly downward — `codexctl → codexctl-tui → codexctl-core`. The runtime trait contract in `codexctl-core/src/runtime.rs` is the only seam the TUI uses to read or write brain / coord / bus state.
 
 ```
 crates/
-├── claudectl-core/    # foundations: types, IO, runtime traits, MockRuntime
-└── claudectl-tui/     # the terminal UI + recording + demo fixtures
+├── codexctl-core/    # foundations: types, IO, runtime traits, MockRuntime
+└── codexctl-tui/     # the terminal UI + recording + demo fixtures
 src/                   # the binary: glue + brain/bus/coord/hive/relay + runtime adapters
 ```
 
-CI rejects upward references in three ways: a grep guard against `crate::{brain,bus,coord,hive,relay,…}` inside `claudectl-core/src/`, plus the two standalone build jobs above. If you find yourself wanting to reach across, add a trait method to `runtime.rs` and implement it in `src/runtime/` instead.
+CI rejects upward references in three ways: a grep guard against `crate::{brain,bus,coord,hive,relay,…}` inside `codexctl-core/src/`, plus the two standalone build jobs above. If you find yourself wanting to reach across, add a trait method to `runtime.rs` and implement it in `src/runtime/` instead.
 
 ## Where things live
 
-### `crates/claudectl-core/src/` — foundations
+### `crates/codexctl-core/src/` — foundations
 | Module | Purpose |
 |--------|---------|
 | `runtime.rs` | UI ↔ runtime trait contract (8 traits + `BrainDriver`), DTOs, `Runtime` aggregate, `MockRuntime` |
@@ -68,12 +68,12 @@ CI rejects upward references in three ways: a grep guard against `crate::{brain,
 | `logger.rs` | Diagnostic file logging |
 | `helpers.rs` | Webhook, notification, kill_process, aggregate session |
 | `hooks.rs` | Event hooks system and execution |
-| `launch.rs` | Launch and resume Claude Code sessions |
-| `skills.rs` | Skill registry + claude-plugin metadata |
+| `launch.rs` | Launch and resume Codex sessions |
+| `skills.rs` | Skill registry + codex-plugin metadata |
 | `config.rs` | `BrainConfig`, `IdleConfig`, `IdleTask` data structs |
 | `terminals/` | Terminal-specific switching and input injection |
 
-### `crates/claudectl-tui/src/` — terminal UI
+### `crates/codexctl-tui/src/` — terminal UI
 | Module | Purpose |
 |--------|---------|
 | `app.rs` | `App` state struct, refresh loop, event handling — talks to brain/bus/coord only through the runtime traits |
@@ -90,8 +90,8 @@ Features: `coord`, `relay`, `hive` mirror the binary's same-named features.
 | `main.rs` | CLI entry point, mode dispatch |
 | `brain_screen.rs` | Full-screen Brain Review surface (kept here because it depends on `brain::metrics` + `brain::risk`) |
 | `commands.rs` | Non-TUI command dispatch |
-| `config.rs` | Layered TOML config parsing (CLI > project > global > defaults). Re-exports the data structs from `claudectl-core::config`. |
-| `init/` | `claudectl init` onboarding wizard (5 phases) |
+| `config.rs` | Layered TOML config parsing (CLI > project > global > defaults). Re-exports the data structs from `codexctl-core::config`. |
+| `init/` | `codexctl init` onboarding wizard (5 phases) |
 | `orchestrator.rs` | Multi-session task runner with dependency ordering |
 | `runtime/` | `Live*` adapters wiring the runtime traits to the real subsystems |
 | `brain/` | Local LLM auto-pilot (engine, decisions, insights, evals, preferences, risk, metrics) |
@@ -102,4 +102,4 @@ Features: `coord`, `relay`, `hive` mirror the binary's same-named features.
 
 ## Reporting Issues
 
-Found a bug? [Open an issue](https://github.com/mercurialsolo/claudectl/issues/new) with `claudectl --version`, your terminal (`echo $TERM_PROGRAM`), and steps to reproduce.
+Found a bug? [Open an issue](https://github.com/aleadag/codexctl/issues/new) with `codexctl --version`, your terminal (`echo $TERM_PROGRAM`), and steps to reproduce.

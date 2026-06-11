@@ -1,18 +1,18 @@
 //! Bind `BusView` to the binary's agent-bus store.
 //!
 //! Under `--features bus` the impl reads from the SQLite-backed bus DB
-//! (`~/.claudectl/bus/bus.db`). Without it, every accessor returns an empty
+//! (`~/.codexctl/bus/bus.db`). Without it, every accessor returns an empty
 //! list so the TUI can render the "no bus" state with zero conditional
 //! compilation.
 
-use claudectl_core::runtime::{AgentDirectoryEntry, BusView, RoleBinding};
+use codexctl_core::runtime::{AgentDirectoryEntry, BusView, RoleBinding};
 
 pub struct LiveBusView;
 
 impl BusView for LiveBusView {
     #[cfg(feature = "bus")]
     fn list_agents(&self) -> Vec<AgentDirectoryEntry> {
-        use claudectl_core::discovery;
+        use codexctl_core::discovery;
 
         let Ok(bus_conn) = crate::bus::store::open() else {
             return Vec::new();

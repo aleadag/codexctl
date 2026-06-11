@@ -16,7 +16,7 @@
 //!    Verdict parsed from a leading `PASS` / `FAIL:` token. Zero
 //!    marginal cost — the right tier for "is the diff plausibly what
 //!    was asked."
-//! 3. **`agent`** — short-lived headless `claude -p` with the diff +
+//! 3. **`agent`** — short-lived headless `codex exec` with the diff +
 //!    prompt. Own model + budget cap. Same verdict-parsing convention
 //!    as `brain`. For gates that need frontier judgment.
 //!
@@ -39,7 +39,7 @@ pub enum Verifier {
     Run { command: String },
     /// Routed to the local LLM via the existing brain client.
     Brain { prompt: String },
-    /// Short-lived `claude -p` with its own budget cap.
+    /// Short-lived `codex exec` with its own budget cap.
     Agent {
         prompt: String,
         #[serde(default)]
@@ -136,7 +136,7 @@ pub trait VerifierBackend {
     /// reply text; verdict parsing happens in `run_verifier`.
     fn query_brain(&self, prompt: &str) -> Result<String, String>;
 
-    /// Run a headless `claude -p` agent with `prompt`. Honor the budget
+    /// Run a headless `codex exec` agent with `prompt`. Honor the budget
     /// cap by killing the process if it exceeds spend; report the cost
     /// regardless so the ledger reflects what was actually spent.
     fn run_agent(

@@ -4,13 +4,13 @@
 #![allow(dead_code)]
 //! `hook_events` table — low-latency signal path (RFC v2 §6).
 //!
-//! Hooks push payloads here via the `claudectl ingest` subcommand
+//! Hooks push payloads here via the `codexctl ingest` subcommand
 //! (`src/ingest.rs`). The reconciler tails this table on each tick so it
 //! reacts to tool activity and turn boundaries in one tick instead of
 //! waiting on a file-watch debounce of the JSONL transcript.
 //!
 //! **Hooks pull, the supervisor pushes via ingest.** The bash hooks call
-//! `claudectl ingest --hook <name> 2>/dev/null || true`. The `|| true` is
+//! `codexctl ingest --hook <name> 2>/dev/null || true`. The `|| true` is
 //! deliberate — ingest is best-effort by construction, which is precisely
 //! why it cannot be the source of record. JSONL tail + `ps` stay
 //! authoritative; this table is a latency optimization on top.
@@ -26,7 +26,7 @@ pub struct HookEvent {
     pub tool: Option<String>,
     /// Raw JSON payload as the hook received it on stdin. Stored as a
     /// string so the supervisor doesn't have to commit to a schema —
-    /// hooks evolve under Claude Code's control, not ours.
+    /// hooks evolve under Codex's control, not ours.
     pub payload: String,
     pub ingested_at: String,
 }

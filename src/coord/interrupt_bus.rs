@@ -2,7 +2,7 @@
 
 use rusqlite::Connection;
 
-use crate::session::{ClaudeSession, SessionStatus};
+use crate::session::{CodexSession, SessionStatus};
 use crate::terminals;
 
 use super::store;
@@ -10,7 +10,7 @@ use super::types::*;
 
 /// Attempt to deliver pending interrupts to live sessions.
 /// Returns a list of (interrupt_id, status_message) for deliveries made or skipped.
-pub fn deliver_pending(conn: &Connection, sessions: &[ClaudeSession]) -> Vec<(String, String)> {
+pub fn deliver_pending(conn: &Connection, sessions: &[CodexSession]) -> Vec<(String, String)> {
     let _ = store::expire_stale_interrupts(conn);
     let _ = store::expire_exhausted_interrupts(conn);
 
@@ -107,7 +107,7 @@ pub fn deliver_pending(conn: &Connection, sessions: &[ClaudeSession]) -> Vec<(St
 }
 
 /// Check whether an interrupt can be delivered to a session based on delivery mode.
-fn can_deliver(interrupt: &Interrupt, session: &ClaudeSession) -> bool {
+fn can_deliver(interrupt: &Interrupt, session: &CodexSession) -> bool {
     match interrupt.delivery_mode.as_str() {
         "immediate" => true,
         "safe_boundary" => {
@@ -152,8 +152,8 @@ mod tests {
     use super::*;
     use crate::session::RawSession;
 
-    fn test_session(status: SessionStatus) -> ClaudeSession {
-        let mut s = ClaudeSession::from_raw(RawSession {
+    fn test_session(status: SessionStatus) -> CodexSession {
+        let mut s = CodexSession::from_raw(RawSession {
             pid: 1,
             session_id: "s1".into(),
             cwd: "/tmp".into(),

@@ -1,12 +1,12 @@
 # Configuration
 
-claudectl loads settings from three layers (highest priority first):
+codexctl loads settings from three layers (highest priority first):
 
 1. **CLI flags** — override everything
-2. **`.claudectl.toml`** — per-project config in the working directory
-3. **`~/.config/claudectl/config.toml`** — global config
+2. **`.codexctl.toml`** — per-project config in the working directory
+3. **`~/.config/codexctl/config.toml`** — global config
 
-Show resolved config: `claudectl --config`
+Show resolved config: `codexctl --config`
 
 ## Full Example
 
@@ -59,16 +59,16 @@ Run shell commands automatically when session events occur:
 
 ```toml
 [hooks.on_needs_input]
-run = "say 'Claude needs your attention'"
+run = "say 'Codex needs your attention'"
 
 [hooks.on_finished]
-run = "terminal-notifier -title 'claudectl' -message '{project} finished (${cost})'"
+run = "terminal-notifier -title 'codexctl' -message '{project} finished (${cost})'"
 
 [hooks.on_budget_warning]
 run = "curl -X POST $SLACK_WEBHOOK -d '{\"text\": \"{project} hit 80% budget (${cost})\"}'"
 
 [hooks.on_status_change]
-run = "echo '[{project}] {old_status} -> {new_status}' >> ~/claude-activity.log"
+run = "echo '[{project}] {old_status} -> {new_status}' >> ~/codex-activity.log"
 ```
 
 ### Events
@@ -89,91 +89,91 @@ run = "echo '[{project}] {old_status} -> {new_status}' >> ~/claude-activity.log"
 
 `{pid}`, `{project}`, `{status}`, `{cost}`, `{model}`, `{cwd}`, `{tokens_in}`, `{tokens_out}`, `{elapsed}`, `{session_id}`, `{old_status}`, `{new_status}`, `{context_pct}`
 
-Use `claudectl --hooks` to verify your configured hooks.
+Use `codexctl --hooks` to verify your configured hooks.
 
 ### Verified Hooks
 
-We maintain a curated set at [mercurialsolo/claudectl-hooks](https://github.com/mercurialsolo/claudectl-hooks). To submit a hook, [open an issue](https://github.com/mercurialsolo/claudectl-hooks/issues) with the config snippet, what it solves, and any dependencies.
+We maintain a curated set at [aleadag/codexctl-hooks](https://github.com/aleadag/codexctl-hooks). To submit a hook, [open an issue](https://github.com/aleadag/codexctl-hooks/issues) with the config snippet, what it solves, and any dependencies.
 
-## Claude Code Integration
+## Codex Integration
 
 Easiest path is the **onboarding wizard** — it covers hooks alongside budget, brain, bus, and skills in one go:
 
 ```bash
-claudectl init                          # Interactive five-phase wizard
-claudectl init --non-interactive        # Same flow, no prompts (for CI / dotfiles)
+codexctl init                          # Interactive five-phase wizard
+codexctl init --non-interactive        # Same flow, no prompts (for CI / dotfiles)
 ```
 
-The Plugin phase writes hooks into Claude Code's settings (`~/.claude/settings.json` by default). See `claudectl init --help` for `--budget`, `--brain-url`, `--bus-role`, and the `--skip-*` overrides.
+The Plugin phase writes hooks into Codex's hook config (`~/.codex/hooks.json` by default). See `codexctl init --help` for `--budget`, `--brain-url`, `--bus-role`, and the `--skip-*` overrides.
 
 For just the hook install (no other phases), the **legacy flags** still work:
 
 ```bash
-claudectl --init                    # Write hooks to ~/.claude/settings.json (user scope)
-claudectl --init -s project         # Write to .claude/settings.local.json instead
+codexctl --init                    # Write hooks to ~/.codex/hooks.json (user scope)
+codexctl --init -s project         # Write to .codex/hooks.json instead
 ```
 
-This adds `PreToolUse`, `PostToolUse`, and `Stop` hooks that call `claudectl --json` on each event. Existing settings and hooks are preserved.
+This adds `PreToolUse`, `PostToolUse`, and `Stop` hooks that call `codexctl --json` on each event. Existing hook entries are preserved.
 
 To remove:
 
 ```bash
-claudectl init --remove             # Soft uninstall: hooks + onboarding marker (keeps user data)
-claudectl init --purge --yes        # Hard uninstall: --remove + wipe ~/.claudectl/ + config file
-claudectl --uninstall               # Legacy hook-only removal from user settings
-claudectl --uninstall -s project    # Legacy hook-only removal from project-local settings
+codexctl init --remove             # Soft uninstall: hooks + onboarding marker (keeps user data)
+codexctl init --purge --yes        # Hard uninstall: --remove + wipe ~/.codexctl/ + config file
+codexctl --uninstall               # Legacy hook-only removal from user settings
+codexctl --uninstall -s project    # Legacy hook-only removal from project-local settings
 ```
 
 ### How it works
 
-The hooks are standard Claude Code command hooks:
+The hooks are standard Codex command hooks:
 
 ```json
 {
   "hooks": {
     "PreToolUse": [{
       "matcher": "Bash",
-      "hooks": [{ "type": "command", "command": "claudectl --json 2>/dev/null || true", "timeout": 5 }]
+      "hooks": [{ "type": "command", "command": "codexctl --json 2>/dev/null || true", "timeout": 5 }]
     }],
     "PostToolUse": [{
       "matcher": "*",
-      "hooks": [{ "type": "command", "command": "claudectl --json 2>/dev/null || true", "timeout": 5 }]
+      "hooks": [{ "type": "command", "command": "codexctl --json 2>/dev/null || true", "timeout": 5 }]
     }],
     "Stop": [{
       "matcher": "",
-      "hooks": [{ "type": "command", "command": "claudectl --json 2>/dev/null || true", "timeout": 5 }]
+      "hooks": [{ "type": "command", "command": "codexctl --json 2>/dev/null || true", "timeout": 5 }]
     }]
   }
 }
 ```
 
-The `2>/dev/null || true` suffix ensures Claude Code is never blocked if claudectl is not installed or fails.
+The `2>/dev/null || true` suffix ensures Codex is never blocked if codexctl is not installed or fails.
 
 ### Scope
 
-The `--scope` / `-s` flag controls where hooks are written, matching Claude Code's own scope convention (`claude mcp add -s project`):
+The `--scope` / `-s` flag controls where hooks are written, matching Codex's own scope convention (`codex mcp add -s project`):
 
 | Scope | Flag | File | Committed to git? |
 |-------|------|------|--------------------|
-| `user` (default) | `--init` | `~/.claude/settings.json` | No (user home) |
-| `project` | `--init -s project` | `.claude/settings.local.json` | No (gitignored) |
+| `user` (default) | `--init` | `~/.codex/hooks.json` | No (user home) |
+| `project` | `--init -s project` | `.codex/hooks.json` | No (gitignored) |
 
-Use `user` scope when you want claudectl active everywhere. Use `project` scope when you only want it for specific projects, or when working in a shared repo where not everyone uses claudectl.
+Use `user` scope when you want codexctl active everywhere. Use `project` scope when you only want it for specific projects, or when working in a shared repo where not everyone uses codexctl.
 
 ## Brain Gate Mode
 
 The brain gate controls whether the plugin hook queries the brain on tool calls.
 
 ```bash
-claudectl --mode on                     # Default: brain evaluates, denies dangerous ops
-claudectl --mode off                    # Disable brain — pass through all tool calls
-claudectl --mode auto                   # Auto-approve above confidence threshold
-claudectl --mode status                 # Show current mode
+codexctl --mode on                     # Default: brain evaluates, denies dangerous ops
+codexctl --mode off                    # Disable brain — pass through all tool calls
+codexctl --mode auto                   # Auto-approve above confidence threshold
+codexctl --mode status                 # Show current mode
 ```
 
-The mode is stored in `~/.claudectl/brain/gate-mode`. If the file is absent, the default is `on`.
+The mode is stored in `~/.codexctl/brain/gate-mode`. If the file is absent, the default is `on`.
 
-The `/brain` command in the Claude Code plugin does the same thing:
+The `/brain` command in the Codex plugin does the same thing:
 
 ```
 /brain off     # Disable brain for exploratory work
@@ -186,19 +186,19 @@ The `/brain` command in the Claude Code plugin does the same thing:
 The brain can automatically detect friction patterns and suggest workflow improvements:
 
 ```bash
-claudectl --brain --insights              # View current insights
-claudectl --brain --insights on           # Auto-generate every 10 decisions
-claudectl --brain --insights off          # Disable auto-generation (default)
-claudectl --brain --insights status       # Show current mode
+codexctl --brain --insights              # View current insights
+codexctl --brain --insights on           # Auto-generate every 10 decisions
+codexctl --brain --insights off          # Disable auto-generation (default)
+codexctl --brain --insights status       # Show current mode
 ```
 
-The insights mode is stored in `~/.claudectl/brain/insights-mode`. If the file is absent, the default is `off` (opt-in). When enabled, insights are generated alongside preference distillation and tracked differentially — only new patterns are surfaced.
+The insights mode is stored in `~/.codexctl/brain/insights-mode`. If the file is absent, the default is `off` (opt-in). When enabled, insights are generated alongside preference distillation and tracked differentially — only new patterns are surfaced.
 
 Detected insight types: friction patterns, error loops, context blowouts, missing rules, accuracy gaps, temporal friction, cost trends.
 
-## Claude Code Plugin
+## Codex Plugin
 
-claudectl ships with a Claude Code plugin in `claude-plugin/` at the repository root. The plugin provides:
+codexctl ships with a Codex plugin in `codex-plugin/` at the repository root. The plugin provides:
 
 - **PreToolUse hooks** that query the brain before Bash/Write/Edit calls
 - **Slash commands** (`/sessions`, `/spend`, `/brain-stats`, `/brain`, `/auto-insights`)
@@ -209,14 +209,14 @@ The plugin and the `--init` hooks are complementary:
 
 | Method | What it does | Best for |
 |--------|-------------|----------|
-| `claudectl --init` | Observability hooks (PostToolUse, Stop) | Feeding data to the TUI dashboard |
+| `codexctl --init` | Observability hooks (PostToolUse, Stop) | Feeding data to the TUI dashboard |
 | Plugin | Brain gate hook (PreToolUse) + commands | Inline approve/deny without the TUI |
 
-You can use both. The `--init` hooks notify claudectl of tool completions. The plugin hook queries the brain before tool execution.
+You can use both. The `--init` hooks notify codexctl of tool completions. The plugin hook queries the brain before tool execution.
 
 ## Coordination Layer (--features coord)
 
-Multi-session coordination on a single machine. Stores events, leases, blockers, handoffs, interrupts, and memory in a local SQLite database at `~/.claudectl/coord.db`. No TOML configuration needed — inspect with `claudectl coord <subcommand>`. See [Reference](reference.md#coordination---features-coord) for all subcommands.
+Multi-session coordination on a single machine. Stores events, leases, blockers, handoffs, interrupts, and memory in a local SQLite database at `~/.codexctl/coord.db`. No TOML configuration needed — inspect with `codexctl coord <subcommand>`. See [Reference](reference.md#coordination---features-coord) for all subcommands.
 
 ## Relay & Hive Mind Configuration
 

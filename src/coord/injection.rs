@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Instant;
 
-use crate::session::ClaudeSession;
+use crate::session::CodexSession;
 
 use super::store;
 use super::types::*;
@@ -21,7 +21,7 @@ static CONTEXT_CACHE: Mutex<Option<HashMap<String, CacheEntry>>> = Mutex::new(No
 
 /// Build a compact coordination context string for injection into a brain prompt.
 /// Results are cached per session_id with a 10-second TTL to reduce database queries.
-pub fn build_coordination_context(session: &ClaudeSession) -> String {
+pub fn build_coordination_context(session: &CodexSession) -> String {
     // Check cache first
     if let Ok(guard) = CONTEXT_CACHE.lock() {
         if let Some(ref cache) = *guard {
@@ -52,7 +52,7 @@ pub fn build_coordination_context(session: &ClaudeSession) -> String {
     result
 }
 
-fn build_coordination_context_uncached(session: &ClaudeSession) -> String {
+fn build_coordination_context_uncached(session: &CodexSession) -> String {
     let conn = match store::open() {
         Ok(c) => c,
         Err(_) => return String::new(),
@@ -147,7 +147,7 @@ fn build_coordination_context_uncached(session: &ClaudeSession) -> String {
 }
 
 /// Build an FTS5 search query from the session's current state.
-fn build_memory_query(session: &ClaudeSession) -> String {
+fn build_memory_query(session: &CodexSession) -> String {
     let mut terms = Vec::new();
 
     if let Some(ref tool) = session.pending_tool_name {
@@ -168,8 +168,8 @@ mod tests {
     use super::*;
     use crate::session::RawSession;
 
-    fn test_session() -> ClaudeSession {
-        let mut s = ClaudeSession::from_raw(RawSession {
+    fn test_session() -> CodexSession {
+        let mut s = CodexSession::from_raw(RawSession {
             pid: 1,
             session_id: "sess_test".into(),
             cwd: "/tmp/myproject".into(),

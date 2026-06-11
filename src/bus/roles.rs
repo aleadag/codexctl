@@ -5,7 +5,7 @@
 //!
 //! Resolution order, given a caller's current working directory:
 //!
-//! 1. **Explicit** — the caller set `CLAUDECTL_BUS_ROLE` at session launch.
+//! 1. **Explicit** — the caller set `CODEXCTL_BUS_ROLE` at session launch.
 //! 2. **cwd-inferred** — a single registered role's `cwd_selector` is a
 //!    prefix of (or equal to) the caller's cwd.
 //! 3. **Ambiguous** — multiple roles match; surface an `Ambiguous` resolution
@@ -51,14 +51,14 @@ pub enum RoleResolution {
     Unbound { cwd: String },
 }
 
-pub const ROLE_ENV: &str = "CLAUDECTL_BUS_ROLE";
+pub const ROLE_ENV: &str = "CODEXCTL_BUS_ROLE";
 
 /// Resolve the caller's role. Order:
 /// 1. `explicit` (CLI `--role`)
-/// 2. `CLAUDECTL_BUS_ROLE` env
+/// 2. `CODEXCTL_BUS_ROLE` env
 /// 3. **PID-binding** (#307) — any role bound to a pid in the caller's
 ///    ancestor chain (starting at the caller's parent — for the bus stdio
-///    server, that's the Claude Code process).
+///    server, that's the Codex process).
 /// 4. cwd-inference (literal-prefix match against bound `cwd_selector`s)
 pub fn resolve(
     conn: &Connection,
@@ -91,7 +91,7 @@ fn resolve_by_pid_chain(conn: &Connection, chain: &[u32]) -> Result<Option<Role>
 }
 
 /// Caller's parent pid chain, capped at depth 8 so we don't walk to init.
-/// Depth 8 comfortably covers `claude → bash → mcp-stdio-server` plus
+/// Depth 8 comfortably covers `codex → bash → mcp-stdio-server` plus
 /// nested shells, tmux, etc.
 fn ancestor_pids() -> Vec<u32> {
     let mut out = Vec::new();
@@ -110,13 +110,13 @@ fn ancestor_pids() -> Vec<u32> {
 }
 
 /// Walk the caller's ancestor pid chain and return the first one whose
-/// `ps`-reported command line contains `claude` (case-insensitive). Used
+/// `ps`-reported command line contains `codex` (case-insensitive). Used
 /// by `bus role bind --self` to attach a role to the right session
-/// without making the operator look up Claude's pid (#310).
-pub fn find_claude_ancestor_pid() -> Option<u32> {
+/// without making the operator look up Codex's pid (#310).
+pub fn find_codex_ancestor_pid() -> Option<u32> {
     ancestor_pids()
         .into_iter()
-        .find(|pid| process_command_for(*pid).is_some_and(|c| c.to_lowercase().contains("claude")))
+        .find(|pid| process_command_for(*pid).is_some_and(|c| c.to_lowercase().contains("codex")))
 }
 
 /// Fetch `ps -o command=` for a pid. Returns `None` when the pid is gone.

@@ -9,45 +9,45 @@ LINUX_INTEL_SHA="${4:?Linux x86_64 sha is required}"
 LINUX_ARM_SHA="${5:?Linux arm64 sha is required}"
 
 TAG="v${VERSION}"
-BASE_URL="https://github.com/mercurialsolo/claudectl/releases/download/${TAG}"
+BASE_URL="https://github.com/aleadag/codexctl/releases/download/${TAG}"
 
 cat <<EOF
-class Claudectl < Formula
-  desc "Orchestrate a swarm of Claude Code agents with a learning local-LLM brain"
-  homepage "https://github.com/mercurialsolo/claudectl"
+class Codexctl < Formula
+  desc "Orchestrate a swarm of Codex agents with a learning local-LLM brain"
+  homepage "https://github.com/aleadag/codexctl"
   version "${VERSION}"
   license "MIT"
 
   on_macos do
     on_arm do
-      url "${BASE_URL}/claudectl-${TAG}-aarch64-apple-darwin.tar.gz"
+      url "${BASE_URL}/codexctl-${TAG}-aarch64-apple-darwin.tar.gz"
       sha256 "${MACOS_ARM_SHA}"
     end
 
     on_intel do
-      url "${BASE_URL}/claudectl-${TAG}-x86_64-apple-darwin.tar.gz"
+      url "${BASE_URL}/codexctl-${TAG}-x86_64-apple-darwin.tar.gz"
       sha256 "${MACOS_INTEL_SHA}"
     end
   end
 
   on_linux do
     on_arm do
-      url "${BASE_URL}/claudectl-${TAG}-aarch64-unknown-linux-musl.tar.gz"
+      url "${BASE_URL}/codexctl-${TAG}-aarch64-unknown-linux-musl.tar.gz"
       sha256 "${LINUX_ARM_SHA}"
     end
 
     on_intel do
-      url "${BASE_URL}/claudectl-${TAG}-x86_64-unknown-linux-musl.tar.gz"
+      url "${BASE_URL}/codexctl-${TAG}-x86_64-unknown-linux-musl.tar.gz"
       sha256 "${LINUX_INTEL_SHA}"
     end
   end
 
   def install
-    bin.install "claudectl"
+    bin.install "codexctl"
   end
 
   test do
-    assert_match "claudectl", shell_output("#{bin}/claudectl --version 2>&1", 0)
+    assert_match "codexctl", shell_output("#{bin}/codexctl --version 2>&1", 0)
   end
 end
 EOF

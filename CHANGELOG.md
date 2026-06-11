@@ -1,27 +1,27 @@
 # Changelog
 
-All notable changes to claudectl are documented here.
+All notable changes to codexctl are documented here.
 
 ## [0.57.2] - 2026-06-07
 
-### Added — `claudectl init --upgrade` + plugin-version doctor row (closes #327)
-- **`claudectl init --upgrade`** — re-sync everything the previous `init` wrote to match the running binary. Used after `brew upgrade claudectl` (or `cargo install ... --force`). Four steps, each with a ✓ / — / ✗ report:
-  1. Claude Code hook entries (`~/.claude/settings.json`)
-  2. Embedded plugin files (`~/.claude/plugins/claudectl/`) — checksums on-disk vs embedded before writing, so the report distinguishes "updated" from "unchanged"
+### Added — `codexctl init --upgrade` + plugin-version doctor row (closes #327)
+- **`codexctl init --upgrade`** — re-sync everything the previous `init` wrote to match the running binary. Used after `brew upgrade codexctl` (or `cargo install ... --force`). Four steps, each with a ✓ / — / ✗ report:
+  1. Codex hook entries (`~/.codex/hooks.json`)
+  2. Embedded plugin files (`~/.codex/plugins/codexctl/`) — checksums on-disk vs embedded before writing, so the report distinguishes "updated" from "unchanged"
   3. DB schema migrations (touching the bus + coord stores triggers `migrate(&conn)` as a side effect of `open()`)
   4. Onboarding marker version bump — when the recorded version differs from the binary's
-- **`claudectl doctor` gains a `plugin version` row** — compares the on-disk `.claude-plugin/plugin.json` version against the binary's `CARGO_PKG_VERSION`. Pass when they match; Advisory when they differ, with `claudectl init upgrade` as the fix hint. This is how operators discover they need to upgrade in the first place.
+- **`codexctl doctor` gains a `plugin version` row** — compares the on-disk `.codex-plugin/plugin.json` version against the binary's `CARGO_PKG_VERSION`. Pass when they match; Advisory when they differ, with `codexctl init upgrade` as the fix hint. This is how operators discover they need to upgrade in the first place.
 - README "Get started" section and `docs/quickstart.md` gain a new "Upgrading" callout pointing at the new verb.
 - 4 new init tests cover the upgrade helpers: first pass writes everything, second pass writes nothing, modified file gets rewritten, marker version bump round-trips.
 
-Closes the last open issue of DX epic #320. With this shipped, all 8 sub-issues of the DX overhaul are done — `brew install` → `claudectl init` → `claudectl doctor` is a complete activation, and `brew upgrade` → `claudectl init --upgrade` is the complete refresh.
+Closes the last open issue of DX epic #320. With this shipped, all 8 sub-issues of the DX overhaul are done — `brew install` → `codexctl init` → `codexctl doctor` is a complete activation, and `brew upgrade` → `codexctl init --upgrade` is the complete refresh.
 
 ## [0.57.1] - 2026-06-07
 
 ### Added — bus retention + `prune` (closes #337)
 - **`bus::store::prune(retention_days)`** — deletes `delivered` messages older than the cutoff (default 30 days, matches `coord::store::prune`). Pending and acked rows untouched. Returns the count deleted.
-- **`claudectl bus prune [--days N] [--dry-run]`** — manual prune verb. Without `--days`, uses the 30-day default.
-- **`claudectl doctor`** gains a `bus retention` row: Pass while the table is under 5000 messages; Advisory above, with a `claudectl bus prune` fix hint.
+- **`codexctl bus prune [--days N] [--dry-run]`** — manual prune verb. Without `--days`, uses the 30-day default.
+- **`codexctl doctor`** gains a `bus retention` row: Pass while the table is under 5000 messages; Advisory above, with a `codexctl bus prune` fix hint.
 - New helpers `bus::store::message_count` and `bus::store::prune_dry_run` for the doctor advisory + dry-run.
 - 5 new bus store tests cover prune semantics, dry-run, the zero-day edge case, the empty-table noop, and total-count accounting.
 
@@ -34,17 +34,17 @@ Closes the "no retention path — `bus.db` grows forever" gap surfaced after the
 The **DX overhaul release**. Closes #322, #324, #328, #325, #321, #326 — six issues from epic #320. A fresh Homebrew install now activates in three commands:
 
 ```bash
-brew install mercurialsolo/tap/claudectl   # full feature set, bus included
-claudectl init                              # writes plugin + hooks (slash commands, MCP, agent)
-claudectl doctor                            # ✓ confirms everything is wired up
+brew install aleadag/tap/codexctl   # full feature set, bus included
+codexctl init                              # writes plugin + hooks (slash commands, MCP, agent)
+codexctl doctor                            # ✓ confirms everything is wired up
 ```
 
 No repo clone. No manual MCP server registration. No "but how do I get the bus subcommand?"
 
-### Added — `claudectl doctor` for unified install + runtime health (closes #326)
-- **`claudectl doctor`** — top-down checklist answering "is everything wired up?" in one command. Replaces what was scattered across `--doctor` (terminal compat only), `init --check` (onboarding marker only), and ad-hoc probes.
-- Checks: binary on PATH, Claude Code hooks installed, plugin files installed, brain endpoint reachable, bus feature compiled in, bus DB writable, session discovery working, terminal integration.
-- Each check returns Pass / Advisory / Fail / Skipped with a one-line message and a fix hint. Failures advise the exact command to run (e.g. `claudectl init --plugin-only` when plugin files are missing).
+### Added — `codexctl doctor` for unified install + runtime health (closes #326)
+- **`codexctl doctor`** — top-down checklist answering "is everything wired up?" in one command. Replaces what was scattered across `--doctor` (terminal compat only), `init --check` (onboarding marker only), and ad-hoc probes.
+- Checks: binary on PATH, Codex hooks installed, plugin files installed, brain endpoint reachable, bus feature compiled in, bus DB writable, session discovery working, terminal integration.
+- Each check returns Pass / Advisory / Fail / Skipped with a one-line message and a fix hint. Failures advise the exact command to run (e.g. `codexctl init --plugin-only` when plugin files are missing).
 - Exit code 0 when all Pass / Advisory / Skipped; non-zero on any Fail — pipeline-friendly.
 - `--json` flag for scripting. Schema is stable: `[{name, status, message, fix_hint}]`.
 - Legacy `--doctor` flag still works but prints a deprecation note pointing at the new subcommand. Will be removed one release after consolidation.
@@ -53,37 +53,37 @@ No repo clone. No manual MCP server registration. No "but how do I get the bus s
 Part of the DX overhaul epic #320.
 
 ### Changed — Homebrew bottle now ships with all features (closes #321)
-- **`brew install mercurialsolo/tap/claudectl`** now produces a binary with `bus`, `coord`, `relay`, and `hive` all compiled in. `claudectl bus`, `claudectl coord`, `claudectl relay`, `claudectl hive` work end-to-end with no source rebuild. Binary grows from ~1.7 MB → ~6.3 MB; the async runtime exception for the `bus` feature is already documented in CLAUDE.md.
-- **`cargo install claudectl`** still defaults to the minimal build (`hive` only). Users who want the full feature set use `cargo install claudectl --features bus,coord,relay,hive`.
+- **`brew install aleadag/tap/codexctl`** now produces a binary with `bus`, `coord`, `relay`, and `hive` all compiled in. `codexctl bus`, `codexctl coord`, `codexctl relay`, `codexctl hive` work end-to-end with no source rebuild. Binary grows from ~1.7 MB → ~6.3 MB; the async runtime exception for the `bus` feature is already documented in AGENTS.md.
+- **`cargo install codexctl`** still defaults to the minimal build (`hive` only). Users who want the full feature set use `cargo install codexctl --features bus,coord,relay,hive`.
 - README and quickstart docs updated to surface both choices and call out the size trade-off.
 
 Part of the DX overhaul epic #320.
 
 ### Added — Plugin embedded in binary (closes #325)
-- **Plugin files now ship inside the `claudectl` binary** via `include_str!` — 17 files, ~29 KB total. `claudectl init` writes them to `~/.claude/plugins/claudectl/` automatically. No repo clone, no manual `.mcp.json` copy. The biggest single Homebrew-user UX win.
-- **`claudectl init --plugin-only`** — install (or re-install) just the plugin without re-running the rest of the wizard. Useful after `brew upgrade claudectl`.
+- **Plugin files now ship inside the `codexctl` binary** via `include_str!` — 17 files, ~29 KB total. `codexctl init` writes them to `~/.codex/plugins/codexctl/` automatically. No repo clone, no manual `.mcp.json` copy. The biggest single Homebrew-user UX win.
+- **`codexctl init --plugin-only`** — install (or re-install) just the plugin without re-running the rest of the wizard. Useful after `brew upgrade codexctl`.
 - Shell hook scripts (`brain-gate.sh`, `budget-check.sh`, `inbox-drain.sh`, `outcome-record.sh`, `session-briefing.sh`) are written with mode 0755 on POSIX.
-- `init --remove` (soft uninstall) now also removes `~/.claude/plugins/claudectl/`. The on-disk plugin tree was claudectl-managed; the soft uninstall should treat it the same way as it does the hook entries in `settings.json`.
+- `init --remove` (soft uninstall) now also removes `~/.codex/plugins/codexctl/`. The on-disk plugin tree was codexctl-managed; the soft uninstall should treat it the same way as it does the hook entries in `hooks.json`.
 - 6 new tests in `init::plugin_assets` cover round-trip writes, idempotency, the executable-bit, removal, and missing-dir tolerance.
 
 Part of the DX overhaul epic #320.
 
 ### Added — DX activation quick wins (closes #322, #324, #328)
-- **First-run banner (#322)** — running `claudectl` for the first time (no `~/.claudectl/onboarding.json` and no `claudectl` entries in `~/.claude/settings.json`) now prints a one-screen banner above the TUI explaining how to onboard. Skipped in `--demo`, in non-TUI output modes (`--json`, `--list`, `--watch`, `--summary`, `--headless`), and when `CLAUDECTL_SKIP_FIRST_RUN=1`.
-- **Brain phase ollama install hint (#324)** — when the Brain phase of `claudectl init` can't reach a local-LLM endpoint, it now prints concrete install steps (`brew install ollama && ollama serve &` + `ollama pull gemma4:e4b`) instead of silently recording `not_installed`. Non-interactive mode shows the hint too.
+- **First-run banner (#322)** — running `codexctl` for the first time (no `~/.codexctl/onboarding.json` and no `codexctl` entries in `~/.codex/hooks.json`) now prints a one-screen banner above the TUI explaining how to onboard. Skipped in `--demo`, in non-TUI output modes (`--json`, `--list`, `--watch`, `--summary`, `--headless`), and when `CODEXCTL_SKIP_FIRST_RUN=1`.
+- **Brain phase ollama install hint (#324)** — when the Brain phase of `codexctl init` can't reach a local-LLM endpoint, it now prints concrete install steps (`brew install ollama && ollama serve &` + `ollama pull gemma4:e4b`) instead of silently recording `not_installed`. Non-interactive mode shows the hint too.
 - **MSRV declared in `Cargo.toml`** (#328) — all three crates set `rust-version = "1.88"`. Users on older toolchains get a clean MSRV error from cargo before the resolver tries to compile transitive deps (which would otherwise produce opaque `darling@0.23.0 requires rustc 1.88.0` errors).
 
 Part of the DX overhaul epic #320.
 
 ### Changed — bus role slash command renamed `/bind` → `/role`
-- The plugin slash command shipped in 0.55.0 as `/bind <name>` is renamed to `/role <name>` (e.g. `/role frontend`, `/role tester`). Reads better — it matches the CLI noun (`claudectl bus role …`) and reflects what the operator is actually doing (setting a role, not binding to one).
-- `claude-plugin/commands/bind.md` is removed in favour of `claude-plugin/commands/role.md`. The command instructions and `--self` ancestor-walk behaviour are unchanged; only the user-facing name changed.
+- The plugin slash command shipped in 0.55.0 as `/bind <name>` is renamed to `/role <name>` (e.g. `/role frontend`, `/role tester`). Reads better — it matches the CLI noun (`codexctl bus role …`) and reflects what the operator is actually doing (setting a role, not binding to one).
+- `codex-plugin/commands/bind.md` is removed in favour of `codex-plugin/commands/role.md`. The command instructions and `--self` ancestor-walk behaviour are unchanged; only the user-facing name changed.
 - 0.55.0 / 0.56.0 install bases who typed `/bind` will need to retype `/role` after upgrading the plugin.
 
 ## [0.56.0] - 2026-06-07
 
-### Added — `claudectl init --purge` for full uninstall
-- **`claudectl init --purge`** — hard uninstall. Does everything `--remove` does (strips Claude Code hooks + clears the onboarding marker) **plus** wipes `~/.claudectl/` entirely (bus DB, brain decisions, hive knowledge, relay identity, coord state) and removes `~/.config/claudectl/config.toml`. Idempotent — re-running after a successful purge is a no-op.
+### Added — `codexctl init --purge` for full uninstall
+- **`codexctl init --purge`** — hard uninstall. Does everything `--remove` does (strips Codex hooks + clears the onboarding marker) **plus** wipes `~/.codexctl/` entirely (bus DB, brain decisions, hive knowledge, relay identity, coord state) and removes `~/.config/codexctl/config.toml`. Idempotent — re-running after a successful purge is a no-op.
 - **`--yes`** flag pairs with `--purge` to skip the confirmation prompt for automation. Without it, you see a list of paths and confirm before anything is deleted.
 - `--remove` is unchanged: it remains the safe form that preserves user data. The CLI help text now spells out the data-preservation contract.
 - 3 new unit tests for the `remove_*_if_present` helpers (idempotency, recursive tree wipe, sibling preservation). Tested live end-to-end against a fake `$HOME`: plant fake artifacts → `--purge --yes` removes them → `init --non-interactive --skip-*` reinits cleanly.
@@ -92,17 +92,17 @@ Part of the DX overhaul epic #320.
 
 ### Added — agent-bus role binding (closes #307, #310)
 - **PID-keyed role bindings.** The bus `roles` table gained a nullable `pid` column. When set, the resolver walks the caller's parent process chain (depth 8 via `getppid` + native `ps`) and picks the first role bound to any ancestor pid before falling back to cwd-inference. Disambiguates "two sessions in one worktree" — different pids, same cwd, distinct roles.
-- **`claudectl bus role bind <NAME> <CWD> --pid <PID>`** — explicit pid binding for orchestrator scripts.
-- **`claudectl bus role bind <NAME> --self`** — auto-detects Claude's pid by walking the ancestor chain looking for a process whose `ps -o command=` contains `claude`. Captures the current cwd. Used by the new `/bind` slash command.
+- **`codexctl bus role bind <NAME> <CWD> --pid <PID>`** — explicit pid binding for orchestrator scripts.
+- **`codexctl bus role bind <NAME> --self`** — auto-detects Codex's pid by walking the ancestor chain looking for a process whose `ps -o command=` contains `codex`. Captures the current cwd. Used by the new `/bind` slash command.
 - **TUI `Ctrl+R`** on the selected session opens a `role>` prompt and binds the selected session's pid + cwd through the new `Actions::bind_bus_role` trait method. Detail panel now shows `Bus role: <name> (bound by pid|cwd)` so the current binding is visible at a glance.
-- **`/bind <role>` plugin slash command** (`claude-plugin/commands/bind.md`) — operator types `/bind frontend` from inside a Claude session; the plugin runs `claudectl bus role bind --self frontend`.
+- **`/bind <role>` plugin slash command** (`codex-plugin/commands/bind.md`) — operator types `/bind frontend` from inside a Codex session; the plugin runs `codexctl bus role bind --self frontend`.
 - **`bus role list`** prints the new pid column; **`bus whoami --json`** payload gains a `pid` field.
 
 ### Added — role-name suggester (closes #309)
-- **`claudectl bus role suggest [--pid <PID>] [--top N] [--json]`** — scans a session's transcript and cwd for signals and emits ranked role-name candidates. Pure analysis: never writes a binding, never queries the LLM.
+- **`codexctl bus role suggest [--pid <PID>] [--top N] [--json]`** — scans a session's transcript and cwd for signals and emits ranked role-name candidates. Pure analysis: never writes a binding, never queries the LLM.
 - Four heuristic analyzers in `src/bus/suggest.rs`: cwd basename (with noise-suffix stripping), explicit role mentions in early user messages (`you are the X`, `acting as X`, `role: X`), tool fan-out shape (writes-heavy → `impl`, reads-heavy → `reviewer`, frequent test runs → `tester`), and path patterns in tool inputs (`frontend`, `backend`, `infra`, `tests`, `docs`).
 - Transcript scan capped at 2 MiB and seeks to the file *tail* so recent activity drives suggestions and a runaway scan can't freeze the dashboard.
-- 6 new unit tests; smoke-verified against a live Claude session.
+- 6 new unit tests; smoke-verified against a live Codex session.
 
 ### Internals
 - Schema migration is idempotent — guarded by a `PRAGMA table_info` check before `ADD COLUMN` (SQLite has no `IF NOT EXISTS` for column adds). Existing cwd-only bindings keep working unchanged.
@@ -113,26 +113,26 @@ Part of the DX overhaul epic #320.
 ## [0.54.0] - 2026-06-06
 
 ### Internals (workspace refactor — closes epic #279)
-- **`claudectl-tui` extracted into its own crate (closes #275).** The `App` state struct (3300 LoC), every `ui/*` render module (table, detail, help, status_bar, peers, skills), the recorder pair, and the demo fixtures now live in `crates/claudectl-tui/`. Depends on `claudectl-core` only. The binary keeps `brain_screen.rs` (the full-screen Brain Review surface) because it imports `brain::metrics` and `brain::risk`.
-- **Dependency direction enforced at three levels.** `claudectl → claudectl-tui → claudectl-core` is checked by (a) a grep guard against `crate::{brain,bus,coord,hive,relay,…}` inside `claudectl-core/src/`, and (b) two standalone build jobs (`Core (standalone)`, `TUI (standalone)`) that catch creeping cross-deps even when the workspace happens to compile.
-- **Eight runtime traits + DTOs in `claudectl-core::runtime`** are the only surface between the TUI and the binary's brain/bus/coord subsystems: `SessionSource`, `BrainView`, `BrainReviewView`, `CoordView`, `BusView`, `Actions`, `HiveActions`, `Orchestrator`, plus the stateful `BrainDriver`. The binary's `src/runtime/` provides `Live*` adapters; `MockRuntime` drives in-crate tests.
+- **`codexctl-tui` extracted into its own crate (closes #275).** The `App` state struct (3300 LoC), every `ui/*` render module (table, detail, help, status_bar, peers, skills), the recorder pair, and the demo fixtures now live in `crates/codexctl-tui/`. Depends on `codexctl-core` only. The binary keeps `brain_screen.rs` (the full-screen Brain Review surface) because it imports `brain::metrics` and `brain::risk`.
+- **Dependency direction enforced at three levels.** `codexctl → codexctl-tui → codexctl-core` is checked by (a) a grep guard against `crate::{brain,bus,coord,hive,relay,…}` inside `codexctl-core/src/`, and (b) two standalone build jobs (`Core (standalone)`, `TUI (standalone)`) that catch creeping cross-deps even when the workspace happens to compile.
+- **Eight runtime traits + DTOs in `codexctl-core::runtime`** are the only surface between the TUI and the binary's brain/bus/coord subsystems: `SessionSource`, `BrainView`, `BrainReviewView`, `CoordView`, `BusView`, `Actions`, `HiveActions`, `Orchestrator`, plus the stateful `BrainDriver`. The binary's `src/runtime/` provides `Live*` adapters; `MockRuntime` drives in-crate tests.
 - **`hooks.rs`, `launch.rs`, `skills.rs` moved into core** (#300), as did the `BrainConfig` and `IdleConfig` data structs (#301). The binary still owns TOML parsing and CLI flag layering; only the value types are downstreamed.
-- **Feature propagation:** the binary's `coord`, `relay`, `hive` features now cascade into `claudectl-tui` via the `claudectl-tui/coord` notation in `[features]`, so the same `#[cfg(feature = "…")]` gates resolve consistently across both crates.
-- **CLAUDE.md updated** to describe the post-refactor layout and the no-upward-deps rule (closes #278).
+- **Feature propagation:** the binary's `coord`, `relay`, `hive` features now cascade into `codexctl-tui` via the `codexctl-tui/coord` notation in `[features]`, so the same `#[cfg(feature = "…")]` gates resolve consistently across both crates.
+- **AGENTS.md updated** to describe the post-refactor layout and the no-upward-deps rule (closes #278).
 
 ### Compatibility
-- No user-facing CLI changes. Existing `crate::*` paths inside the binary continue to resolve unchanged thanks to a thin re-export bridge in `src/lib.rs` (`pub use claudectl_tui::{app, demo, recorder, session_recorder, ui};`).
-- No new dependencies. `claudectl-tui` pulls only what the TUI already used (`ratatui`, `crossterm`, `serde_json`).
+- No user-facing CLI changes. Existing `crate::*` paths inside the binary continue to resolve unchanged thanks to a thin re-export bridge in `src/lib.rs` (`pub use codexctl_tui::{app, demo, recorder, session_recorder, ui};`).
+- No new dependencies. `codexctl-tui` pulls only what the TUI already used (`ratatui`, `crossterm`, `serde_json`).
 
 ## [0.53.0] - 2026-06-06
 
 ### Added
-- **`claudectl init` — opinionated onboarding wizard (closes #257).** Single canonical first-run flow that walks five phases in order: weekly budget cap, local-LLM brain auto-detection (probes ollama / llama.cpp / LM Studio / vLLM), Claude Code hook install, agent-bus role binding, and curated skill suggestions. Replaces the planned `claudectl setup` verb from `docs/AGENT_BUS.md` § 8 — onboarding lives in one place.
-- **`claudectl init --non-interactive`** with per-phase flags (`--budget`, `--brain-url`, `--install-plugin` / `--skip-plugin`, `--bus-role` / `--bus-cwd`, `--skip-*` for every phase). For CI and dotfile automation.
-- **`claudectl init --check`** — drift report. Detects each phase's current state and diffs against the recorded marker; exits non-zero when the live environment no longer matches what was onboarded.
-- **`claudectl init --remove`** — uninstall every claudectl-managed artifact (hooks, marker). Phases that own user state (the bus DB, the config file's `budget` line) deliberately decline to delete it — we don't erase a user's setup, only artifacts claudectl actively manages.
-- **`claudectl init --reset`** — clear the onboarding marker so the next `init` starts fresh. Doesn't touch installed artifacts.
-- **`~/.claudectl/onboarding.json` marker** — durable record of which phases ran, when, and against which claudectl version. Loaded via `serde_json` with `#[serde(default)]` on optional fields so older markers stay forward-compatible.
+- **`codexctl init` — opinionated onboarding wizard (closes #257).** Single canonical first-run flow that walks five phases in order: weekly budget cap, local-LLM brain auto-detection (probes ollama / llama.cpp / LM Studio / vLLM), Codex hook install, agent-bus role binding, and curated skill suggestions. Replaces the planned `codexctl setup` verb from `docs/AGENT_BUS.md` § 8 — onboarding lives in one place.
+- **`codexctl init --non-interactive`** with per-phase flags (`--budget`, `--brain-url`, `--install-plugin` / `--skip-plugin`, `--bus-role` / `--bus-cwd`, `--skip-*` for every phase). For CI and dotfile automation.
+- **`codexctl init --check`** — drift report. Detects each phase's current state and diffs against the recorded marker; exits non-zero when the live environment no longer matches what was onboarded.
+- **`codexctl init --remove`** — uninstall every codexctl-managed artifact (hooks, marker). Phases that own user state (the bus DB, the config file's `budget` line) deliberately decline to delete it — we don't erase a user's setup, only artifacts codexctl actively manages.
+- **`codexctl init --reset`** — clear the onboarding marker so the next `init` starts fresh. Doesn't touch installed artifacts.
+- **`~/.codexctl/onboarding.json` marker** — durable record of which phases ran, when, and against which codexctl version. Loaded via `serde_json` with `#[serde(default)]` on optional fields so older markers stay forward-compatible.
 
 ### Changed
 - **Existing `--init` / `--uninstall` flags** are now deprecated aliases. They still write/remove the hook entries (existing dotfile automation keeps working), but each prints a deprecation note pointing at the new `init` subcommand. Slated for removal one release after consolidation.
@@ -140,12 +140,12 @@ Part of the DX overhaul epic #320.
 ### Internals
 - New `src/init/` module replacing the single-file `src/init.rs`:
   - `hooks.rs` — moved unchanged from the old `init.rs` (the hook writer the plugin phase delegates to).
-  - `marker.rs` — atomic-rename `OnboardingMarker` read/write at `~/.claudectl/onboarding.json`.
+  - `marker.rs` — atomic-rename `OnboardingMarker` read/write at `~/.codexctl/onboarding.json`.
   - `prompt.rs` — minimal stdin/stdout helpers (yes/no, number-or-default, line-or-default).
   - `state.rs` — environment probes for each phase. Uses `curl --max-time 1` for HTTP probes (matching the existing brain client pattern; no new deps).
   - `phases.rs` — `Phase` trait + `Budget` / `Brain` / `Plugin` / `Bus` / `Skills` impls + the ordered `registry()`. Single uniform shape so the wizard, `--check`, and `--remove` all walk the same list without per-phase branching.
   - `mod.rs` — orchestrator (`run_wizard`, `run_non_interactive`, `run_check`, `run_remove`, `run_reset`) plus the drift-comparison logic (`is_drift` treats `not_installed` and `skipped` as equivalent so the report only flags real divergence).
-- 21 new unit tests (marker roundtrip, drift comparison matrix, phase registry order, role-from-cwd derivation, TOML upsert, status-label stability). Plus a 9-scenario end-to-end smoke verifying every CLI verb (non-interactive all-skipped → marker → `--check` green → tamper → `--check` drift → `--remove` cleans up settings.json and marker; legacy `--init` still works and prints the deprecation note).
+- 21 new unit tests (marker roundtrip, drift comparison matrix, phase registry order, role-from-cwd derivation, TOML upsert, status-label stability). Plus a 9-scenario end-to-end smoke verifying every CLI verb (non-interactive all-skipped → marker → `--check` green → tamper → `--check` drift → `--remove` cleans up hooks.json and marker; legacy `--init` still works and prints the deprecation note).
 
 ### Compatibility
 - The Phase trait lets every phase live in its own file with no per-phase branching in the orchestrator — adding a new phase later (e.g., "MCP plugin discovery") is one new impl plus one line in `registry()`.
@@ -154,10 +154,10 @@ Part of the DX overhaul epic #320.
 ## [0.52.0] - 2026-06-06
 
 ### Added
-- **Agent bus Stop-hook delivery (Trigger A, phase 5 of `docs/AGENT_BUS.md`)** — closes the loop on bus messaging. After every turn finishes, the Claude Code plugin's new `Stop` hook drains the caller's mailbox and, when mail is present, returns `decision: "block"` with the rendered messages as `additionalContext`. The agent picks the work up **in the same turn** without waiting for the user to type `/inbox`. The bus is now self-driving.
-- **`claudectl bus stop-hook` subcommand** — owns the Claude Code Stop-hook output protocol. Silent + exit 0 on every failure mode (no role bound, empty inbox, missing DB, ambiguous cwd) so the hook can never block a session because of a bus problem. All logic lives in Rust (`src/bus/stop_hook.rs`) where it is unit-tested.
+- **Agent bus Stop-hook delivery (Trigger A, phase 5 of `docs/AGENT_BUS.md`)** — closes the loop on bus messaging. After every turn finishes, the Codex plugin's new `Stop` hook drains the caller's mailbox and, when mail is present, returns `decision: "block"` with the rendered messages as `additionalContext`. The agent picks the work up **in the same turn** without waiting for the user to type `/inbox`. The bus is now self-driving.
+- **`codexctl bus stop-hook` subcommand** — owns the Codex Stop-hook output protocol. Silent + exit 0 on every failure mode (no role bound, empty inbox, missing DB, ambiguous cwd) so the hook can never block a session because of a bus problem. All logic lives in Rust (`src/bus/stop_hook.rs`) where it is unit-tested.
 - **`--json` flag on `bus inbox` and `bus whoami`** — machine-readable output for tooling. `inbox --json` soft-fails on unbound/ambiguous cwds (returns `{"role":null,"messages":[],"note":"..."}`) so the Stop hook never errors out on a session that hasn't bound a role yet.
-- **`claude-plugin/hooks/scripts/inbox-drain.sh`** — Stop-hook wrapper installed by the plugin. Intentionally thin: protects against the case where `claudectl` is not on PATH, then delegates to `claudectl bus stop-hook`. Wired into `hooks.json` with a 5 s timeout.
+- **`codex-plugin/hooks/scripts/inbox-drain.sh`** — Stop-hook wrapper installed by the plugin. Intentionally thin: protects against the case where `codexctl` is not on PATH, then delegates to `codexctl bus stop-hook`. Wired into `hooks.json` with a 5 s timeout.
 
 ### Internals
 - New `src/bus/stop_hook.rs` module owning the Stop-output schema (`StopHookResponse`, `HookSpecificOutput`) and the markdown rendering of drained messages into context. Decoupled from the CLI so the schema is independently testable.
@@ -165,21 +165,21 @@ Part of the DX overhaul epic #320.
 - 5 new unit tests covering Stop-hook envelope shape, pluralization, JSON wire format, and the critical "no raw newlines inside the JSON string fields" invariant (caught a real bug in development).
 
 ### Compatibility
-- `claudectl bus inbox` without `--json` is unchanged — human-readable output, errors interactively on unbound/ambiguous cwds.
+- `codexctl bus inbox` without `--json` is unchanged — human-readable output, errors interactively on unbound/ambiguous cwds.
 - No new dependencies. Stop hook ships behind the existing `bus` feature.
 
 ## [0.51.0] - 2026-06-06
 
 ### Added
-- **Agent bus (phases 1–4 of `docs/AGENT_BUS.md`)** — a durable role directory + persistent mailbox exposed as an MCP server. Running Claude Code sessions discover each other (`list_agents`), look up their own role (`whoami`), send directed messages (`publish`), and drain their inbox (`read_inbox`) at turn boundaries. Gated behind the new opt-in `bus` Cargo feature.
-- **`claudectl bus` CLI** with five verbs: `stdio` (run the MCP server, what the plugin invokes), `role bind/list` (durable role addresses), `send` (directed messaging), `inbox` (drain queued messages), `whoami` (resolve the caller's role from cwd or `CLAUDECTL_BUS_ROLE`).
-- **Mailbox persistence** at `~/.claudectl/bus/bus.db` (SQLite WAL). Survives restarts; the role address outlives the session it was last bound to.
+- **Agent bus (phases 1–4 of `docs/AGENT_BUS.md`)** — a durable role directory + persistent mailbox exposed as an MCP server. Running Codex sessions discover each other (`list_agents`), look up their own role (`whoami`), send directed messages (`publish`), and drain their inbox (`read_inbox`) at turn boundaries. Gated behind the new opt-in `bus` Cargo feature.
+- **`codexctl bus` CLI** with five verbs: `stdio` (run the MCP server, what the plugin invokes), `role bind/list` (durable role addresses), `send` (directed messaging), `inbox` (drain queued messages), `whoami` (resolve the caller's role from cwd or `CODEXCTL_BUS_ROLE`).
+- **Mailbox persistence** at `~/.codexctl/bus/bus.db` (SQLite WAL). Survives restarts; the role address outlives the session it was last bound to.
 - **Content sanitization at the injection boundary.** A leading `/` in a message body is neutralized before delivery so a queued message cannot smuggle a slash command into the recipient. Subject grammar, type allowlist, and an 8 KiB body cap also enforced.
-- **Claude Code plugin updates.** `claude-plugin/.mcp.json` registers the bus as an MCP server; `claude-plugin/commands/inbox.md` is the new `/inbox` slash command that drains the caller's mailbox through the `read_inbox` tool.
+- **Codex plugin updates.** `codex-plugin/.mcp.json` registers the bus as an MCP server; `codex-plugin/commands/inbox.md` is the new `/inbox` slash command that drains the caller's mailbox through the `read_inbox` tool.
 
 ### Changed
-- **Architecture invariants in `CLAUDE.md` carve out an exception for the `bus` feature.** The bus pulls rmcp + a current-thread Tokio runtime, deliberately relaxing the no-async-runtime rule for that feature path only. Default build is unchanged at ~3.5 MB / <50 ms startup; `--features bus` is ~6.4 MB.
-- **Plugin manifest version** (`claude-plugin/.claude-plugin/plugin.json`) synced from a drifted `0.48.0` back to the crate version.
+- **Architecture invariants in `AGENTS.md` carve out an exception for the `bus` feature.** The bus pulls rmcp + a current-thread Tokio runtime, deliberately relaxing the no-async-runtime rule for that feature path only. Default build is unchanged at ~3.5 MB / <50 ms startup; `--features bus` is ~6.4 MB.
+- **Plugin manifest version** (`codex-plugin/.codex-plugin/plugin.json`) synced from a drifted `0.48.0` back to the crate version.
 
 ### Internals
 - New `src/bus/` module: `store.rs` (SQLite schema, drain-on-read), `roles.rs` (cwd inference with macOS symlink canonicalization), `policy.rs` (sanitization + validation), `mcp.rs` (rmcp stdio server), `cli.rs` (subcommand dispatch).
@@ -188,19 +188,19 @@ Part of the DX overhaul epic #320.
 ## [0.50.0] - 2026-05-29
 
 ### Added
-- **Brain Scorecard** (`claudectl --brain-stats scorecard`). One-screen periodic-review surface: north-star auto-handled accuracy, guardrails (Critical-tier false-approve count + rolling override rate), latency p50/p95/p99, few-shot cache hit rate, per-risk-tier accuracy breakdown, counterfactual summary, and review status. The single command you want to run to see whether the brain is healthy.
+- **Brain Scorecard** (`codexctl --brain-stats scorecard`). One-screen periodic-review surface: north-star auto-handled accuracy, guardrails (Critical-tier false-approve count + rolling override rate), latency p50/p95/p99, few-shot cache hit rate, per-risk-tier accuracy breakdown, counterfactual summary, and review status. The single command you want to run to see whether the brain is healthy.
 - **Per-risk-tier breakdown** (`--brain-stats tier`). Accuracy, false-approves, false-denies, and override rate split by `Low` / `Medium` / `High` / `Critical` tier. Critical-tier false-approves are flagged with a warning marker — they are the safety-critical number.
 - **Latency report** (`--brain-stats latency`). p50/p95/p99/mean/max + ASCII distribution histogram over the new `brain_decision_ms` field. Reads gracefully on histories without instrumentation.
 - **Cache hit report** (`--brain-stats cache`). Percentage of decisions handled from the few-shot store without an LLM call, over the new `cache_hit` field.
 - **Counterfactual analyzer** (`--brain-stats counterfactual`). Surfaces user-overrides where the subsequent same-PID outcome failed (brain was right) or succeeded (brain over-cautious). Each entry prints a one-shot `--brain-mark-canonical <id>` command for promotion.
-- **Interactive review CLI** (`claudectl --brain-review`). Walks the prioritized queue (counterfactual brain-was-right → Critical-tier false-approves → high-confidence calibration misses) one decision at a time with `m`/`n`/`s`/`d`/`q` controls. `--brain-review list` prints the queue non-interactively.
-- **Canonical teaching store**. Decisions marked canonical (via the review flow or `--brain-mark-canonical <id>`) are appended to `~/.claudectl/brain/canonical.jsonl` and get a `+50` score boost in `retrieval::retrieve_similar`, so reviewed examples dominate future few-shots. Each review pass becomes supervised training signal.
+- **Interactive review CLI** (`codexctl --brain-review`). Walks the prioritized queue (counterfactual brain-was-right → Critical-tier false-approves → high-confidence calibration misses) one decision at a time with `m`/`n`/`s`/`d`/`q` controls. `--brain-review list` prints the queue non-interactively.
+- **Canonical teaching store**. Decisions marked canonical (via the review flow or `--brain-mark-canonical <id>`) are appended to `~/.codexctl/brain/canonical.jsonl` and get a `+50` score boost in `retrieval::retrieve_similar`, so reviewed examples dominate future few-shots. Each review pass becomes supervised training signal.
 - **Brain Review TUI mode** (`M` hotkey). Full-screen mode integrated with the dashboard: Scorecard tab mirrors the CLI scorecard; Review tab provides a list + detail split with `j/k` navigate, `m` mark canonical, `n` mark with inline note, `s` skip, `r` refresh, `Tab` cycle, `Esc/M/q` close. Marked items drop from the queue in-place and selection advances — triage is one keystroke per item.
 - **DecisionRecord schema extensions**. `brain_decision_ms: Option<u64>`, `cache_hit: Option<bool>`, `canonical: Option<bool>` on every record. `Option`-wrapped for full backward compat with existing decision logs. New `log_decision_full(..., brain_decision_ms, cache_hit)` for instrumented call sites; the legacy `log_decision` continues to work and writes `None`.
-- **Source-built `packaging/homebrew-core/claudectl.rb`** formula template with `livecheck`, `generate_completions_from_executable`, `man1` install, and a real `test do` block. Submitted to Homebrew/homebrew-core (declined for now per the self-submission notability bar — re-pursueable when star/fork/watcher thresholds are cleared).
+- **Source-built `packaging/homebrew-core/codexctl.rb`** formula template with `livecheck`, `generate_completions_from_executable`, `man1` install, and a real `test do` block. Submitted to Homebrew/homebrew-core (declined for now per the self-submission notability bar — re-pursueable when star/fork/watcher thresholds are cleared).
 
 ### Changed
-- **Repositioned every public-facing surface** to the new tagline: *"Orchestrate a swarm of Claude Code agents with a local-LLM brain that learns from you."* Lands in the README hero, mkdocs site description, `docs/index.md`, `docs/llms.txt`, `Cargo.toml` description, clap `--help`, `flake.nix`, `AGENTS.md`, `CLAUDE.md`, `LAUNCH_POSTS.md`, `blog/posts.md`, the nixpkgs handoff README, and the GitHub repo description. Homebrew `desc` and AUR `pkgdesc` use the 73-char trimmed variant *"Orchestrate a swarm of Claude Code agents with a learning local-LLM brain"* to fit their 80-char cap.
+- **Repositioned every public-facing surface** to the new tagline: *"Orchestrate a swarm of Codex agents with a local-LLM brain that learns from you."* Lands in the README hero, mkdocs site description, `docs/index.md`, `docs/llms.txt`, `Cargo.toml` description, clap `--help`, `flake.nix`, `AGENTS.md`, `LAUNCH_POSTS.md`, `blog/posts.md`, the nixpkgs handoff README, and the GitHub repo description. Homebrew `desc` and AUR `pkgdesc` use the 73-char trimmed variant *"Orchestrate a swarm of Codex agents with a learning local-LLM brain"* to fit their 80-char cap.
 - **Homebrew-core template** `desc` trimmed from 82 → 61 chars to clear `brew audit --strict --new --online`'s 80-char limit, and pinned to the v0.49.3 source-tarball sha256 so future bumps start from a known-good baseline instead of the `REPLACE_WITH_SHA256` placeholder.
 
 ### Internals
@@ -211,9 +211,9 @@ Part of the DX overhaul epic #320.
 ## [0.49.3] - 2026-05-27
 
 ### Added
-- **`CLAUDECTL_DEMO_SKILLS=1` demo recording hook.** With this env var plus `--demo`, claudectl boots straight into the Skills & Hive mode with a scripted tab-rotation in `refresh_demo` (Skills → Hive → Skills every 14 ticks) and seeded peer/invite data so the Hive tab renders convincingly even without the `relay` feature compiled in. Lets `scripts/record-demos.sh skills` produce a deterministic GIF for launch posts.
-- **`scripts/record-demos.sh skills` target** — records `docs/assets/claudectl-demo-skills.gif` (30 s, both tabs) using the same agg flags as the other demo gifs. Bundled into the `all` target.
-- **`docs/assets/claudectl-demo-skills.gif`** — embedded in `docs/index.md` Screenshots and `docs/reference.md` Skills & Hive section.
+- **`CODEXCTL_DEMO_SKILLS=1` demo recording hook.** With this env var plus `--demo`, codexctl boots straight into the Skills & Hive mode with a scripted tab-rotation in `refresh_demo` (Skills → Hive → Skills every 14 ticks) and seeded peer/invite data so the Hive tab renders convincingly even without the `relay` feature compiled in. Lets `scripts/record-demos.sh skills` produce a deterministic GIF for launch posts.
+- **`scripts/record-demos.sh skills` target** — records `docs/assets/codexctl-demo-skills.gif` (30 s, both tabs) using the same agg flags as the other demo gifs. Bundled into the `all` target.
+- **`docs/assets/codexctl-demo-skills.gif`** — embedded in `docs/index.md` Screenshots and `docs/reference.md` Skills & Hive section.
 
 ## [0.49.2] - 2026-05-27
 
@@ -230,13 +230,13 @@ Part of the DX overhaul epic #320.
 
 ### Added
 - **Skills & Hive TUI overlay** — press `K` from the TUI to open a Skills & Hive panel. Two tabs (Tab to switch):
-  - **Skills tab** lists every Claude Code skill on disk (scans `~/.claude/skills`, `~/.claude/plugins/*/skills`, and `<cwd>/.claude/skills`). A `✓` marker shows which skills are already shared with the local hive; `s` shares the highlighted skill via the existing hive pipeline. Honours the 32 KiB skill-share limit and surfaces a warning when a skill exceeds it.
-  - **Hive tab** shows local identity, listener status, and known peers (read from `~/.claudectl/relay/peers/`). Hotkeys: `h` start hive listener (spawns detached `claudectl relay serve`), `i` generate an invite (relay code, word phrase, and invite link, shown inline), `J` join a hive via pasted code/link/words (detached `claudectl relay join`), `r` refresh peers.
+  - **Skills tab** lists every Codex skill on disk (scans `~/.codex/skills`, `~/.codex/plugins/*/skills`, and `<cwd>/.codex/skills`). A `✓` marker shows which skills are already shared with the local hive; `s` shares the highlighted skill via the existing hive pipeline. Honours the 32 KiB skill-share limit and surfaces a warning when a skill exceeds it.
+  - **Hive tab** shows local identity, listener status, and known peers (read from `~/.codexctl/relay/peers/`). Hotkeys: `h` start hive listener (spawns detached `codexctl relay serve`), `i` generate an invite (relay code, word phrase, and invite link, shown inline), `J` join a hive via pasted code/link/words (detached `codexctl relay join`), `r` refresh peers.
 - **`hive::cli::share_artifact_from_path()`** — public wrapper around the previously private CLI-only `cmd_share` so callers outside the dispatch table (the new TUI overlay) can share skills/commands/hooks without reimplementing frontmatter + scope parsing.
 - **`src/skills.rs`** — new skill discovery module with YAML frontmatter parsing, source classification (user / plugin / project), and a shared-key lookup that aligns with the hive's `skill:<lowercased-name>` semantic key.
 
 ### Technical details
-- Detached subprocess spawning for `relay serve` and `relay join` keeps the TUI event loop responsive; the invite generator shells out to `claudectl --json relay invite --words` and parses the JSON envelope.
+- Detached subprocess spawning for `relay serve` and `relay join` keeps the TUI event loop responsive; the invite generator shells out to `codexctl --json relay invite --words` and parses the JSON envelope.
 - New module wired into `src/lib.rs`, `src/main.rs`, and `src/ui/mod.rs`; help overlay (`?`) gains a `K` entry.
 - 585 tests passing (5 new: 3 for the skills module, 2 for the overlay rendering).
 
@@ -245,15 +245,15 @@ Part of the DX overhaul epic #320.
 ### Added
 - **Test-failure feedback loop** -- when a configured test runner (`cargo test`, `npm test`, `pytest`, `go test`, `bun test`, ...) exits non-zero, the reaper fans the failure out to the most recent brain-approved `Edit`/`Write`/`MultiEdit`/`NotebookEdit` decisions in the same project within a 5-minute window and tags them as `DecisionOutcome::TestFailed` (#238). Distillation weights `TestFailed` more strongly than transient `Error` (0.1 vs 0.3 for accepted-but-broken; 2.0 vs 1.5 for rejected-rightly), so a broken build is the strongest negative signal the brain has.
 - **`test_runners` config** -- `[brain]` section accepts an override list; sensible defaults cover the major language runners. Empty list disables fan-out.
-- **`continueOnBlock` for deny reasoning** -- `brain-gate.sh` emits the `hookSpecificOutput.continueOnBlock` envelope alongside the legacy `{decision, reason}` so newer Claude Code surfaces `permissionDecisionReason` and `systemMessage` into the model's next turn instead of blocking opaquely (#249). The brain stops being a wall and starts being a teacher.
-- **Below-threshold approval advisory** -- uncertain approvals (below the adaptive threshold) emit `hookSpecificOutput.additionalContext` so Claude picks up the brain's hesitation without being blocked.
+- **`continueOnBlock` for deny reasoning** -- `brain-gate.sh` emits the `hookSpecificOutput.continueOnBlock` envelope alongside the legacy `{decision, reason}` so newer Codex surfaces `permissionDecisionReason` and `systemMessage` into the model's next turn instead of blocking opaquely (#249). The brain stops being a wall and starts being a teacher.
+- **Below-threshold approval advisory** -- uncertain approvals (below the adaptive threshold) emit `hookSpecificOutput.additionalContext` so Codex picks up the brain's hesitation without being blocked.
 - **Robust hook output** -- `brain-gate.sh` now prefers `jq` for parsing the brain's response and constructing its envelope, with a manual JSON-escape fallback. Fixes a latent bug where reasoning containing quotes, backslashes, or newlines could corrupt the hook's stdout.
 
 ### Technical details
 - `DecisionOutcome::TestFailed(String)` carries the failing test command; backfill overlays it onto `DecisionRecord.outcome` after the consecutive-pair pass so a marker beats a clean tool-error signal.
 - `BrainConfig.test_runners: Vec<String>` parsed from `[brain]` TOML; `default_test_runners()` exposed for tests.
 - Fan-out is idempotent via `create_new` on `test-failures/<decision_id>.json` markers; 5-minute attribution window, capped at 5 recent edits per failure.
-- New hook envelope is unconditional -- Claude Code < 2.1.138 ignores the extra fields and falls back to the legacy deny.
+- New hook envelope is unconditional -- Codex < 2.1.138 ignores the extra fields and falls back to the legacy deny.
 - 1240 tests passing across all build configurations (12 new for this release).
 
 ## [0.45.0] - 2026-04-28
@@ -261,9 +261,9 @@ Part of the DX overhaul epic #320.
 ### Added
 - **Configurable event log retention** -- `retention_days` in `[lifecycle]` config section controls auto-prune period (default 30 days), wired to headless auto-prune loop (#186)
 - **Per-session recording toggle** -- `R` key now starts/stops recording for the selected session only, not all recordings. Recordings include a ~30-second lookback buffer of events before record-start. Output filenames include timestamps for uniqueness (#73)
-- **Config validation** -- `claudectl --config-validate` reports unknown keys, unknown sections, and malformed values in config files with line numbers and actionable messages (#74)
-- **Hook dry-run** -- `claudectl --init --dry-run` shows what hooks would be written to `.claude/settings.json` without modifying the file (#74)
-- **Sample config generation** -- `claudectl --config-init` writes an annotated `.claudectl.toml` template in the current directory (#74)
+- **Config validation** -- `codexctl --config-validate` reports unknown keys, unknown sections, and malformed values in config files with line numbers and actionable messages (#74)
+- **Hook dry-run** -- `codexctl --init --dry-run` shows what hooks would be written to `.codex/hooks.json` without modifying the file (#74)
+- **Sample config generation** -- `codexctl --config-init` writes an annotated `.codexctl.toml` template in the current directory (#74)
 - **False-deny friction cost** -- `--brain-stats false-deny` now shows friction cost (avg override delay, total friction time) and override reason breakdown. Brain denial overrides prompt for categorized reasons: always safe, one-time exception, or brain is wrong (#134)
 - **Override reason capture** -- when accepting a brain denial, TUI prompts for override reason (1/2/3 keys) to feed back into preference distillation
 - **Decision record timestamps** -- `resolved_at` field on all brain decisions enables friction latency measurement
@@ -286,7 +286,7 @@ Part of the DX overhaul epic #320.
   - `GET /api/sessions` -- unified session list across all connected workers
   - `GET /api/workers` -- worker status summary with staleness detection
   - Bearer token auth, 1 MB body cap, background thread
-  - CLI: `claudectl relay serve --http-port 9876 --auth-token <token>`
+  - CLI: `codexctl relay serve --http-port 9876 --auth-token <token>`
   - Config: `[relay]` section supports `http_port` and `auth_token`
 - **Unified dashboard** -- remote sessions from connected workers appear in the TUI alongside local sessions (#109)
   - Remote sessions shown with `[worker-id] project` prefix
@@ -298,7 +298,7 @@ Part of the DX overhaul epic #320.
 ### Technical details
 - All new code feature-gated behind `--features relay` -- default build unaffected
 - HTTP server uses `std::net::TcpListener` (same pattern as relay listener) -- no new runtime dependencies
-- `ClaudeSession` gains `worker_origin: Option<String>`, `is_remote()`, and `from_remote_json()` for remote session hydration
+- `CodexSession` gains `worker_origin: Option<String>`, `is_remote()`, and `from_remote_json()` for remote session hydration
 - 596 tests passing across all build configurations
 
 ## [0.33.0] - 2026-04-21
@@ -309,12 +309,12 @@ Part of the DX overhaul epic #320.
   - **Phase 1: Ownership and Handoffs** -- `claim`/`release` with exclusive conflict detection, structured handoff packets with goal/artifacts/next_steps, TUI badges (`L`/`H`/`I`) and detail panel coordination section
   - **Phase 2: Interrupt Bus** -- typed interrupt delivery with 4 modes (immediate, safe_boundary, waiting_only, manual_review), deduplication, expiry, full lifecycle tracking (pending -> delivered -> acknowledged), wired into app tick loop
   - **Phase 3: Memory Promotion and Injection** -- promotes high-confidence brain patterns into typed memory records, injects compact coordination context (leases, conflicts, blockers, handoffs, memory) into brain prompts before every decision
-  - **Phase 4: External Agent Adapters** -- `AgentAdapter` trait with capability negotiation, Claude Code adapter wrapping existing discovery/terminal code, Codex stub adapter
+  - **Phase 4: External Agent Adapters** -- `AgentAdapter` trait with capability negotiation, Codex adapter wrapping existing discovery/terminal code, Codex stub adapter
   - **Evaluation layer** -- 10 coordination eval scenarios, metrics engine computing conflict rate, handoff completion rate, interrupt delivery rate, blocker resolution time from the event log
 - **`--headless` mode** -- run the full autonomous stack (brain + coordination + context rot prevention) without a TUI. Attach a dashboard from another terminal. Emits structured JSON events to stdout
   - Automatic context rot intervention: raises `compact` interrupts at decay >= 50, `stop` at >= 85
   - Periodic coordination summaries every ~30s
-  - Usage: `claudectl --headless --brain --auto-run`
+  - Usage: `codexctl --headless --brain --auto-run`
 
 ### Technical details
 - Feature-gated behind `--features coord` -- default build is unaffected (zero cost for users who don't need coordination)
@@ -341,12 +341,12 @@ Part of the DX overhaul epic #320.
 ## [0.31.0] - 2026-04-19
 
 ### Added
-- **Claude Code plugin** — integrates the brain directly into Claude Code sessions, no TUI required (#169)
+- **Codex plugin** — integrates the brain directly into Codex sessions, no TUI required (#169)
   - PreToolUse hooks: `brain-gate.sh` (auto-approve/deny) and `budget-check.sh` (spend limits)
   - Slash commands: `/sessions`, `/spend`, `/brain-stats`, `/brain`, `/auto-insights`
   - Supervisor agent for session health triage
   - Session monitoring skill (auto-activated)
-- **`--init` / `--uninstall`** — one-command setup to wire up Claude Code hooks in `.claude/settings.json` (#169)
+- **`--init` / `--uninstall`** — one-command setup to wire up Codex hooks in `.codex/hooks.json` (#169)
 - **`--brain-query`** — standalone brain query for single tool-call decisions (JSON output), used by plugin hooks (#169)
 - **`--mode on|off|auto|status`** — toggle brain gate mode mid-session without restarting (#169)
 - **`-s / --scope`** — configure hooks at user or project level (#169)
@@ -358,7 +358,7 @@ Part of the DX overhaul epic #320.
 - **Impact scorecard** — `--brain-stats impact` with visual card layout, bar charts, and headline metrics (#171)
   - Auto-approve rate, brain accuracy, coverage vs static rules, dangerous ops blocked, time saved, learning curve
 - Star prompt after first successful run (#168)
-- `--demo` mode for fake sessions without Claude Code (#168)
+- `--demo` mode for fake sessions without Codex (#168)
 
 ## [0.30.0] - 2026-04-18
 
@@ -421,7 +421,7 @@ Part of the DX overhaul epic #320.
 
 ### Added
 - Continuous learning system: brain now closes the feedback loop — every accept, reject, auto-execute, and deny-rule override is logged and used to improve future decisions
-- Preference distillation: decision history is periodically compacted into `~/.claudectl/brain/preferences.json` with compact rules like "always approve [Read]" — uses ~200 tokens vs ~500+ for raw few-shot examples, critical for Gemma4's limited context window
+- Preference distillation: decision history is periodically compacted into `~/.codexctl/brain/preferences.json` with compact rules like "always approve [Read]" — uses ~200 tokens vs ~500+ for raw few-shot examples, critical for Gemma4's limited context window
 - Outcome-weighted few-shot retrieval: rejected decisions score higher than accepts (corrections are the strongest learning signal), with recency bonus for newer decisions
 - Adaptive confidence thresholds: per-tool accuracy tracking adjusts the auto-execution bar — high-accuracy tools get lower thresholds (0.5), low-accuracy tools require 0.95 confidence. Below-threshold suggestions are automatically demoted to advisory mode
 - Smart context budgeting: when distilled preferences exist, raw few-shot count is reduced to save context for transcript and decision prompt
@@ -449,7 +449,7 @@ Part of the DX overhaul epic #320.
 - `[orchestrate]` config section with `file_conflicts` (default true) and `auto_deny_file_conflicts` (default false)
 - Configurable health check thresholds via `[health]` TOML section — all 5 checks (cache, cost spike, loop, stall, context) accept user-defined thresholds
 - Capture actual error messages from tool results — detail panel shows "Recent Errors" section with tool name and message text
-- `--config-template` flag prints a fully annotated `.claudectl.toml` with all available settings
+- `--config-template` flag prints a fully annotated `.codexctl.toml` with all available settings
 - CLI flags grouped by purpose in `--help`: Dashboard, Output Modes, Filtering, Session Management, Budget & Notifications, Brain, Orchestration, Recording, Cleanup, History & Diagnostics
 
 ### Fixed
@@ -467,7 +467,7 @@ Part of the DX overhaul epic #320.
 ## [0.23.2] - 2026-04-15
 
 ### Fixed
-- Ghost sessions from PID reuse: when a Claude Code process exits and macOS reassigns the PID to another process, claudectl now correctly detects the mismatch and marks the session as Finished instead of showing stale status
+- Ghost sessions from PID reuse: when a Codex process exits and macOS reassigns the PID to another process, codexctl now correctly detects the mismatch and marks the session as Finished instead of showing stale status
 
 ## [0.23.1] - 2026-04-15
 
@@ -477,16 +477,16 @@ Part of the DX overhaul epic #320.
 ## [0.23.0] - 2026-04-15
 
 ### Added
-- External agent integration: register agents (Codex, Aider, custom) via `[agents.*]` config, brain can delegate work to them with output capture to `.claudectl-runs/agents/`
+- External agent integration: register agents (Codex, Aider, custom) via `[agents.*]` config, brain can delegate work to them with output capture to `.codexctl-runs/agents/`
 - `RuleAction::Delegate` — brain can delegate work to named agents
-- Agent output logged to `.claudectl-runs/agents/{name}.{timestamp}.log`
+- Agent output logged to `.codexctl-runs/agents/{name}.{timestamp}.log`
 
 ## [0.22.0] - 2026-04-15
 
 ### Added
-- Externalized prompt library: all brain prompts loaded from `~/.claudectl/brain/prompts/` with built-in fallbacks, users can override any prompt template
+- Externalized prompt library: all brain prompts loaded from `~/.codexctl/brain/prompts/` with built-in fallbacks, users can override any prompt template
 - Local eval framework: `--brain-eval` runs 6 built-in scenarios (approve/deny/send) against the local LLM and reports accuracy
-- Custom eval scenarios via JSON files in `~/.claudectl/brain/evals/`
+- Custom eval scenarios via JSON files in `~/.codexctl/brain/evals/`
 - `--brain-prompts` CLI command lists all prompt templates and their source (built-in vs user override)
 
 ## [0.21.0] - 2026-04-15
@@ -500,8 +500,8 @@ Part of the DX overhaul epic #320.
 ## [0.20.0] - 2026-04-15
 
 ### Added
-- Spawn action: the brain can launch new Claude Code sessions with derived prompts, with configurable `max_sessions` limit (default 10)
-- Persistent mailbox system: messages between sessions are queued in `~/.claudectl/brain/mailbox/` and delivered when the target session is ready (WaitingInput), preventing interruption during active work
+- Spawn action: the brain can launch new Codex sessions with derived prompts, with configurable `max_sessions` limit (default 10)
+- Persistent mailbox system: messages between sessions are queued in `~/.codexctl/brain/mailbox/` and delivered when the target session is ready (WaitingInput), preventing interruption during active work
 - Smart routing: Route action queues to mailbox when target is busy, delivers directly when target is waiting
 
 ## [0.19.0] - 2026-04-15
@@ -534,7 +534,7 @@ Part of the DX overhaul epic #320.
 - Brain inference loop: non-blocking async inference with 10-second per-PID cooldown
 - Advisory UI: pending brain suggestions shown inline (`[b:approve]`), accept with `b`, reject with `B`
 - Auto mode: `--brain-auto` executes suggestions without confirmation
-- Decision logging: every brain suggestion + user response logged to `~/.claudectl/brain/decisions.jsonl`
+- Decision logging: every brain suggestion + user response logged to `~/.codexctl/brain/decisions.jsonl`
 - Deny rules always override brain suggestions regardless of confidence
 
 ## [0.17.1] - 2026-04-15
@@ -547,14 +547,14 @@ Part of the DX overhaul epic #320.
 ## [0.17.0] - 2026-04-15
 
 ### Added
-- Rule-based auto-actions: configure `[rules.*]` sections in `.claudectl.toml` to automatically approve, deny, send messages, or terminate sessions based on tool name, command pattern, project, cost threshold, and error state
+- Rule-based auto-actions: configure `[rules.*]` sections in `.codexctl.toml` to automatically approve, deny, send messages, or terminate sessions based on tool name, command pattern, project, cost threshold, and error state
 - Pending tool tracking: sessions now expose the tool name and command awaiting approval for rule matching and display
 - Deny-first precedence: deny rules always override approve rules regardless of config order
 
 ## [0.16.2] - 2026-04-14
 
 ### Fixed
-- Sessions blocked on a permission prompt now correctly show Needs Input when Claude Code writes `stop_reason: null` with a tool_use content block; the monitor infers `tool_use` from the message content instead of requiring the explicit stop_reason field
+- Sessions blocked on a permission prompt now correctly show Needs Input when Codex writes `stop_reason: null` with a tool_use content block; the monitor infers `tool_use` from the message content instead of requiring the explicit stop_reason field
 
 ## [0.16.1] - 2026-04-14
 
@@ -566,7 +566,7 @@ Part of the DX overhaul epic #320.
 ### Added
 - GNOME Terminal support on Linux for `--new` and the `n` launch wizard, with doctor output that makes the current control limitations explicit
 - GNOME Terminal launch support for Ubuntu's default terminal, verified under Docker/X11
-- Homebrew release automation for both macOS and Linux artifacts, updating `mercurialsolo/homebrew-tap` on tagged releases
+- Homebrew release automation for both macOS and Linux artifacts, updating `aleadag/homebrew-tap` on tagged releases
 
 ### Fixed
 - Parent sessions now keep subagent token and cost rollups even when transient task files disappear from `/tmp`
@@ -577,17 +577,17 @@ Part of the DX overhaul epic #320.
 ## [0.15.5] - 2026-04-14
 
 ### Fixed
-- Unified Claude transcript parsing across monitoring and highlight reels, so status/cost/context now come from one parser instead of separate ad-hoc readers
+- Unified Codex transcript parsing across monitoring and highlight reels, so status/cost/context now come from one parser instead of separate ad-hoc readers
 - Sessions with missing or unsupported transcript telemetry now show an explicit `Unknown` state with `n/a` metrics instead of looking like idle zero-cost sessions
-- `--run` now tracks real child exit status, drains stdout/stderr, writes per-task logs under `.claudectl-runs/`, and fails tasks on non-zero exit instead of treating any vanished PID as success
-- `n` and `--new` now launch visible Claude sessions only in supported terminals (`tmux`, Kitty, WezTerm) and fail clearly elsewhere instead of spawning detached background processes
+- `--run` now tracks real child exit status, drains stdout/stderr, writes per-task logs under `.codexctl-runs/`, and fails tasks on non-zero exit instead of treating any vanished PID as success
+- `n` and `--new` now launch visible Codex sessions only in supported terminals (`tmux`, Kitty, WezTerm) and fail clearly elsewhere instead of spawning detached background processes
 - Cost estimation now uses a model registry with config overrides; unknown models are marked as fallback estimates instead of silently pretending pricing is verified
 - `install.sh` now downloads the tagged release assets that the GitHub release workflow actually publishes
 
 ### Added
 - `[models."..."]` config sections for overriding pricing and context limits per model
 - Telemetry metadata in JSON and webhook outputs, including whether estimates are verified or fallback
-- Shared transcript fixtures and parser tests for both current and legacy Claude JSONL shapes
+- Shared transcript fixtures and parser tests for both current and legacy Codex JSONL shapes
 
 ## [0.13.1] - 2026-04-13
 
@@ -600,7 +600,7 @@ Part of the DX overhaul epic #320.
 - **Session highlight reel** — press `R` on any session to start recording a supercut of its activity. Parses the session's JSONL in real-time, extracts the interesting bits (file edits, bash commands, status transitions), compresses idle time, and outputs as `.gif` or `.cast`. Press `R` again to stop (#66)
 - **Multiple simultaneous recordings** — press `R` on different sessions to record them all at once. Each gets its own highlight reel
 - **Per-session REC indicator** — table shows `REC` prefix on recorded sessions, status bar shows count
-- **Supercut format** — title card, running stats header (edits/commands/errors), paced playback, final summary card with claudectl branding
+- **Supercut format** — title card, running stats header (edits/commands/errors), paced playback, final summary card with codexctl branding
 - Only highlight events make the cut: Edit, Write, Bash, Agent. Read/Grep/Glob filtered out
 - Errors marked ✗ red, successes ✓ green, verbose text trimmed
 - Works passively in background while TUI stays interactive
@@ -609,7 +609,7 @@ Part of the DX overhaul epic #320.
 ## [0.11.2] - 2026-04-13
 
 ### Added
-- **Direct GIF recording** (`--record session.gif`) — specify `.gif` extension and claudectl automatically records asciicast then converts via `agg`. No manual pipeline needed (#65)
+- **Direct GIF recording** (`--record session.gif`) — specify `.gif` extension and codexctl automatically records asciicast then converts via `agg`. No manual pipeline needed (#65)
 - Falls back gracefully: if `agg` not installed, saves `.cast` with install instructions
 - `.cast` extension still supported for raw asciicast v2 output
 
@@ -625,12 +625,12 @@ Part of the DX overhaul epic #320.
 ## [0.10.0] - 2026-04-13
 
 ### Added
-- **Remote compaction trigger** — press `c` to send `/compact` to a running Claude Code session. Only works when session is idle/waiting. Prevents context window from filling up before auto-compaction kicks in (#64)
+- **Remote compaction trigger** — press `c` to send `/compact` to a running Codex session. Only works when session is idle/waiting. Prevents context window from filling up before auto-compaction kicks in (#64)
 - **Rate limit exhaustion ETA** — title bar shows `$spent/$budget (ETA: Xh Ym)` based on aggregate burn rate. Color-coded: green (>2h), yellow (<2h), red (<30m) (#57)
 - **Conflict detection** — warns when 2+ sessions share the same working directory with `!!` prefix on project name. Desktop notification and `on_conflict_detected` hook (#58)
 - **Context threshold hooks** — new `on_context_high` event fires when context window % crosses configurable threshold (default 75%). Resets after `/compact`. New `{context_pct}` template variable (#59)
 - **Per-tool token attribution** — detail panel shows tool call counts sorted by frequency (Bash, Read, Edit, etc.). Exposed in `--json` export (#60)
-- **Session cleanup command** — `claudectl --clean` with `--older-than`, `--finished`, `--dry-run` flags. Removes dead session JSON + JSONL transcripts, reports freed disk space (#61)
+- **Session cleanup command** — `codexctl --clean` with `--older-than`, `--finished`, `--dry-run` flags. Removes dead session JSON + JSONL transcripts, reports freed disk space (#61)
 - **File change tracking** — detail panel shows which files each session modified (extracted from Edit/Write tool_use events in JSONL). Exposed in `--json` export (#62)
 - **Permission wait time** — status column shows `Needs Input (2m 34s)` with escalating colors (yellow >1m, red >5m). NeedsInput sessions sorted by longest-waiting first (#63)
 - `[context] warn_threshold` config option for context alert threshold
@@ -649,8 +649,8 @@ Part of the DX overhaul epic #320.
 - 7 hook events: `on_session_start`, `on_status_change`, `on_needs_input`, `on_finished`, `on_budget_warning`, `on_budget_exceeded`, `on_idle`
 - Template variables: `{pid}`, `{project}`, `{status}`, `{cost}`, `{model}`, `{cwd}`, `{tokens_in}`, `{tokens_out}`, `{elapsed}`, `{session_id}`, `{old_status}`, `{new_status}`
 - Hooks configured in `[hooks.on_*]` sections of config.toml
-- `claudectl --hooks` to list configured hooks
-- Verified hooks repository at mercurialsolo/claudectl-hooks
+- `codexctl --hooks` to list configured hooks
+- Verified hooks repository at aleadag/codexctl-hooks
 
 ## [0.8.3] - 2025-04-10
 
@@ -660,9 +660,9 @@ Part of the DX overhaul epic #320.
 ## [0.8.0] - 2025-04-09
 
 ### Added
-- **Multi-session orchestration** — `claudectl --run tasks.json` with dependency ordering and `--parallel` flag
+- **Multi-session orchestration** — `codexctl --run tasks.json` with dependency ordering and `--parallel` flag
 - **Session history** — persist completed sessions with `--history` and `--stats` commands
-- **Configuration files** — `~/.config/claudectl/config.toml` (global) and `.claudectl.toml` (per-project) with layered overrides
+- **Configuration files** — `~/.config/codexctl/config.toml` (global) and `.codexctl.toml` (per-project) with layered overrides
 - **Theme system** — dark, light, and monochrome themes with `NO_COLOR` support
 - **Diagnostic logging** — `--log` flag for structured debug output
 - **Install script and Nix flake** for easier distribution
@@ -674,14 +674,14 @@ Part of the DX overhaul epic #320.
 ## [0.7.0] - 2025-04-07
 
 ### Added
-- **Watch mode** — `claudectl --watch` streams status changes without TUI
+- **Watch mode** — `codexctl --watch` streams status changes without TUI
 - **Debug mode** — timing instrumentation in the footer
 - **Activity sparklines** — 30-second history ring buffer per session
 - **Grouped view** — press `g` to group sessions by project with aggregate stats
 - **Detail panel** — press `Enter` for expanded session info (tokens, cost, model, paths)
-- **Session summary** — `claudectl --summary` for what happened while you were away
+- **Session summary** — `codexctl --summary` for what happened while you were away
 - **Webhooks** — POST JSON to Slack/Discord/URL on status changes with event filtering
-- **Session launcher** — press `n` or `claudectl --new` to start sessions from the TUI
+- **Session launcher** — press `n` or `codexctl --new` to start sessions from the TUI
 - **Budget enforcement** — `--budget` with 80% warning and optional `--kill-on-budget`
 - Custom output format for watch mode
 - Linux support (monitoring without terminal switching)
@@ -724,7 +724,7 @@ Part of the DX overhaul epic #320.
 ### Added
 - Terminal support for **Ghostty**, **Kitty**, **WezTerm**, **tmux**, **Warp**, **iTerm2**, and **Terminal.app**
 - Process table enrichment (CPU, MEM, TTY, elapsed) via `ps`
-- Session file scanner for `~/.claude/sessions/*.json`
+- Session file scanner for `~/.codex/sessions/*.json`
 - JSONL tail reader for incremental token accumulation
 - Status inference engine (Processing / NeedsInput / WaitingInput / Idle / Finished)
 - Cost estimation with model-aware pricing (Opus, Sonnet, Haiku)
@@ -735,8 +735,8 @@ Part of the DX overhaul epic #320.
 
 ### Added
 - Initial release
-- Basic TUI table showing running Claude Code sessions
-- Process discovery via `~/.claude/sessions/` directory
+- Basic TUI table showing running Codex sessions
+- Process discovery via `~/.codex/sessions/` directory
 - ratatui-based terminal UI
 
 ---
@@ -758,7 +758,7 @@ Part of the DX overhaul epic #320.
 - `c` — Trigger `/compact` on idle sessions
 - `a` — Toggle auto-approve (double-tap)
 - `d`/`x` — Kill sessions (double-tap to confirm)
-- `n` — Launch new Claude Code sessions
+- `n` — Launch new Codex sessions
 - `Tab` — Switch to session's terminal
 
 ### Observability
@@ -790,8 +790,8 @@ Part of the DX overhaul epic #320.
 - `--clean` — remove old session data
 
 ### Configuration
-- Global config: `~/.config/claudectl/config.toml`
-- Per-project config: `.claudectl.toml`
+- Global config: `~/.config/codexctl/config.toml`
+- Per-project config: `.codexctl.toml`
 - CLI flags override config values
 - Theme system: dark, light, monochrome, NO_COLOR
 

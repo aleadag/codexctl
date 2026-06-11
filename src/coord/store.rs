@@ -13,7 +13,7 @@ static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 fn db_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     PathBuf::from(home)
-        .join(".claudectl")
+        .join(".codexctl")
         .join("coord")
         .join("coord.db")
 }
@@ -102,8 +102,8 @@ pub fn check_schema_version(conn: &Connection) -> Result<(), String> {
     if actual > EXPECTED_COORD_SCHEMA_VERSION {
         return Err(format!(
             "coord DB schema at v{actual} but this binary expects v{expected}. \
-             A newer claudectl initialized this DB. Upgrade to that version, or \
-             run `claudectl init --upgrade` after upgrading the binary.",
+             A newer codexctl initialized this DB. Upgrade to that version, or \
+             run `codexctl init --upgrade` after upgrading the binary.",
             expected = EXPECTED_COORD_SCHEMA_VERSION
         ));
     }
@@ -130,7 +130,7 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         CREATE TABLE IF NOT EXISTS leases (
             id                TEXT PRIMARY KEY,
             owner_session_id  TEXT NOT NULL,
-            owner_agent       TEXT NOT NULL DEFAULT 'claude-code',
+            owner_agent       TEXT NOT NULL DEFAULT 'codex',
             resource_kind     TEXT NOT NULL,
             resource_value    TEXT NOT NULL,
             mode              TEXT NOT NULL,
@@ -335,7 +335,7 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         CREATE INDEX IF NOT EXISTS idx_transitions_task ON task_transitions(task_id);
 
         -- Hook event ingestion (RFC v2 §6). Hooks push payloads here via
-        -- `claudectl ingest` so the reconciler reacts in one tick instead
+        -- `codexctl ingest` so the reconciler reacts in one tick instead
         -- of waiting on file-watch debounce. JSONL tail stays authoritative
         -- — this table is best-effort by construction (`|| true` in hook
         -- commands), which is why it cannot be the source of record.
@@ -1534,7 +1534,7 @@ mod tests {
         let lease = Lease {
             id: "lease_1".into(),
             owner_session_id: "sess_1".into(),
-            owner_agent: "claude-code".into(),
+            owner_agent: "codex".into(),
             resource_kind: "path_glob".into(),
             resource_value: "src/brain/**".into(),
             mode: LeaseMode::Exclusive,
@@ -1563,7 +1563,7 @@ mod tests {
         let lease = Lease {
             id: "lease_expired".into(),
             owner_session_id: "sess_1".into(),
-            owner_agent: "claude-code".into(),
+            owner_agent: "codex".into(),
             resource_kind: "file".into(),
             resource_value: "src/app.rs".into(),
             mode: LeaseMode::Exclusive,
@@ -1621,7 +1621,7 @@ mod tests {
 
         let handoff = Handoff {
             id: "handoff_1".into(),
-            from_session_id: "sess_claude_1".into(),
+            from_session_id: "sess_codex_1".into(),
             to_session_id: Some("sess_codex_2".into()),
             task_id: "task_windows".into(),
             summary: "Path normalization on Windows".into(),
@@ -1683,7 +1683,7 @@ mod tests {
         let record = MemoryRecord {
             id: "mem_1".into(),
             mem_type: "workflow".into(),
-            scope: serde_json::json!({"project": "claudectl"}),
+            scope: serde_json::json!({"project": "codexctl"}),
             subjects: vec![Subject {
                 kind: "path".into(),
                 value: "src/health.rs".into(),
@@ -1786,7 +1786,7 @@ mod tests {
         let lease = Lease {
             id: "l_glob".into(),
             owner_session_id: "sess_1".into(),
-            owner_agent: "claude-code".into(),
+            owner_agent: "codex".into(),
             resource_kind: "path_glob".into(),
             resource_value: "src/**".into(),
             mode: LeaseMode::Exclusive,
@@ -1838,7 +1838,7 @@ mod tests {
         Lease {
             id: id.into(),
             owner_session_id: session.into(),
-            owner_agent: "claude-code".into(),
+            owner_agent: "codex".into(),
             resource_kind: "path_glob".into(),
             resource_value: resource.into(),
             mode,

@@ -2,7 +2,7 @@
 //!
 //! Lives in its own `bus.db` (parallel to `coord/coord.db`) so the bus's
 //! schema can evolve independently of the coordination/event store. WAL mode
-//! makes it safe for the TUI process and every `claudectl bus stdio`
+//! makes it safe for the TUI process and every `codexctl bus stdio`
 //! subprocess to read/write concurrently.
 
 use std::fs;
@@ -17,7 +17,7 @@ static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 fn db_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     PathBuf::from(home)
-        .join(".claudectl")
+        .join(".codexctl")
         .join("bus")
         .join("bus.db")
 }
@@ -406,7 +406,7 @@ pub fn prune(conn: &Connection, retention_days: Option<u64>) -> Result<u64, Stri
 }
 
 /// How many rows `prune` would delete without writing. Used by
-/// `bus prune --dry-run` and by `claudectl doctor` when it wants to
+/// `bus prune --dry-run` and by `codexctl doctor` when it wants to
 /// surface "X stale messages waiting to be pruned" advisories.
 pub fn prune_dry_run(conn: &Connection, retention_days: Option<u64>) -> Result<u64, String> {
     let days = retention_days.unwrap_or(DEFAULT_RETENTION_DAYS);
@@ -421,7 +421,7 @@ pub fn prune_dry_run(conn: &Connection, retention_days: Option<u64>) -> Result<u
     Ok(n as u64)
 }
 
-/// Total messages currently in the table. Used by `claudectl doctor`
+/// Total messages currently in the table. Used by `codexctl doctor`
 /// to flag a growing mailbox before it becomes a problem.
 pub fn message_count(conn: &Connection) -> Result<u64, String> {
     let n: i64 = conn

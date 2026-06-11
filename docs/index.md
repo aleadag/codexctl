@@ -1,6 +1,6 @@
-# claudectl
+# codexctl
 
-**Orchestrate a swarm of Claude Code agents with a local-LLM brain that learns from you.**
+**Orchestrate a swarm of Codex agents with a local-LLM brain that learns from you.**
 
 <p class="hero-tagline">
 Know which agent is blocked, burning budget, waiting for approval, or stalled - and intervene without tab hunting.
@@ -13,33 +13,33 @@ Know which agent is blocked, burning budget, waiting for approval, or stalled - 
   <span>macOS &amp; Linux</span>
 </div>
 
-![claudectl dashboard demo](assets/claudectl-demo-hero.gif){ .terminal-screenshot }
+![codexctl dashboard demo](assets/codexctl-demo-hero.gif){ .terminal-screenshot }
 
 ## Install
 
 === "Homebrew"
 
     ```bash
-    brew install mercurialsolo/tap/claudectl
+    brew install aleadag/tap/codexctl
     ```
 
 === "Cargo"
 
     ```bash
-    cargo install claudectl
+    cargo install codexctl
     ```
 
-Then wire up Claude Code hooks and start the dashboard:
+Then wire up Codex hooks and start the dashboard:
 
 ```bash
-claudectl --init    # one-time setup
-claudectl           # launch dashboard
+codexctl --init    # one-time setup
+codexctl           # launch dashboard
 ```
 
-Or try it without Claude Code running:
+Or try it without Codex running:
 
 ```bash
-claudectl --demo
+codexctl --demo
 ```
 
 See the [Quick Start](quickstart.md) for the full walkthrough.
@@ -114,14 +114,14 @@ Press `R` to record a session highlight reel as a GIF. Extracts edits, commands,
 
 ### Relay & Hive Mind
 
-Connect claudectl instances across machines. Share brain learnings, delegate tasks, and build a convergent hive mind - all peer-to-peer. [Learn more](relay.md)
+Connect codexctl instances across machines. Share brain learnings, delegate tasks, and build a convergent hive mind - all peer-to-peer. [Learn more](relay.md)
 
 </div>
 <div class="feature-item" markdown>
 
 ### Agent Bus (preview)
 
-Durable role directory + persistent mailbox exposed as an MCP server. Running Claude Code instances discover each other, look up their own role, send directed messages, and drain their inbox at turn boundaries. Phases 1-4 of the [design spec](AGENT_BUS.md) are shipped behind `--features bus`.
+Durable role directory + persistent mailbox exposed as an MCP server. Running Codex instances discover each other, look up their own role, send directed messages, and drain their inbox at turn boundaries. Phases 1-4 of the [design spec](AGENT_BUS.md) are shipped behind `--features bus`.
 
 </div>
 <div class="feature-item" markdown>
@@ -144,11 +144,11 @@ Post-mortem analysis on completed sessions via `--autopsy`. Inspect what went wr
 
 Skills & Hive mode (press `K` in the dashboard):
 
-![claudectl Skills & Hive mode](assets/claudectl-demo-skills.gif){ .terminal-screenshot }
+![codexctl Skills & Hive mode](assets/codexctl-demo-skills.gif){ .terminal-screenshot }
 
 Dashboard health monitoring:
 
-![claudectl health monitoring](assets/demo-health.gif){ .terminal-screenshot }
+![codexctl health monitoring](assets/demo-health.gif){ .terminal-screenshot }
 
 ## Status Detection
 
@@ -176,24 +176,24 @@ Multi-signal inference from CPU usage, JSONL events, and timestamps:
 | WezTerm | Yes | Yes | - | - |
 | GNOME Terminal | Yes | - | - | - |
 
-Run `claudectl doctor` to verify your install + terminal support in one command. See [Terminal Support](terminal-support.md) for setup notes.
+Run `codexctl doctor` to verify your install + terminal support in one command. See [Terminal Support](terminal-support.md) for setup notes.
 
 ## How It Works
 
-claudectl reads Claude Code's local data - no API keys, no network access, no modifications to Claude Code:
+codexctl reads Codex's local data - no API keys, no network access, no modifications to Codex:
 
-- **`~/.claude/sessions/*.json`** - session metadata
-- **`~/.claude/projects/{slug}/*.jsonl`** - conversation logs with token usage
+- **`~/.codex/sessions/*.json`** - session metadata
+- **`~/.codex/projects/{slug}/*.jsonl`** - conversation logs with token usage
 - **`ps`** - CPU%, memory, TTY for each process
 
 Status inference combines multiple signals: `waiting_for_task` events, CPU usage thresholds, `stop_reason` fields, and message recency.
 
 ## Security
 
-claudectl runs entirely locally. It does not:
+codexctl runs entirely locally. It does not:
 
 - Send data to any server (unless you configure webhooks)
-- Modify Claude Code's files or behavior
+- Modify Codex's files or behavior
 - Require API keys or authentication
 - Run with elevated privileges
 

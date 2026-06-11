@@ -5,7 +5,7 @@
 //! Brain gate today sees `tool_name` + `command_or_path`. That's enough to
 //! say "this is an Edit on src/foo.rs" but not enough to say "this Edit drops
 //! a database table" or "this Write creates a .env file with what looks like
-//! a private key". This module turns a Claude Code tool_input JSON payload
+//! a private key". This module turns a tool_input JSON payload
 //! into a structured digest the brain prompt and decision log can both use.
 
 use serde_json::Value;
@@ -184,7 +184,7 @@ const RISKY_PATH_NEEDLES: &[&str] = &[
 // ────────────────────────────────────────────────────────────────────────────
 
 /// Build a digest from a tool name and a tool_input JSON value. The JSON
-/// shapes follow Claude Code's hook payload conventions:
+/// shapes follow Codex hook payload conventions:
 ///   Bash: `{"command": "..."}`
 ///   Edit: `{"file_path": "...", "old_string": "...", "new_string": "..."}`
 ///   MultiEdit: `{"file_path": "...", "edits": [{"old_string", "new_string"}, ...]}`

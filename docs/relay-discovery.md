@@ -10,20 +10,20 @@ Current pairing flow:
 
 ```
 # Machine A                        # Machine B
-claudectl relay pair             
+codexctl relay pair             
 # → PAIR CODE: a3f2-9b1c-d4e5-f678
-# → "They should run: claudectl relay accept a3f2-9b1c-d4e5-f678 machineA-x7f2"
+# → "They should run: codexctl relay accept a3f2-9b1c-d4e5-f678 machineA-x7f2"
 
-                                    claudectl relay accept a3f2-9b1c-d4e5-f678 machineA-x7f2
-claudectl relay serve
-                                    claudectl relay connect 192.168.1.50:9847
+                                    codexctl relay accept a3f2-9b1c-d4e5-f678 machineA-x7f2
+codexctl relay serve
+                                    codexctl relay connect 192.168.1.50:9847
 ```
 
 Four friction points:
 1. You need to know the other person's IP address
 2. You need to copy a 19-character code between machines
 3. You need to run the commands in the right order
-4. There's no way to see "who else is using claudectl near me"
+4. There's no way to see "who else is using codexctl near me"
 
 ## Design Principle
 
@@ -42,7 +42,7 @@ All four are additive and optional. The existing manual pair/accept/connect flow
 
 ## Mechanism 1: LAN Broadcast Discovery
 
-**The idea:** When relay is enabled, claudectl periodically broadcasts a UDP announcement on the local network. Other instances see it and offer to pair.
+**The idea:** When relay is enabled, codexctl periodically broadcasts a UDP announcement on the local network. Other instances see it and offer to pair.
 
 ### How it works
 
@@ -65,13 +65,13 @@ Machine B starts relay:
 
 ```bash
 # Discover nearby instances (one-shot scan)
-claudectl relay discover
-# → Found 2 claudectl instances on LAN:
+codexctl relay discover
+# → Found 2 codexctl instances on LAN:
 # →   laptop-a3f2    192.168.1.50:9847   v0.36.0
 # →   ci-runner-9d1e 192.168.1.101:9847  v0.36.0
 
 # Pair with a discovered instance (interactive)
-claudectl relay pair-with laptop-a3f2
+codexctl relay pair-with laptop-a3f2
 # → Sending pair request to laptop-a3f2...
 # → Waiting for approval on the remote side...
 # → Paired! Connected to laptop-a3f2.
@@ -142,30 +142,30 @@ auto_approve_lan = false      # if true, skip approval prompt (team LAN)
 
 ## Mechanism 2: Project Peers (Git-based)
 
-**The idea:** Store a list of team peers in the project repo. When someone clones the repo and runs claudectl, they automatically know who to connect to.
+**The idea:** Store a list of team peers in the project repo. When someone clones the repo and runs codexctl, they automatically know who to connect to.
 
 ### How it works
 
 ```
 # One-time: team lead sets up the peer list
-claudectl relay project-init
-# → Created .claudectl/peers.toml with your identity
+codexctl relay project-init
+# → Created .codexctl/peers.toml with your identity
 
 # Commit it to the repo
-git add .claudectl/peers.toml && git commit -m "add claudectl relay peers"
+git add .codexctl/peers.toml && git commit -m "add codexctl relay peers"
 
-# When teammates clone and run claudectl:
-# → claudectl reads .claudectl/peers.toml
+# When teammates clone and run codexctl:
+# → codexctl reads .codexctl/peers.toml
 # → Shows: "Team peers: laptop-a3f2 (not paired), ci-runner-9d1e (not paired)"
 # → Offers to pair with each one
 ```
 
-### File format: `.claudectl/peers.toml`
+### File format: `.codexctl/peers.toml`
 
 ```toml
-# Team claudectl relay peers
-# Add your identity with: claudectl relay project-add
-# Connect with: claudectl relay project-connect
+# Team codexctl relay peers
+# Add your identity with: codexctl relay project-add
+# Connect with: codexctl relay project-connect
 
 [[peers]]
 identity = "laptop-a3f2"
@@ -183,18 +183,18 @@ addr = "10.0.0.42:9847"
 
 ```bash
 # Add yourself to the project peer list
-claudectl relay project-add
-# → Added laptop-a3f2 to .claudectl/peers.toml
+codexctl relay project-add
+# → Added laptop-a3f2 to .codexctl/peers.toml
 # → Commit this file to share with your team.
 
 # Show project peers and connection status
-claudectl relay project-peers
-# → PROJECT PEERS (.claudectl/peers.toml):
+codexctl relay project-peers
+# → PROJECT PEERS (.codexctl/peers.toml):
 # →   laptop-a3f2    Barada's laptop     ● connected
 # →   ci-runner-9d1e CI runner           ○ not paired
 
 # Connect to all project peers (pairs if needed)
-claudectl relay project-connect
+codexctl relay project-connect
 # → Connecting to ci-runner-9d1e at 10.0.0.42:9847...
 # → Pair request sent. Waiting for approval...
 # → Connected!
@@ -212,7 +212,7 @@ If the address is stale or wrong, it falls back to LAN discovery or prompts for 
 
 ### Security
 
-- The `.claudectl/peers.toml` file contains no secrets — just identities and addresses
+- The `.codexctl/peers.toml` file contains no secrets — just identities and addresses
 - Pairing still requires explicit approval on the remote side
 - The file can be `.gitignore`d if the team prefers not to commit it
 
@@ -226,10 +226,10 @@ If the address is stale or wrong, it falls back to LAN discovery or prompts for 
 
 ```bash
 # Generate an invite link
-claudectl relay invite
+codexctl relay invite
 # → Your relay invite link (valid for 24 hours):
 # →
-# →   claudectl relay join cctl://laptop-a3f2@192.168.1.50:9847/k/a3f29b1cd4e5f678
+# →   codexctl relay join cctl://laptop-a3f2@192.168.1.50:9847/k/a3f29b1cd4e5f678
 # →
 # → Or scan this QR code:
 # →   ██████████████
@@ -237,7 +237,7 @@ claudectl relay invite
 # →   ...
 
 # Recipient runs the join command
-claudectl relay join cctl://laptop-a3f2@192.168.1.50:9847/k/a3f29b1cd4e5f678
+codexctl relay join cctl://laptop-a3f2@192.168.1.50:9847/k/a3f29b1cd4e5f678
 # → Connecting to laptop-a3f2 at 192.168.1.50:9847...
 # → Authenticated!
 # → Paired with laptop-a3f2.
@@ -252,7 +252,7 @@ cctl://<identity>@<host>:<port>/k/<psk-code>
 Example: `cctl://laptop-a3f2@192.168.1.50:9847/k/a3f29b1cd4e5f678`
 
 Components:
-- `cctl://` — scheme (claudectl link)
+- `cctl://` — scheme (codexctl link)
 - `laptop-a3f2` — remote peer identity
 - `192.168.1.50:9847` — address to connect to
 - `/k/a3f29b1cd4e5f678` — the PSK code (same format as `pair` output, dashes stripped)
@@ -261,10 +261,10 @@ Components:
 
 ```bash
 # Generate invite
-claudectl relay invite [--ttl 24h] [--json]
+codexctl relay invite [--ttl 24h] [--json]
 
 # Accept invite
-claudectl relay join <link>
+codexctl relay join <link>
 
 # The join command:
 # 1. Parses the link
@@ -291,12 +291,12 @@ The invite link itself doesn't expire (it's just data). TTL is enforced by:
 
 ### QR code
 
-The link is short enough for a QR code (under 80 characters). claudectl can render the QR in the terminal using Unicode block characters — no external dependencies. This is particularly useful for pairing a laptop with a CI server or remote machine where you can see the terminal.
+The link is short enough for a QR code (under 80 characters). codexctl can render the QR in the terminal using Unicode block characters — no external dependencies. This is particularly useful for pairing a laptop with a CI server or remote machine where you can see the terminal.
 
 ```bash
-claudectl relay invite --qr
+codexctl relay invite --qr
 # → Renders a scannable QR code in the terminal
-# → (The other machine runs: claudectl relay join <scanned-text>)
+# → (The other machine runs: codexctl relay join <scanned-text>)
 ```
 
 ---
@@ -309,13 +309,13 @@ claudectl relay invite --qr
 
 ```bash
 # Enable Tailscale discovery
-# In .claudectl.toml:
+# In .codexctl.toml:
 # [relay]
 # tailscale = true
 
-# claudectl detects Tailscale is running:
+# codexctl detects Tailscale is running:
 # → Queries `tailscale status --json` for peer list
-# → Filters for machines running claudectl (port probe or tag-based)
+# → Filters for machines running codexctl (port probe or tag-based)
 # → Auto-connects using Tailscale identity as the trust anchor
 ```
 
@@ -323,7 +323,7 @@ claudectl relay invite --qr
 
 1. Check if `tailscale` CLI is available
 2. Run `tailscale status --json` to get the peer list
-3. For each peer, probe port 9847 to see if claudectl relay is running
+3. For each peer, probe port 9847 to see if codexctl relay is running
 4. If found, connect using a Tailscale-derived PSK (HMAC of both Tailscale node IDs + a shared constant)
 
 ### Trust model
@@ -338,7 +338,7 @@ Tailscale already provides identity and encryption. The HMAC-based PSK derivatio
 ```toml
 [relay]
 tailscale = true                  # enable Tailscale auto-discovery
-tailscale_tag = "tag:claudectl"   # only connect to peers with this ACL tag
+tailscale_tag = "tag:codexctl"   # only connect to peers with this ACL tag
 tailscale_probe_interval = 60     # seconds between peer probes
 ```
 
@@ -346,7 +346,7 @@ tailscale_probe_interval = 60     # seconds between peer probes
 
 - Zero manual pairing for teams already using Tailscale
 - Stable IPs across roaming, NAT, etc.
-- Built-in encryption means claudectl's plaintext TCP is fine
+- Built-in encryption means codexctl's plaintext TCP is fine
 - Tailscale ACL tags let admins control which machines can form hive networks
 
 ---
@@ -358,7 +358,7 @@ With all four mechanisms, the ideal experience is:
 ### Same room, same WiFi (LAN discovery)
 
 ```
-1. Both run: claudectl relay serve (or TUI with relay.enabled = true)
+1. Both run: codexctl relay serve (or TUI with relay.enabled = true)
 2. Both see each other in the discovery overlay
 3. One presses "Pair", the other approves
 4. Connected. Knowledge flows.
@@ -367,17 +367,17 @@ With all four mechanisms, the ideal experience is:
 ### Same team, same repo (project peers)
 
 ```
-1. Lead runs: claudectl relay project-add && git commit && git push
-2. Teammate clones, runs: claudectl relay project-connect
+1. Lead runs: codexctl relay project-add && git commit && git push
+2. Teammate clones, runs: codexctl relay project-connect
 3. Pair request sent, approved, connected.
 ```
 
 ### Remote colleague (invite link)
 
 ```
-1. You run: claudectl relay invite
+1. You run: codexctl relay invite
 2. Paste the link in Slack
-3. They run: claudectl relay join <link>
+3. They run: codexctl relay join <link>
 4. Connected.
 ```
 
@@ -420,7 +420,7 @@ auto_approve_lan = false
 
 # Tailscale integration
 tailscale = false
-tailscale_tag = "tag:claudectl"
+tailscale_tag = "tag:codexctl"
 tailscale_probe_interval = 60
 
 # Invite links
@@ -431,23 +431,23 @@ invite_ttl_hours = 24
 
 ```bash
 # Discovery
-claudectl relay discover              # scan LAN for nearby instances
-claudectl relay project-peers       # show project peer list
+codexctl relay discover              # scan LAN for nearby instances
+codexctl relay project-peers       # show project peer list
 
 # Pairing (new)
-claudectl relay invite [--qr] [--ttl 24h]   # generate invite link
-claudectl relay join <link>                # accept invite link
-claudectl relay pair-with <identity>       # pair with discovered peer
+codexctl relay invite [--qr] [--ttl 24h]   # generate invite link
+codexctl relay join <link>                # accept invite link
+codexctl relay pair-with <identity>       # pair with discovered peer
 
 # Project peers
-claudectl relay project-init        # create .claudectl/peers.toml
-claudectl relay project-add         # add yourself to peer list
-claudectl relay project-connect     # connect to all project peers
+codexctl relay project-init        # create .codexctl/peers.toml
+codexctl relay project-add         # add yourself to peer list
+codexctl relay project-connect     # connect to all project peers
 
 # Existing (unchanged)
-claudectl relay serve
-claudectl relay pair
-claudectl relay accept <code> <peer-id>
-claudectl relay connect <host:port>
-claudectl relay peers
+codexctl relay serve
+codexctl relay pair
+codexctl relay accept <code> <peer-id>
+codexctl relay connect <host:port>
+codexctl relay peers
 ```

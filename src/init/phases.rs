@@ -104,7 +104,7 @@ impl Phase for BudgetPhase {
 
     fn run_interactive(&self) -> io::Result<PhaseStatus> {
         println!("Set a weekly per-session budget so a runaway agent can't burn unlimited cost.");
-        println!("Claude Code alerts at 80% and (optionally) kills the session at 100%.");
+        println!("Codex alerts at 80% and (optionally) kills the session at 100%.");
         if !prompt::yes_no("Set a weekly budget cap?", true)? {
             return Ok(PhaseStatus::Skipped);
         }
@@ -137,7 +137,7 @@ impl Phase for BudgetPhase {
 }
 
 fn write_budget_to_config(weekly_usd: f64) -> io::Result<()> {
-    // Write to ~/.config/claudectl/config.toml as a top-level `budget` field.
+    // Write to ~/.config/codexctl/config.toml as a top-level `budget` field.
     // We merge, don't overwrite, so other config keys are preserved.
     let Some(cfg_path) = crate::config::Config::global_path() else {
         // No HOME — non-interactive CI env. Skip silently rather than fail.
@@ -262,10 +262,10 @@ fn print_ollama_install_hint() {
     println!("  To enable the brain, install ollama and a small model:");
     println!("    brew install ollama && ollama serve &");
     println!("    ollama pull gemma4:e4b");
-    println!("  Then re-run `claudectl init` to wire it up.");
+    println!("  Then re-run `codexctl init` to wire it up.");
 }
 
-// ===================== Plugin (Claude Code hooks) =======================
+// ===================== Codex hooks ======================================
 
 pub struct PluginPhase;
 
@@ -274,7 +274,7 @@ impl Phase for PluginPhase {
         "plugin"
     }
     fn label(&self) -> &'static str {
-        "Claude Code hooks (supervisor plugin)"
+        "Codex hooks"
     }
 
     fn detect(&self) -> PhaseStatus {
@@ -282,10 +282,8 @@ impl Phase for PluginPhase {
     }
 
     fn run_interactive(&self) -> io::Result<PhaseStatus> {
-        println!("Install claudectl's plugin into ~/.claude/plugins/claudectl/ (slash");
-        println!("commands, the supervisor agent, and the bus MCP server registration) and");
-        println!("wire hooks into ~/.claude/settings.json. Existing hooks are preserved.");
-        if !prompt::yes_no("Install plugin + hooks?", true)? {
+        println!("Wire codexctl hooks into ~/.codex/hooks.json. Existing hooks are preserved.");
+        if !prompt::yes_no("Install Codex hooks?", true)? {
             return Ok(PhaseStatus::Skipped);
         }
         install_plugin_hooks()?;
@@ -308,41 +306,16 @@ impl Phase for PluginPhase {
     }
 
     fn remove(&self) -> io::Result<()> {
-        // Strip hook entries from settings.json AND remove the plugin
-        // install dir. `--purge` also walks ~/.claudectl/; this just
-        // handles claudectl-managed paths under ~/.claude/.
-        let _ = hooks::run_uninit(false);
-        if let Some(dir) = crate::init::plugin_assets::default_install_dir() {
-            crate::init::plugin_assets::remove_assets(&dir)?;
-        }
-        Ok(())
+        hooks::run_uninit(false)
     }
 }
 
-/// Install both the embedded plugin (#325) and the legacy hook entries
-/// in ~/.claude/settings.json. The plugin install gives users the slash
-/// commands (`/role`, `/inbox`, `/brain`, …) and the bus MCP server
-/// registration without cloning the repo; the legacy hook entries are
-/// the dashboard-observability path (PostToolUse / Stop fire claudectl
-/// --json so the TUI sees activity).
 fn install_plugin_hooks() -> io::Result<()> {
-    // Write embedded plugin assets first. When HOME is unset (CI
-    // sandboxes), skip the plugin install silently rather than fail —
-    // the hook entries below still work.
-    if let Some(dir) = crate::init::plugin_assets::default_install_dir() {
-        let written = crate::init::plugin_assets::write_assets(&dir)?;
-        println!(
-            "  installed {} plugin files at {}",
-            written.len(),
-            dir.display()
-        );
-    }
     hooks::run_init(false, false)
 }
 
-/// Public entry for the `init plugin-only` shortcut (#325): write the
-/// embedded assets + hook entries without running the rest of the
-/// wizard. Used by main.rs when `--plugin-only` is set.
+/// Public entry for the `init plugin-only` shortcut: write hook entries without
+/// running the rest of the wizard. Kept under the old name for CLI stability.
 pub fn install_plugin_now() -> io::Result<()> {
     install_plugin_hooks()
 }
@@ -371,7 +344,7 @@ impl Phase for BusPhase {
         }
         #[cfg(feature = "bus")]
         {
-            println!("Bind a role to this cwd so other Claude Code sessions can address you.");
+            println!("Bind a role to this cwd so other Codex sessions can address you.");
             if !prompt::yes_no("Bind a role for the current directory?", true)? {
                 return Ok(PhaseStatus::Skipped);
             }
@@ -455,10 +428,10 @@ fn derive_role_from_cwd_at(p: &Path) -> String {
 
 // ===================== Skills ============================================
 
-/// Suggestions only — we don't shell into Claude Code's plugin installer.
+/// Suggestions only — we don't shell into Codex's plugin installer.
 const SUGGESTED_SKILLS: &[(&str, &str)] = &[
     ("humanizer", "rewrite AI-shaped prose into natural language"),
-    ("update-config", "edit settings.json safely"),
+    ("update-config", "edit hooks.json safely"),
     ("verify", "drive the app to confirm a change actually works"),
 ];
 
@@ -477,7 +450,7 @@ impl Phase for SkillsPhase {
     }
 
     fn run_interactive(&self) -> io::Result<PhaseStatus> {
-        if !prompt::yes_no("Print suggested Claude Code skills?", false)? {
+        if !prompt::yes_no("Print suggested Codex skills?", false)? {
             return Ok(PhaseStatus::Skipped);
         }
         println!();
@@ -486,7 +459,7 @@ impl Phase for SkillsPhase {
         }
         println!();
         println!(
-            "  (Run these inside any Claude Code session. claudectl does not install \
+            "  (Run these inside any Codex session. codexctl does not install \
              skills automatically.)"
         );
         Ok(PhaseStatus::Installed {

@@ -35,11 +35,11 @@ pub struct Config {
 }
 
 /// Configurable thresholds for session health checks.
-/// Re-exported from `claudectl_core::health` so existing `config::HealthThresholds`
+/// Re-exported from `codexctl_core::health` so existing `config::HealthThresholds`
 /// callers still resolve. The struct itself lives with the health module that
 /// owns it, so the binary's TOML parsing (`RawHealthThresholds`, below) is the
 /// only piece that needs to know about config-layer concerns.
-pub use claudectl_core::health::HealthThresholds;
+pub use codexctl_core::health::HealthThresholds;
 
 /// Raw TOML representation for health thresholds — all fields optional.
 #[derive(Debug, Default)]
@@ -60,10 +60,10 @@ struct RawHealthThresholds {
     repetition_threshold: Option<u32>,
 }
 
-/// `BrainConfig` and friends live in `claudectl_core::config` so the future
+/// `BrainConfig` and friends live in `codexctl_core::config` so the future
 /// TUI crate (#275) can hold them without depending on the binary. Re-exported
 /// here so existing `crate::config::BrainConfig` callers keep resolving.
-pub use claudectl_core::config::{BrainConfig, default_test_runners};
+pub use codexctl_core::config::{BrainConfig, default_test_runners};
 
 /// Configuration for session lifecycle management (auto-restart on context saturation).
 #[derive(Debug, Clone)]
@@ -86,10 +86,10 @@ impl Default for LifecycleConfig {
     }
 }
 
-/// `IdleConfig` and `IdleTask` live in `claudectl_core::config` so the future
+/// `IdleConfig` and `IdleTask` live in `codexctl_core::config` so the future
 /// TUI crate (#275) can hold them without depending on the binary.
 #[allow(unused_imports)]
-pub use claudectl_core::config::{IdleConfig, IdleTask};
+pub use codexctl_core::config::{IdleConfig, IdleTask};
 
 /// Configuration for relay transport (cross-machine collaboration).
 #[derive(Debug, Clone)]
@@ -148,7 +148,7 @@ pub struct HiveConfig {
     /// Days after which a peer's knowledge is pruned if the peer hasn't been seen.
     pub stale_peer_days: u32,
     /// Outbound exposure mode: "auto" gossips everything that passes filters;
-    /// "manual" keeps new units hidden until the user runs `claudectl hive expose`.
+    /// "manual" keeps new units hidden until the user runs `codexctl hive expose`.
     pub share_mode: String,
 }
 
@@ -294,8 +294,8 @@ impl Config {
             }
         }
 
-        // Layer 2: Project config (.claudectl.toml in cwd)
-        if let Some(raw) = parse_config_file(&PathBuf::from(".claudectl.toml")) {
+        // Layer 2: Project config (.codexctl.toml in cwd)
+        if let Some(raw) = parse_config_file(&PathBuf::from(".codexctl.toml")) {
             config.apply(raw);
         }
 
@@ -524,7 +524,7 @@ impl Config {
         }
     }
 
-    /// Show resolved config and file locations (for `claudectl config`).
+    /// Show resolved config and file locations (for `codexctl config`).
     pub fn print_resolved(&self) {
         println!("Resolved configuration:");
         println!();
@@ -537,11 +537,11 @@ impl Config {
             }
         }
 
-        let project_path = PathBuf::from(".claudectl.toml");
+        let project_path = PathBuf::from(".codexctl.toml");
         if project_path.exists() {
             println!("  Project config: {}", project_path.display());
         } else {
-            println!("  Project config: .claudectl.toml (not found)");
+            println!("  Project config: .codexctl.toml (not found)");
         }
 
         println!();
@@ -654,10 +654,10 @@ impl Config {
 
     /// Return the config template as a string.
     pub fn template_string() -> &'static str {
-        r#"# claudectl configuration
+        r#"# codexctl configuration
 # Place this file at:
-#   Project: .claudectl.toml (in your project root)
-#   Global:  ~/.config/claudectl/config.toml
+#   Project: .codexctl.toml (in your project root)
+#   Global:  ~/.config/codexctl/config.toml
 #
 # Priority: CLI flags > project config > global config > defaults
 # Only set values you want to override — unset keys use defaults.
@@ -853,7 +853,7 @@ fn global_config_path() -> Option<PathBuf> {
     std::env::var_os("HOME").map(|home| {
         PathBuf::from(home)
             .join(".config")
-            .join("claudectl")
+            .join("codexctl")
             .join("config.toml")
     })
 }
@@ -1379,7 +1379,7 @@ pub fn load_hooks() -> crate::hooks::HookRegistry {
     if let Some(global) = global_config_path() {
         parse_hooks_from_file(&global, &mut registry);
     }
-    parse_hooks_from_file(&PathBuf::from(".claudectl.toml"), &mut registry);
+    parse_hooks_from_file(&PathBuf::from(".codexctl.toml"), &mut registry);
 
     registry
 }
@@ -1535,7 +1535,7 @@ mod tests {
         writeln!(
             file,
             r#"
-# Global claudectl config
+# Global codexctl config
 [defaults]
 interval = 1000
 notify = true

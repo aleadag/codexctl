@@ -1,10 +1,10 @@
-//! `claudectl doctor` — install + runtime health check (#326).
+//! `codexctl doctor` — install + runtime health check (#326).
 //!
 //! Top-down checklist that answers "is everything wired up?" in one
 //! command. Replaces what was scattered across:
 //!
-//! * `claudectl --doctor` (terminal compat only)
-//! * `claudectl init --check` (onboarding-marker drift only)
+//! * `codexctl --doctor` (terminal compat only)
+//! * `codexctl init --check` (onboarding-marker drift only)
 //! * scattered "is X reachable?" probes the user had to chain manually
 //!
 //! Each check returns a `Check` with status + a fix hint. The renderer
@@ -60,9 +60,7 @@ pub struct Check {
 pub fn run_all_checks() -> Vec<Check> {
     vec![
         check_binary_on_path(),
-        check_claude_code_hooks(),
-        check_plugin_installed(),
-        check_plugin_version(),
+        check_codex_hooks(),
         check_brain_endpoint(),
         check_bus_feature(),
         check_bus_db(),
@@ -79,7 +77,7 @@ pub fn run_all_checks() -> Vec<Check> {
 /// indent, fixed-width name column so messages align.
 pub fn render_checks(checks: &[Check]) -> String {
     let mut out = String::new();
-    out.push_str("claudectl doctor\n");
+    out.push_str("codexctl doctor\n");
     out.push_str("=================\n\n");
     let max_name = checks.iter().map(|c| c.name.len()).max().unwrap_or(0);
     for c in checks {
@@ -135,13 +133,13 @@ fn counts(checks: &[Check]) -> (usize, usize, usize) {
 // ─── individual checks ──────────────────────────────────────────────────────
 
 fn check_binary_on_path() -> Check {
-    // Compare the running binary against what `which claudectl` resolves
+    // Compare the running binary against what `which codexctl` resolves
     // to. Mismatches mean the user is running one binary while their
     // hooks resolve a different one (typical after `cargo install` on top
     // of a previous `brew install`).
     let running = std::env::current_exe().ok();
     let on_path = std::process::Command::new("which")
-        .arg("claudectl")
+        .arg("codexctl")
         .output()
         .ok()
         .and_then(|o| {
@@ -164,7 +162,7 @@ fn check_binary_on_path() -> Check {
             status: CheckStatus::Advisory,
             message: format!("running {}, PATH resolves {}", r.display(), p.display()),
             fix_hint: Some(
-                "Two installs detected. Hooks call `claudectl` by name — \
+                "Two installs detected. Hooks call `codexctl` by name — \
                  verify they use the version you expect."
                     .into(),
             ),
@@ -174,7 +172,7 @@ fn check_binary_on_path() -> Check {
             status: CheckStatus::Fail,
             message: format!("{} not on PATH", r.display()),
             fix_hint: Some(
-                "Add the install dir to PATH so hooks can find `claudectl` by name.".into(),
+                "Add the install dir to PATH so hooks can find `codexctl` by name.".into(),
             ),
         },
         _ => Check {
@@ -186,155 +184,41 @@ fn check_binary_on_path() -> Check {
     }
 }
 
-fn check_claude_code_hooks() -> Check {
+fn check_codex_hooks() -> Check {
     let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
         return Check {
-            name: "Claude Code hooks".into(),
+            name: "Codex hooks".into(),
             status: CheckStatus::Fail,
             message: "HOME not set".into(),
             fix_hint: None,
         };
     };
-    let settings = home.join(".claude").join("settings.json");
+    let settings = home.join(".codex").join("hooks.json");
     let contents = match std::fs::read_to_string(&settings) {
         Ok(s) => s,
         Err(_) => {
             return Check {
-                name: "Claude Code hooks".into(),
+                name: "Codex hooks".into(),
                 status: CheckStatus::Fail,
                 message: format!("{} not found", settings.display()),
-                fix_hint: Some("Run `claudectl init` to install hooks.".into()),
+                fix_hint: Some("Run `codexctl init` to install hooks.".into()),
             };
         }
     };
-    if !contents.contains("claudectl") {
+    if !contents.contains("codexctl") {
         return Check {
-            name: "Claude Code hooks".into(),
+            name: "Codex hooks".into(),
             status: CheckStatus::Fail,
-            message: format!("{} has no claudectl entries", settings.display()),
-            fix_hint: Some("Run `claudectl init` (or `claudectl init --plugin-only`).".into()),
+            message: format!("{} has no codexctl entries", settings.display()),
+            fix_hint: Some("Run `codexctl init` (or `codexctl init --plugin-only`).".into()),
         };
     }
-    let entries = contents.matches("claudectl").count();
+    let entries = contents.matches("codexctl").count();
     Check {
-        name: "Claude Code hooks".into(),
+        name: "Codex hooks".into(),
         status: CheckStatus::Pass,
-        message: format!("{entries} claudectl entries in {}", settings.display()),
+        message: format!("{entries} codexctl entries in {}", settings.display()),
         fix_hint: None,
-    }
-}
-
-fn check_plugin_installed() -> Check {
-    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
-        return Check {
-            name: "plugin files".into(),
-            status: CheckStatus::Fail,
-            message: "HOME not set".into(),
-            fix_hint: None,
-        };
-    };
-    let plugin_dir = home.join(".claude").join("plugins").join("claudectl");
-    let manifest = plugin_dir.join(".claude-plugin").join("plugin.json");
-    if !manifest.exists() {
-        return Check {
-            name: "plugin files".into(),
-            status: CheckStatus::Fail,
-            message: format!("{} missing", plugin_dir.display()),
-            fix_hint: Some(
-                "Run `claudectl init --plugin-only` to write the embedded plugin files.".into(),
-            ),
-        };
-    }
-    let file_count = walk_count(&plugin_dir);
-    Check {
-        name: "plugin files".into(),
-        status: CheckStatus::Pass,
-        message: format!("{file_count} files at {}", plugin_dir.display()),
-        fix_hint: None,
-    }
-}
-
-fn walk_count(root: &std::path::Path) -> usize {
-    let mut count = 0usize;
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(p) = stack.pop() {
-        let Ok(rd) = std::fs::read_dir(&p) else {
-            continue;
-        };
-        for entry in rd.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                stack.push(path);
-            } else {
-                count += 1;
-            }
-        }
-    }
-    count
-}
-
-/// Compare the on-disk plugin manifest version against the running
-/// binary's `CARGO_PKG_VERSION` (#327). When they differ the user is
-/// almost certainly running `brew upgrade` without `claudectl init
-/// upgrade` afterwards, so they're missing whatever new slash commands
-/// / hook scripts the latest binary ships.
-fn check_plugin_version() -> Check {
-    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
-        return Check {
-            name: "plugin version".into(),
-            status: CheckStatus::Skipped,
-            message: "HOME not set".into(),
-            fix_hint: None,
-        };
-    };
-    let manifest = home
-        .join(".claude")
-        .join("plugins")
-        .join("claudectl")
-        .join(".claude-plugin")
-        .join("plugin.json");
-    let raw = match std::fs::read_to_string(&manifest) {
-        Ok(s) => s,
-        Err(_) => {
-            return Check {
-                name: "plugin version".into(),
-                status: CheckStatus::Skipped,
-                message: "plugin not installed yet".into(),
-                fix_hint: None,
-            };
-        }
-    };
-    let binary = env!("CARGO_PKG_VERSION");
-    // Cheap parse — the manifest is small + stable, no point pulling
-    // serde_json::Value just for one field.
-    let on_disk = raw
-        .lines()
-        .find_map(|line| {
-            let trimmed = line.trim();
-            let prefix = "\"version\":";
-            let idx = trimmed.find(prefix)?;
-            let after = &trimmed[idx + prefix.len()..];
-            let v = after.trim().trim_start_matches('"');
-            let end = v.find('"')?;
-            Some(&v[..end])
-        })
-        .unwrap_or("unknown");
-    if on_disk == binary {
-        Check {
-            name: "plugin version".into(),
-            status: CheckStatus::Pass,
-            message: format!("{on_disk} matches binary"),
-            fix_hint: None,
-        }
-    } else {
-        Check {
-            name: "plugin version".into(),
-            status: CheckStatus::Advisory,
-            message: format!("plugin {on_disk}, binary {binary}"),
-            fix_hint: Some(
-                "Run `claudectl init upgrade` to re-sync hooks + plugin files + DB migrations to the current binary.".into(),
-            ),
-        }
     }
 }
 
@@ -382,7 +266,7 @@ fn check_bus_feature() -> Check {
             status: CheckStatus::Advisory,
             message: "not compiled — multi-session coordination unavailable".into(),
             fix_hint: Some(
-                "Reinstall with `cargo install claudectl --features bus,coord,relay,hive` or `brew install mercurialsolo/tap/claudectl` (Homebrew bottle includes bus since 0.57.0)."
+                "Reinstall with `cargo install codexctl --features bus,coord,relay,hive` or the matching package manager install."
                     .into(),
             ),
         }
@@ -413,7 +297,7 @@ fn check_bus_db() -> Check {
                         fix_hint: None,
                     };
                 };
-                let db = home.join(".claudectl").join("bus").join("bus.db");
+                let db = home.join(".codexctl").join("bus").join("bus.db");
                 let size = std::fs::metadata(&db).map(|m| m.len()).unwrap_or(0);
                 Check {
                     name: "bus DB".into(),
@@ -425,9 +309,9 @@ fn check_bus_db() -> Check {
             Err(e) => Check {
                 name: "bus DB".into(),
                 status: CheckStatus::Fail,
-                message: format!("cannot open ~/.claudectl/bus/bus.db: {e}"),
+                message: format!("cannot open ~/.codexctl/bus/bus.db: {e}"),
                 fix_hint: Some(
-                    "Check that ~/.claudectl/bus/ is writable. `claudectl init --purge --yes` resets everything.".into(),
+                    "Check that ~/.codexctl/bus/ is writable. `codexctl init --purge --yes` resets everything.".into(),
                 ),
             },
         }
@@ -477,7 +361,7 @@ fn check_bus_retention() -> Check {
                 "{total} messages in table ({stale} older than 30 days, prunable)"
             ),
             fix_hint: Some(
-                "Run `claudectl bus prune` to delete delivered messages older than 30 days. Add `--days N` to override.".into(),
+                "Run `codexctl bus prune` to delete delivered messages older than 30 days. Add `--days N` to override.".into(),
             ),
         }
     }
@@ -486,7 +370,7 @@ fn check_bus_retention() -> Check {
 /// Supervisor schema row (#345). Opens the coord DB and verifies the
 /// `PRAGMA user_version` matches what this binary expects. Drift here is
 /// the manual-upgrade gap RFC v2 §12 calls out — a `brew upgrade
-/// claudectl` without a follow-up `claudectl init --upgrade` lands the
+/// codexctl` without a follow-up `codexctl init --upgrade` lands the
 /// new binary on disk but leaves the schema at the old version. The
 /// store's `open()` would refuse loudly in that case; doctor surfaces it
 /// up-front so the user sees the fix in their checklist instead of in a
@@ -519,7 +403,7 @@ fn check_coord_schema() -> Check {
                 status: CheckStatus::Fail,
                 message: e,
                 fix_hint: Some(
-                    "Run `claudectl init --upgrade` to migrate the coord DB.".into(),
+                    "Run `codexctl init --upgrade` to migrate the coord DB.".into(),
                 ),
             },
             Err(e) => Check {
@@ -527,7 +411,7 @@ fn check_coord_schema() -> Check {
                 status: CheckStatus::Fail,
                 message: format!("cannot open coord DB: {e}"),
                 fix_hint: Some(
-                    "Check that ~/.claudectl/coord/ is writable. `claudectl init --purge --yes` resets everything.".into(),
+                    "Check that ~/.codexctl/coord/ is writable. `codexctl init --purge --yes` resets everything.".into(),
                 ),
             },
         }
@@ -535,7 +419,7 @@ fn check_coord_schema() -> Check {
 }
 
 /// Per-session policy directory row (#345). The supervisor writes
-/// `~/.claudectl/coord/session-policy/<session>.json` at task assignment
+/// `~/.codexctl/coord/session-policy/<session>.json` at task assignment
 /// so the brain-gate hook can do a single `fs::read_to_string` per tool
 /// call. Pass when the dir exists and is writable; Advisory when the
 /// supervisor hasn't run yet (no dir created) — that's expected on a
@@ -583,7 +467,7 @@ fn check_coord_session_policy_dir() -> Check {
                 status: CheckStatus::Fail,
                 message: format!("{} not writable: {e}", dir.display()),
                 fix_hint: Some(
-                    "Check ownership/permissions on ~/.claudectl/coord/session-policy/. The brain-gate hook reads files here on every tool call.".into(),
+                    "Check ownership/permissions on ~/.codexctl/coord/session-policy/. The brain-gate hook reads files here on every tool call.".into(),
                 ),
             },
         }
@@ -616,7 +500,7 @@ fn check_supervisor_drain_state() -> Check {
                     crate::coord::supervisor_cli::drain_marker_path().display()
                 ),
                 fix_hint: Some(
-                    "Run `claudectl supervisor undrain` to resume issuing new assignments.".into(),
+                    "Run `codexctl supervisor undrain` to resume issuing new assignments.".into(),
                 ),
             }
         } else {
@@ -633,16 +517,16 @@ fn check_supervisor_drain_state() -> Check {
 fn check_session_discovery() -> Check {
     // Discovery never errors per se — it returns 0 sessions when nothing
     // matches. The signal we want is "the scanner runs and finds at
-    // least one session." Zero sessions is normal if no Claude is
+    // least one session." Zero sessions is normal if no Codex is
     // running; advise instead of fail.
-    let sessions = claudectl_core::discovery::scan_sessions();
+    let sessions = codexctl_core::discovery::scan_sessions();
     if sessions.is_empty() {
         Check {
             name: "session discovery".into(),
             status: CheckStatus::Advisory,
-            message: "0 sessions discovered (no Claude Code running?)".into(),
+            message: "0 sessions discovered (no Codex running?)".into(),
             fix_hint: Some(
-                "Start a Claude session in another terminal (`claude`) and re-run `claudectl doctor`."
+                "Start a Codex session in another terminal (`codex`) and re-run `codexctl doctor`."
                     .into(),
             ),
         }
@@ -660,7 +544,7 @@ fn check_terminal_integration() -> Check {
     // Re-use the existing terminal doctor report. We collapse it to a
     // one-line summary (the detailed view is still available via the
     // legacy `--doctor` flag).
-    let report = claudectl_core::terminals::doctor_report();
+    let report = codexctl_core::terminals::doctor_report();
     if report.terminal == "Unknown" {
         return Check {
             name: "terminal integration".into(),
@@ -691,7 +575,7 @@ mod tests {
     #[test]
     fn render_handles_empty_check_list() {
         let out = render_checks(&[]);
-        assert!(out.contains("claudectl doctor"));
+        assert!(out.contains("codexctl doctor"));
         assert!(out.contains("0 passed"));
     }
 

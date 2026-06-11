@@ -1,12 +1,12 @@
 //! Bind `Orchestrator` to the binary's mailbox + coord stores.
 //!
 //! Each `deliver_*` method resolves `SessionSnapshot` inputs to the live
-//! `ClaudeSession` values the brain mailbox and coord interrupt bus actually
+//! `CodexSession` values the brain mailbox and coord interrupt bus actually
 //! need, via a fresh discovery scan per call.
 
-use claudectl_core::discovery;
-use claudectl_core::runtime::{Orchestrator, SessionSnapshot};
-use claudectl_core::session::ClaudeSession;
+use codexctl_core::discovery;
+use codexctl_core::runtime::{Orchestrator, SessionSnapshot};
+use codexctl_core::session::CodexSession;
 
 use crate::brain;
 
@@ -45,13 +45,13 @@ impl Orchestrator for LiveOrchestrator {
     }
 }
 
-/// Re-fetch the live `ClaudeSession` set and intersect with the snapshots
+/// Re-fetch the live `CodexSession` set and intersect with the snapshots
 /// the caller passed. Sessions that exited between the snapshot and the
 /// call are silently dropped — the orchestration layer is best-effort.
-fn resolve_live(snapshots: &[SessionSnapshot]) -> Vec<ClaudeSession> {
+fn resolve_live(snapshots: &[SessionSnapshot]) -> Vec<CodexSession> {
     let mut live = discovery::scan_sessions();
     discovery::resolve_jsonl_paths(&mut live);
-    let mut by_id: std::collections::HashMap<String, ClaudeSession> = live
+    let mut by_id: std::collections::HashMap<String, CodexSession> = live
         .into_iter()
         .map(|s| (s.session_id.clone(), s))
         .collect();

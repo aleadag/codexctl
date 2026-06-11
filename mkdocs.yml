@@ -1,8 +1,8 @@
-site_name: claudectl
-site_url: https://mercurialsolo.github.io/claudectl/
-site_description: Orchestrate a swarm of Claude Code agents with a local-LLM brain that learns from you.
-repo_url: https://github.com/mercurialsolo/claudectl
-repo_name: mercurialsolo/claudectl
+site_name: codexctl
+site_url: https://aleadag.github.io/codexctl/
+site_description: Orchestrate a swarm of Codex agents with a local-LLM brain that learns from you.
+repo_url: https://github.com/aleadag/codexctl
+repo_name: aleadag/codexctl
 
 theme:
   name: material
@@ -74,4 +74,4 @@ plugins:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/mercurialsolo/claudectl
+      link: https://github.com/aleadag/codexctl

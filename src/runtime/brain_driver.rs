@@ -1,14 +1,14 @@
 //! Bind `BrainDriver` to the binary's `BrainEngine`.
 //!
 //! Wraps a `BrainEngine` instance and translates the trait's
-//! `SessionSnapshot` inputs to the live `ClaudeSession` values the engine
+//! `SessionSnapshot` inputs to the live `CodexSession` values the engine
 //! expects, looking up real sessions via discovery on each call. The
 //! `PendingSuggestion` DTO is projected from the brain's internal type.
 
-use claudectl_core::discovery;
-use claudectl_core::rules::AutoRule;
-use claudectl_core::runtime::{BrainDriver, PendingSuggestion, SessionSnapshot};
-use claudectl_core::session::ClaudeSession;
+use codexctl_core::discovery;
+use codexctl_core::rules::AutoRule;
+use codexctl_core::runtime::{BrainDriver, PendingSuggestion, SessionSnapshot};
+use codexctl_core::session::CodexSession;
 
 use crate::brain;
 use crate::brain::client::BrainSuggestion;
@@ -26,14 +26,14 @@ impl LiveBrainDriver {
         Self { engine }
     }
 
-    /// Convert a SessionSnapshot batch into the live `ClaudeSession` values
+    /// Convert a SessionSnapshot batch into the live `CodexSession` values
     /// the engine expects. Sessions that have exited between the snapshot
     /// and the call are silently dropped (the engine's cleanup pass will
     /// notice independently).
-    fn resolve_live(&self, snapshots: &[SessionSnapshot]) -> Vec<ClaudeSession> {
+    fn resolve_live(&self, snapshots: &[SessionSnapshot]) -> Vec<CodexSession> {
         let mut live = discovery::scan_sessions();
         discovery::resolve_jsonl_paths(&mut live);
-        let mut by_id: std::collections::HashMap<String, ClaudeSession> = live
+        let mut by_id: std::collections::HashMap<String, CodexSession> = live
             .into_iter()
             .map(|s| (s.session_id.clone(), s))
             .collect();
@@ -93,7 +93,7 @@ impl BrainDriver for LiveBrainDriver {
         // The trait carries `action` as a string for flexibility; the engine
         // needs a real `RuleAction`. Best-effort: drop the suggestion if it
         // doesn't parse rather than error out (demo callers are permissive).
-        let Some(action) = claudectl_core::rules::RuleAction::parse(&suggestion.action) else {
+        let Some(action) = codexctl_core::rules::RuleAction::parse(&suggestion.action) else {
             return;
         };
         self.engine.pending.insert(
@@ -130,7 +130,7 @@ mod tests {
     #[test]
     fn action_label_format_is_stable() {
         let s = BrainSuggestion {
-            action: claudectl_core::rules::RuleAction::Approve,
+            action: codexctl_core::rules::RuleAction::Approve,
             message: None,
             reasoning: "test".into(),
             confidence: 0.5,
@@ -145,7 +145,7 @@ mod tests {
     #[test]
     fn deny_action_lowercases() {
         let s = BrainSuggestion {
-            action: claudectl_core::rules::RuleAction::Deny,
+            action: codexctl_core::rules::RuleAction::Deny,
             message: Some("dangerous".into()),
             reasoning: "rm -rf".into(),
             confidence: 0.99,

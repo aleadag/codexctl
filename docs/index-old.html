@@ -3,49 +3,49 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>claudectl | Mission Control for Claude Code</title>
+    <title>codexctl | Mission Control for Codex</title>
     <meta
       name="description"
       content="Supervise, orchestrate, and connect your coding agents. Local LLM brain for auto-approve, hive mind for sharing skills across machines, one dashboard for every session."
     />
-    <meta property="og:title" content="claudectl | Mission Control for Claude Code" />
+    <meta property="og:title" content="codexctl | Mission Control for Codex" />
     <meta
       property="og:description"
       content="Supervise, orchestrate, and connect your coding agents. Local LLM brain, hive mind skill sharing, and one dashboard for every session."
     />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://mercurialsolo.github.io/claudectl/" />
+    <meta property="og:url" content="https://aleadag.github.io/codexctl/" />
     <meta
       property="og:image"
-      content="https://mercurialsolo.github.io/claudectl/assets/github-social-preview.png"
+      content="https://aleadag.github.io/codexctl/assets/github-social-preview.png"
     />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="claudectl | Mission Control for Claude Code" />
+    <meta name="twitter:title" content="codexctl | Mission Control for Codex" />
     <meta
       name="twitter:description"
       content="Supervise, orchestrate, and connect your coding agents."
     />
     <meta
       name="twitter:image"
-      content="https://mercurialsolo.github.io/claudectl/assets/github-social-preview.png"
+      content="https://aleadag.github.io/codexctl/assets/github-social-preview.png"
     />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div class="page-shell">
       <header class="site-header">
-        <a class="brand" href="#top">claudectl</a>
+        <a class="brand" href="#top">codexctl</a>
         <nav class="site-nav">
           <a href="#workflows">Workflows</a>
           <a href="#install">Install</a>
-          <a href="https://github.com/mercurialsolo/claudectl">GitHub</a>
+          <a href="https://github.com/aleadag/codexctl">GitHub</a>
         </nav>
       </header>
 
       <main id="top">
         <section class="hero">
           <div class="hero-copy">
-            <p class="eyebrow">Orchestrate a swarm of Claude Code agents</p>
+            <p class="eyebrow">Orchestrate a swarm of Codex agents</p>
             <h1>With a local-LLM brain that learns from you.</h1>
             <p class="hero-text">
               Know which agent is blocked, burning budget, waiting for approval,
@@ -59,7 +59,7 @@
                 >Watch the demo</a
               >
             </div>
-            <ul class="proof-strip" aria-label="claudectl proof points">
+            <ul class="proof-strip" aria-label="codexctl proof points">
               <li>~1 MB binary</li>
               <li>Sub-50ms startup</li>
               <li>Zero config</li>
@@ -76,11 +76,11 @@
             <a
               class="demo-frame"
               href="https://asciinema.org/a/bovJrUq2vEmC08NU"
-              aria-label="Open claudectl demo on Asciinema"
+              aria-label="Open codexctl demo on Asciinema"
             >
               <img
-                src="assets/claudectl-demo-hero.gif"
-                alt="Animated claudectl dashboard demo"
+                src="assets/codexctl-demo-hero.gif"
+                alt="Animated codexctl dashboard demo"
                 width="1785"
                 height="1142"
               />
@@ -96,7 +96,7 @@
         <section class="problem">
           <div class="section-heading">
             <p class="eyebrow">Why it exists</p>
-            <h2>Claude Code is good at execution. It is not built to supervise five terminals at once.</h2>
+            <h2>Codex is good at execution. It is not built to supervise five terminals at once.</h2>
           </div>
           <div class="problem-grid">
             <article class="problem-card">
@@ -120,8 +120,8 @@
 
         <section class="solution">
           <div class="section-heading">
-            <p class="eyebrow">What claudectl does</p>
-            <h2>The operator layer for Claude Code.</h2>
+            <p class="eyebrow">What codexctl does</p>
+            <h2>The operator layer for Codex.</h2>
           </div>
           <div class="feature-grid">
             <article class="feature-card">
@@ -160,17 +160,17 @@
             <article class="workflow-card">
               <h3>Catch blockers</h3>
               <p>Find every session waiting for approval and clear it immediately.</p>
-              <pre><code>claudectl --watch --focus attention</code></pre>
+              <pre><code>codexctl --watch --focus attention</code></pre>
             </article>
             <article class="workflow-card">
               <h3>Control spend</h3>
               <p>Track live burn rate, set budgets, and auto-kill over-budget runs.</p>
-              <pre><code>claudectl --budget 5 --kill-on-budget</code></pre>
+              <pre><code>codexctl --budget 5 --kill-on-budget</code></pre>
             </article>
             <article class="workflow-card">
               <h3>Supervise agent teams</h3>
-              <p>Run multiple Claude Code sessions without losing operational control.</p>
-              <pre><code>claudectl --run tasks.json --parallel</code></pre>
+              <p>Run multiple Codex sessions without losing operational control.</p>
+              <pre><code>codexctl --run tasks.json --parallel</code></pre>
             </article>
           </div>
         </section>
@@ -184,27 +184,27 @@
           <div class="install-grid">
             <article class="install-card">
               <h3>1. Install</h3>
-              <pre><code>brew install mercurialsolo/tap/claudectl
-cargo install claudectl</code></pre>
+              <pre><code>brew install aleadag/tap/codexctl
+cargo install codexctl</code></pre>
               <p>Single binary, no dependencies. Under 1 MB.</p>
             </article>
 
             <article class="install-card">
               <h3>2. Wire up hooks</h3>
-              <pre><code>claudectl --init</code></pre>
-              <p>One command adds hooks to <code>~/.claude/settings.json</code> so Claude Code notifies claudectl on every tool use. Run once.</p>
+              <pre><code>codexctl --init</code></pre>
+              <p>One command adds hooks to <code>~/.codex/hooks.json</code> so Codex notifies codexctl on every tool use. Run once.</p>
             </article>
 
             <article class="install-card">
               <h3>3. Start the dashboard</h3>
-              <pre><code>claudectl</code></pre>
-              <p>See every session at a glance. Or try <code>claudectl --demo</code> first to explore with fake sessions.</p>
+              <pre><code>codexctl</code></pre>
+              <p>See every session at a glance. Or try <code>codexctl --demo</code> first to explore with fake sessions.</p>
             </article>
 
             <article class="install-card">
               <h3>Uninstall</h3>
-              <pre><code>claudectl --uninstall</code></pre>
-              <p>Removes only claudectl hooks. All other settings preserved. Then <code>brew uninstall claudectl</code>.</p>
+              <pre><code>codexctl --uninstall</code></pre>
+              <p>Removes only codexctl hooks. All other settings preserved. Then <code>brew uninstall codexctl</code>.</p>
             </article>
           </div>
         </section>
@@ -212,7 +212,7 @@ cargo install claudectl</code></pre>
         <section class="terminal-section">
           <div class="section-heading">
             <p class="eyebrow">Terminal coverage</p>
-            <h2>Built for the terminals people actually use with Claude Code.</h2>
+            <h2>Built for the terminals people actually use with Codex.</h2>
           </div>
           <ul class="terminal-list">
             <li>Ghostty</li>
@@ -225,7 +225,7 @@ cargo install claudectl</code></pre>
             <li>GNOME Terminal</li>
           </ul>
           <p class="terminal-note">
-            Run <code>claudectl --doctor</code> to verify launch, switch, input, and approve support in your current terminal.
+            Run <code>codexctl --doctor</code> to verify launch, switch, input, and approve support in your current terminal.
           </p>
         </section>
 
@@ -235,11 +235,11 @@ cargo install claudectl</code></pre>
             <h2>Use the repo for code. Use the page for conversion.</h2>
             <p>
               This site is designed to answer the top-of-funnel question fast:
-              why someone running multiple Claude Code sessions should care.
+              why someone running multiple Codex sessions should care.
             </p>
           </div>
           <div class="closing-actions">
-            <a class="button button-primary" href="https://github.com/mercurialsolo/claudectl"
+            <a class="button button-primary" href="https://github.com/aleadag/codexctl"
               >View on GitHub</a
             >
             <a class="button button-secondary" href="#install">Get install commands</a>

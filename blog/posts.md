@@ -1,14 +1,14 @@
-# claudectl Social Posts
+# codexctl Social Posts
 
 ---
 
-## 1. r/ClaudeAI
+## 1. r/CodexAI
 
-**Title:** I built a local LLM that learns how you use Claude Code and starts auto-piloting it
+**Title:** I built a local LLM that learns how you use Codex and starts auto-piloting it
 
 **Body:**
 
-I've been running 5-8 Claude Code sessions at a time and got tired of tab-switching to approve tool calls. So I built claudectl — a TUI that sits on top of all your sessions and lets a local LLM (ollama/llama.cpp) handle approvals for you.
+I've been running 5-8 Codex sessions at a time and got tired of tab-switching to approve tool calls. So I built codexctl — a TUI that sits on top of all your sessions and lets a local LLM (ollama/llama.cpp) handle approvals for you.
 
 The part I'm most excited about: **it learns from your corrections.**
 
@@ -16,7 +16,7 @@ When the brain suggests an action, you press `b` to accept or `B` to reject. Eve
 
 After 50+ decisions, it basically knows your style. Rejections are weighted 8x heavier than approvals so it learns your "no"s fast.
 
-Everything runs locally. No cloud API, no telemetry. Decision logs and preferences live in `~/.claudectl/brain/`.
+Everything runs locally. No cloud API, no telemetry. Decision logs and preferences live in `~/.codexctl/brain/`.
 
 What it does beyond the brain:
 
@@ -30,24 +30,24 @@ What it does beyond the brain:
 [showcase GIF]
 
 ```
-brew install mercurialsolo/tap/claudectl
-claudectl --demo          # try it without Claude running
-claudectl --brain         # the real thing (needs ollama)
+brew install aleadag/tap/codexctl
+codexctl --demo          # try it without Codex running
+codexctl --brain         # the real thing (needs ollama)
 ```
 
 ~1MB binary, sub-50ms startup, 7 runtime dependencies. Written in Rust.
 
-GitHub: https://github.com/mercurialsolo/claudectl
+GitHub: https://github.com/aleadag/codexctl
 
 ---
 
 ## 2. r/LocalLLaMA
 
-**Title:** Using a local model (gemma3) to auto-approve/deny Claude Code tool calls — it learns your preferences over time
+**Title:** Using a local model (gemma3) to auto-approve/deny Codex tool calls — it learns your preferences over time
 
 **Body:**
 
-I built a tool called claudectl that puts a local LLM between you and Claude Code's permission prompts. The idea: instead of you manually approving every `cargo test` or denying every `rm -rf`, a small local model makes the call.
+I built a tool called codexctl that puts a local LLM between you and Codex's permission prompts. The idea: instead of you manually approving every `cargo test` or denying every `rm -rf`, a small local model makes the call.
 
 **How the learning loop works:**
 
@@ -74,26 +74,26 @@ After ~50 decisions you can flip to `--auto-run` mode and the brain just handles
 
 ```bash
 ollama pull gemma3 && ollama serve
-claudectl --brain
+codexctl --brain
 ```
 
-Default model is gemma3 but anything works. The prompts are overridable by dropping files in `~/.claudectl/brain/prompts/`.
+Default model is gemma3 but anything works. The prompts are overridable by dropping files in `~/.codexctl/brain/prompts/`.
 
 [showcase GIF]
 
 All decision data stays on your machine. No cloud calls, no telemetry.
 
-GitHub: https://github.com/mercurialsolo/claudectl
+GitHub: https://github.com/aleadag/codexctl
 
 ---
 
 ## 3. Hacker News
 
-**Title:** Show HN: claudectl -- local LLM brain that learns to auto-pilot Claude Code sessions
+**Title:** Show HN: codexctl -- local LLM brain that learns to auto-pilot Codex sessions
 
 **Body:**
 
-claudectl is a terminal dashboard for supervising multiple Claude Code sessions. Its main feature is the "brain" — a local LLM (via ollama, llama.cpp, vLLM, or LM Studio) that observes your sessions and makes real-time approve/deny/terminate decisions on tool calls.
+codexctl is a terminal dashboard for supervising multiple Codex sessions. Its main feature is the "brain" — a local LLM (via ollama, llama.cpp, vLLM, or LM Studio) that observes your sessions and makes real-time approve/deny/terminate decisions on tool calls.
 
 The brain learns from your corrections. Every accept/reject is logged, distilled into preference patterns every 10 decisions, and used to adapt future behavior. Accuracy is tracked per tool — if the model keeps misjudging Bash commands, it raises its confidence threshold for that tool. Rejections carry 8x the weight of approvals so hard "no"s are learned quickly.
 
@@ -107,17 +107,17 @@ All data stays local. No cloud API, no telemetry.
 
 [showcase GIF]
 
-https://github.com/mercurialsolo/claudectl
+https://github.com/aleadag/codexctl
 
 ---
 
 ## 4. r/rust
 
-**Title:** claudectl: 1MB Rust binary that auto-pilots Claude Code with a local LLM brain — 7 deps, no async, sub-50ms startup
+**Title:** codexctl: 1MB Rust binary that auto-pilots Codex with a local LLM brain — 7 deps, no async, sub-50ms startup
 
 **Body:**
 
-I've been building claudectl — a TUI for supervising Claude Code sessions. Sharing because some of the constraints might be interesting to this community.
+I've been building codexctl — a TUI for supervising Codex sessions. Sharing because some of the constraints might be interesting to this community.
 
 **Binary constraints:**
 - Under 1MB release binary
@@ -139,11 +139,11 @@ No `unsafe`. Uses `ratatui` for the TUI. Config is layered TOML (CLI flags > pro
 [showcase GIF]
 
 ```
-cargo install claudectl
-claudectl --demo    # fake sessions, no Claude needed
+cargo install codexctl
+codexctl --demo    # fake sessions, no Codex needed
 ```
 
-GitHub: https://github.com/mercurialsolo/claudectl
+GitHub: https://github.com/aleadag/codexctl
 
 Happy to answer questions about keeping the dependency count low or the no-async design.
 
@@ -151,13 +151,13 @@ Happy to answer questions about keeping the dependency count low or the no-async
 
 ## 5. r/commandline
 
-**Title:** claudectl: orchestrate a swarm of Claude Code agents with a local-LLM brain that learns from you
+**Title:** codexctl: orchestrate a swarm of Codex agents with a local-LLM brain that learns from you
 
 **Body:**
 
-I run multiple Claude Code sessions in parallel and needed a way to see all of them at once and handle permission prompts without switching tabs. So I built claudectl.
+I run multiple Codex sessions in parallel and needed a way to see all of them at once and handle permission prompts without switching tabs. So I built codexctl.
 
-It's a terminal dashboard that shows every active Claude Code session with status, cost, burn rate, model, project, and pending tool calls. You can approve prompts, launch/resume sessions, and record highlight reels — all from one screen.
+It's a terminal dashboard that shows every active Codex session with status, cost, burn rate, model, project, and pending tool calls. You can approve prompts, launch/resume sessions, and record highlight reels — all from one screen.
 
 The headline feature: a **local LLM brain** that watches your sessions and handles approvals for you. It starts in advisory mode (suggests, you confirm), learns from your corrections, and after ~50 decisions it knows your style well enough to run on auto. All local, powered by ollama or any local inference server.
 
@@ -172,10 +172,10 @@ The headline feature: a **local LLM brain** that watches your sessions and handl
 [showcase GIF]
 
 ```
-brew install mercurialsolo/tap/claudectl
-claudectl --demo    # try it right now
+brew install aleadag/tap/codexctl
+codexctl --demo    # try it right now
 ```
 
 ~1MB binary, starts in under 50ms. Written in Rust.
 
-GitHub: https://github.com/mercurialsolo/claudectl
+GitHub: https://github.com/aleadag/codexctl

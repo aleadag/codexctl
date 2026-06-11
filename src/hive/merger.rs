@@ -1,7 +1,7 @@
 // Conflict resolution for merging incoming knowledge units.
 //
 // #228 transparency: every non-trivial merge decision is appended to
-// `~/.claudectl/hive/resolutions.jsonl` with the rationale and the scores
+// `~/.codexctl/hive/resolutions.jsonl` with the rationale and the scores
 // involved, so operators can replay why the merger picked what it picked.
 
 use std::fs::{self, OpenOptions};
@@ -274,7 +274,7 @@ pub fn merge_batch(
 // ────────────────────────────────────────────────────────────────────────────
 
 /// A single merge decision recorded for replay. Written to
-/// `~/.claudectl/hive/resolutions.jsonl` as JSON, one per line.
+/// `~/.codexctl/hive/resolutions.jsonl` as JSON, one per line.
 #[derive(Debug, Clone)]
 pub struct MergeResolution {
     pub result: MergeResult,
@@ -293,7 +293,7 @@ pub struct MergeResolution {
 fn resolutions_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     PathBuf::from(home)
-        .join(".claudectl")
+        .join(".codexctl")
         .join("hive")
         .join("resolutions.jsonl")
 }

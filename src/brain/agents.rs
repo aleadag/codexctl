@@ -70,7 +70,7 @@ pub fn run_agent(agent: &AgentConfig, prompt: &str) -> Result<AgentResult, Strin
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let exit_code = output.status.code();
 
-    // Log output to .claudectl-runs/agents/
+    // Log output to .codexctl-runs/agents/
     log_agent_output(&agent.name, &stdout, &stderr);
 
     Ok(AgentResult {
@@ -92,7 +92,7 @@ fn shell_escape(s: &str) -> String {
 }
 
 fn log_agent_output(agent_name: &str, stdout: &str, stderr: &str) {
-    let dir = std::path::PathBuf::from(".claudectl-runs").join("agents");
+    let dir = std::path::PathBuf::from(".codexctl-runs").join("agents");
     let _ = std::fs::create_dir_all(&dir);
 
     let ts = std::time::SystemTime::now()

@@ -91,20 +91,18 @@ pub struct AgentState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AgentFamily {
-    ClaudeCode,
     Codex,
 }
 
 impl AgentFamily {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::ClaudeCode => "claude-code",
             Self::Codex => "codex",
         }
     }
 
     pub fn all() -> &'static [AgentFamily] {
-        &[AgentFamily::ClaudeCode, AgentFamily::Codex]
+        &[AgentFamily::Codex]
     }
 }
 
@@ -153,16 +151,12 @@ pub trait AgentAdapter {
 
 /// Get all registered adapters.
 pub fn all_adapters() -> Vec<Box<dyn AgentAdapter>> {
-    vec![
-        Box::new(super::adapter_claude::ClaudeCodeAdapter),
-        Box::new(super::adapter_codex::CodexAdapter),
-    ]
+    vec![Box::new(super::adapter_codex::CodexAdapter)]
 }
 
 /// Get an adapter by family name.
 pub fn get_adapter(family: &str) -> Option<Box<dyn AgentAdapter>> {
     match family {
-        "claude-code" => Some(Box::new(super::adapter_claude::ClaudeCodeAdapter)),
         "codex" => Some(Box::new(super::adapter_codex::CodexAdapter)),
         _ => None,
     }
@@ -187,21 +181,18 @@ mod tests {
 
     #[test]
     fn agent_family_display() {
-        assert_eq!(AgentFamily::ClaudeCode.to_string(), "claude-code");
         assert_eq!(AgentFamily::Codex.to_string(), "codex");
     }
 
     #[test]
     fn all_adapters_registered() {
         let adapters = all_adapters();
-        assert_eq!(adapters.len(), 2);
-        assert_eq!(adapters[0].family(), AgentFamily::ClaudeCode);
-        assert_eq!(adapters[1].family(), AgentFamily::Codex);
+        assert_eq!(adapters.len(), 1);
+        assert_eq!(adapters[0].family(), AgentFamily::Codex);
     }
 
     #[test]
     fn get_adapter_by_name() {
-        assert!(get_adapter("claude-code").is_some());
         assert!(get_adapter("codex").is_some());
         assert!(get_adapter("unknown").is_none());
     }

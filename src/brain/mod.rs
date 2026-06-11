@@ -24,11 +24,11 @@ pub mod sequences;
 
 use std::path::PathBuf;
 
-/// Path to the brain gate mode file (`~/.claudectl/brain/gate-mode`).
+/// Path to the brain gate mode file (`~/.codexctl/brain/gate-mode`).
 pub fn gate_mode_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     PathBuf::from(home)
-        .join(".claudectl")
+        .join(".codexctl")
         .join("brain")
         .join("gate-mode")
 }

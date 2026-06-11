@@ -2,7 +2,7 @@
 
 //! Outcome capture for brain decisions (#220 baselining v1).
 //!
-//! A `PostToolUse` hook in Claude Code writes a "pending outcome" file each
+//! A `PostToolUse` hook writes a "pending outcome" file each
 //! time a tool finishes. The reaper periodically attributes each pending
 //! outcome to the most recent matching decision in `decisions.jsonl` and
 //! writes the resolved outcome to `outcomes/<decision_id>.json`. Distillation
@@ -60,10 +60,10 @@ pub struct PendingOutcome {
     pub command: Option<String>,
     /// Project slug (basename of cwd at hook time).
     pub project: String,
-    /// Claude Code session id, if the hook payload carried one.
+    /// Codex session id, if the hook payload carried one.
     #[serde(default)]
     pub session_id: Option<String>,
-    /// Claude Code tool_use_id, if available — used for stricter joining later.
+    /// Codex tool_use_id, if available — used for stricter joining later.
     #[serde(default)]
     pub tool_use_id: Option<String>,
     /// Tool exit code (0 = success). None when the hook can't infer one.
@@ -589,7 +589,7 @@ mod tests {
         let p = PendingOutcome {
             tool: "Bash".into(),
             command: Some("cargo test".into()),
-            project: "claudectl".into(),
+            project: "codexctl".into(),
             session_id: Some("sess-1".into()),
             tool_use_id: Some("tu-1".into()),
             exit_code: Some(0),

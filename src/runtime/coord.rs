@@ -4,7 +4,7 @@
 //! store. Without it, every accessor returns an empty list so the TUI can
 //! render the "no coord" state without conditional compilation.
 
-use claudectl_core::runtime::{CoordView, HandoffSummary, InterruptSummary, LeaseSummary};
+use codexctl_core::runtime::{CoordView, HandoffSummary, InterruptSummary, LeaseSummary};
 
 pub struct LiveCoordView;
 

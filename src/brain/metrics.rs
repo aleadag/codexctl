@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use claudectl_core::runtime::DecisionSummary;
+use codexctl_core::runtime::DecisionSummary;
 
 use super::decisions::{DecisionRecord, read_all_decisions};
 
@@ -77,7 +77,7 @@ pub fn print_learning_curve() {
 
     if total < 10 {
         println!("  Not enough decisions yet ({total}). Need at least 10.");
-        println!("  Use claudectl with --brain and accept/reject suggestions to build history.");
+        println!("  Use codexctl with --brain and accept/reject suggestions to build history.");
         return;
     }
 
@@ -1307,7 +1307,7 @@ pub fn print_impact() {
 
     if total < 5 {
         println!("Not enough decisions yet ({total}). Need at least 5.");
-        println!("Use claudectl with --brain to build history.");
+        println!("Use codexctl with --brain to build history.");
         return;
     }
 
@@ -1537,7 +1537,7 @@ pub fn print_evolution() {
 
     if total < 10 {
         println!("Not enough decisions yet ({total}). Need at least 10.");
-        println!("Use claudectl with --brain to build history.");
+        println!("Use codexctl with --brain to build history.");
         return;
     }
 
@@ -2242,7 +2242,7 @@ pub fn print_counterfactuals() {
             }
             println!("    outcome: {}", cf.outcome_summary);
             if let Some(id) = &cf.decision_id {
-                println!("    mark canonical: claudectl brain review --mark {}", id);
+                println!("    mark canonical: codexctl brain review --mark {}", id);
             }
             println!();
         }
@@ -2419,7 +2419,7 @@ pub fn print_scorecard() {
     );
     println!();
 
-    println!("→ Run `claudectl brain review` to triage the highest-value cases.");
+    println!("→ Run `codexctl brain review` to triage the highest-value cases.");
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -2459,7 +2459,7 @@ fn print_help() {
     println!("Brain Statistics & Metrics");
     println!("==========================");
     println!();
-    println!("Usage: claudectl --brain-stats <subcommand>");
+    println!("Usage: codexctl --brain-stats <subcommand>");
     println!();
     println!("Subcommands:");
     println!("  evolution        Learning trajectory with sparkline charts");

@@ -4,23 +4,23 @@ Date: 2026-06-11
 
 ## Goal
 
-Migrate the project from a Claude Code control plane into a Codex-only control
+Migrate the project from a legacy agent control plane into a Codex-only control
 plane. The first implementation phase should make live behavior and primary
 user-facing surfaces Codex-native while avoiding a high-churn crate rename until
 the behavior is verified.
 
 ## Current State
 
-The codebase is still centered on Claude Code:
+The codebase is still centered on the legacy shape:
 
-- Session discovery reads `~/.claude/sessions/*.json` and resolves transcripts
-  under `~/.claude/projects/*/*.jsonl`.
-- Runtime session state is represented by `ClaudeSession`.
-- Transcript parsing expects Claude-style `message.content` blocks with
+- Session discovery reads `~/.codex/sessions/*.json` and resolves transcripts
+  under `~/.codex/projects/*/*.jsonl`.
+- Runtime session state is represented by `CodexSession`.
+- Transcript parsing expects Codex-style `message.content` blocks with
   `tool_use` and `tool_result`.
-- Process enrichment filters for commands containing `claude`.
-- Init installs Claude Code hooks into `~/.claude/settings.json` and writes an
-  embedded `claude-plugin/` bundle.
+- Process enrichment filters for the old command name.
+- Init installs Codex hooks into `~/.codex/hooks.json` and writes an
+  embedded `codex-plugin/` bundle.
 - The coord layer has a Codex adapter, but it is a stub that discovers no
   sessions and cannot send input.
 
@@ -40,12 +40,12 @@ Codex has a different local shape:
 
 Use a Codex-native migration.
 
-The implementation should replace the active Claude runtime path with Codex
-discovery, transcript parsing, and hooks. It should remove Claude support from
+The implementation should replace the active Codex runtime path with Codex
+discovery, transcript parsing, and hooks. It should remove Codex support from
 active code paths instead of preserving a multi-agent abstraction.
 
 The implementation should not immediately rename every crate or module. Keeping
-`claudectl-core` and `claudectl-tui` temporarily avoids mixing mechanical
+`codexctl-core` and `codexctl-tui` temporarily avoids mixing mechanical
 renames with behavioral migration. Public naming and docs that users see in
 phase 1 should move toward `codexctl`.
 
@@ -68,7 +68,7 @@ The live session source should use Codex discovery only.
 
 ### Transcript Parsing
 
-Add a Codex transcript parser instead of adapting the Claude parser in place.
+Add a Codex transcript parser instead of adapting the Codex parser in place.
 
 The parser should recognize:
 
@@ -88,7 +88,7 @@ The parser should produce the existing internal facts the monitor needs:
 - Context or token data only when the Codex event includes it.
 
 If a metric is not available in Codex JSONL, the UI should show an unavailable
-state rather than carrying a Claude-specific estimate.
+state rather than carrying a Codex-specific estimate.
 
 ### Session Model
 
@@ -99,13 +99,13 @@ create churn.
 The first phase should focus on behavior:
 
 - Codex sessions appear in the TUI and JSON output.
-- Claude-only fields are either populated from Codex data or marked
+- Codex-only fields are either populated from Codex data or marked
   unavailable.
 - Existing health and brain code consumes the same normalized session facts.
 
 ### Process and Terminal Integration
 
-Replace Claude process filtering with Codex process detection where live process
+Replace Codex process filtering with Codex process detection where live process
 data is needed.
 
 The first version should use process data only as a supplemental signal. Codex
@@ -118,7 +118,7 @@ work.
 
 ### Hooks and Init
 
-Remove Claude Code hook installation from the active init path.
+Remove Codex hook installation from the active init path.
 
 Add Codex-native hook installation using documented Codex hook sources:
 
@@ -137,9 +137,9 @@ hook trust review.
 
 ### Plugin and Slash Command Assets
 
-Remove `claude-plugin/` from the active install path.
+Remove `codex-plugin/` from the active install path.
 
-Do not port Claude slash commands one-for-one. Codex plugins and skills have a
+Do not port Codex slash commands one-for-one. Codex plugins and skills have a
 different model, so the first phase should expose equivalent workflows through
 the CLI and hooks. A later phase can package Codex skills or a plugin once the
 runtime behavior is stable.
@@ -165,9 +165,9 @@ Defer full historical cleanup:
 
 Phase 1 will not:
 
-- Preserve Claude Code as a secondary runtime.
+- Preserve Codex as a secondary runtime.
 - Fully rename all crates, modules, tests, and internal types.
-- Recreate Claude plugin slash commands as Codex commands.
+- Recreate Codex plugin slash commands as Codex commands.
 - Implement cloud Codex task orchestration.
 - Infer private Codex SQLite schemas without a stable public contract.
 - Depend on undocumented Codex internals when the JSONL and hook surfaces are
@@ -183,7 +183,7 @@ Add focused tests for:
 - Hook JSON merge and removal behavior that preserves unrelated hooks.
 - The real Codex adapter returning discovered sessions from fixtures.
 
-Update or remove tests that only validate Claude behavior when the behavior has
+Update or remove tests that only validate Codex behavior when the behavior has
 no Codex equivalent.
 
 ## Verification
@@ -191,9 +191,9 @@ no Codex equivalent.
 Success criteria:
 
 - A local Codex transcript from `~/.codex/sessions` appears in `codexctl --json`.
-- The TUI can list Codex sessions without Claude files present.
-- `codexctl init` writes Codex hook config, not Claude settings.
-- Claude plugin assets are no longer installed by init.
+- The TUI can list Codex sessions without Codex files present.
+- `codexctl init` writes Codex hook config, not Codex settings.
+- Codex plugin assets are no longer installed by init.
 - `cargo fmt` passes.
 - `cargo test` passes.
 - `cargo clippy -- -D warnings` passes, or any remaining failures are documented

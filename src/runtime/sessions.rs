@@ -1,7 +1,7 @@
 //! Bind `SessionSource` to the binary's live discovery + monitor pipeline.
 
-use claudectl_core::discovery;
-use claudectl_core::runtime::{SessionSnapshot, SessionSource};
+use codexctl_core::discovery;
+use codexctl_core::runtime::{SessionSnapshot, SessionSource};
 
 pub struct LiveSessionSource;
 
@@ -13,7 +13,7 @@ impl SessionSource for LiveSessionSource {
     }
 }
 
-fn snapshot_from_live(s: claudectl_core::session::ClaudeSession) -> SessionSnapshot {
+fn snapshot_from_live(s: codexctl_core::session::CodexSession) -> SessionSnapshot {
     SessionSnapshot {
         session_id: s.session_id,
         pid: s.pid,

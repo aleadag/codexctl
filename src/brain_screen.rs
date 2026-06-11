@@ -15,7 +15,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
 
-use claudectl_core::runtime::DecisionSummary;
+use codexctl_core::runtime::DecisionSummary;
 
 use crate::app::{App, BrainTab};
 use crate::brain::metrics::{
@@ -28,7 +28,7 @@ pub fn render_brain_screen(frame: &mut Frame, area: Rect, app: &App) {
     let t = &app.theme;
 
     let title = Line::from(vec![
-        Span::styled(" claudectl ", Style::default().fg(t.text_primary)),
+        Span::styled(" codexctl ", Style::default().fg(t.text_primary)),
         Span::styled(
             "│ Brain Review ",
             Style::default().fg(t.header).add_modifier(Modifier::BOLD),

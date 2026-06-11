@@ -5,17 +5,17 @@
     clippy::io_other_error
 )]
 
-// Foundational modules from claudectl-core (epic #279). Re-aliased so existing
+// Foundational modules from codexctl-core (epic #279). Re-aliased so existing
 // `crate::session::*` paths still resolve. See `lib.rs` for the rationale.
-use claudectl_core::{
+use codexctl_core::{
     discovery, history, hooks, launch, logger, models, process, rules, session, terminals, theme,
     transcript,
 };
-// TUI now lives in `claudectl-tui` (issue #275). The `app` + `ui` + TUI
+// TUI now lives in `codexctl-tui` (issue #275). The `app` + `ui` + TUI
 // peripheral modules are imported here so existing `app::App`, `ui::table`,
 // `demo::*`, `recorder::*`, `session_recorder::*` paths in main.rs resolve
 // unchanged.
-use claudectl_tui::{app, demo, recorder, session_recorder, ui};
+use codexctl_tui::{app, demo, recorder, session_recorder, ui};
 
 mod brain;
 mod brain_screen;
@@ -88,7 +88,7 @@ pub(crate) enum Command {
     },
 
     #[cfg(feature = "coord")]
-    /// Ingest a Claude Code hook payload from stdin into the coord
+    /// Ingest a Codex hook payload from stdin into coord
     /// `hook_events` table (#345, RFC v2 §6). Best-effort by
     /// construction — meant to be called from a bash hook with
     /// `2>/dev/null || true`. JSONL tail + `ps` stay authoritative;
@@ -116,34 +116,34 @@ pub(crate) enum Command {
         /// Clear the onboarding marker so the next `init` starts fresh.
         #[arg(long, conflicts_with_all = ["check", "remove", "non_interactive"])]
         reset: bool,
-        /// Uninstall every claudectl-managed artifact (hooks, marker).
+        /// Uninstall every codexctl-managed artifact (hooks, marker).
         /// Preserves user data: bus DB roles, brain decision logs, hive
         /// knowledge, relay identity, config file. Pair with `--purge` to
         /// wipe everything.
         #[arg(long, conflicts_with_all = ["check", "reset", "non_interactive", "purge"])]
         remove: bool,
-        /// Hard uninstall: `--remove` PLUS delete `~/.claudectl/` entirely
+        /// Hard uninstall: `--remove` PLUS delete `~/.codexctl/` entirely
         /// (bus DB, brain decisions, hive knowledge, relay identity, coord
-        /// state) and `~/.config/claudectl/config.toml`. Use to start over
+        /// state) and `~/.config/codexctl/config.toml`. Use to start over
         /// from a clean slate. Requires `--yes` to proceed without prompt.
         #[arg(long, conflicts_with_all = ["check", "reset", "non_interactive", "remove"])]
         purge: bool,
         /// Skip the confirmation prompt for `--purge`.
         #[arg(long)]
         yes: bool,
-        /// Install (or re-install) just the embedded plugin + hooks (#325).
+        /// Install (or re-install) just Codex hooks (#325).
         /// Skip every other phase. Useful for users who already configured
-        /// budget / brain / bus and just want to refresh the plugin files
-        /// after `brew upgrade claudectl`.
+        /// budget / brain / bus and just want to refresh hook entries
+        /// after `brew upgrade codexctl`.
         #[arg(
             long,
             conflicts_with_all = ["check", "reset", "remove", "purge", "non_interactive"]
         )]
         plugin_only: bool,
         /// Re-sync everything the previous `init` wrote to match the
-        /// running binary (#327): hook entries, embedded plugin files,
+        /// running binary (#327): hook entries,
         /// DB schema migrations, and the onboarding marker version. Use
-        /// after `brew upgrade claudectl` / `cargo install ... --force`.
+        /// after `brew upgrade codexctl` / `cargo install ... --force`.
         #[arg(
             long,
             conflicts_with_all = ["check", "reset", "remove", "purge", "plugin_only", "non_interactive"]
@@ -168,7 +168,7 @@ pub(crate) enum Command {
         #[arg(long)]
         skip_brain: bool,
 
-        /// Install Claude Code hooks (default in --non-interactive).
+        /// Install Codex hooks (default in --non-interactive).
         #[arg(long)]
         install_plugin: bool,
         /// Skip the plugin phase.
@@ -201,7 +201,7 @@ pub(crate) enum Command {
     Man,
 
     /// Install + runtime health check. Answers "is everything wired up?"
-    /// in one command — PATH, hooks, plugin files, brain endpoint, bus
+    /// in one command — PATH, hooks, brain endpoint, bus
     /// feature, bus DB, session discovery, terminal integration.
     /// Exits non-zero on any failure; advisories don't affect exit code.
     Doctor {
@@ -213,9 +213,9 @@ pub(crate) enum Command {
 
 #[derive(Parser)]
 #[command(
-    name = "claudectl",
+    name = "codexctl",
     version,
-    about = "Orchestrate a swarm of Claude Code agents with a local-LLM brain that learns from you."
+    about = "Orchestrate Codex sessions with a local-LLM brain that learns from you."
 )]
 pub(crate) struct Cli {
     // ── Dashboard ───────────────────────────────────────────────────────
@@ -249,7 +249,7 @@ pub(crate) struct Cli {
     pub(crate) watch: bool,
 
     /// Run headless with brain, coordination, and context rot prevention active (no TUI).
-    /// Attach a dashboard with `claudectl` in another terminal.
+    /// Attach a dashboard with `codexctl` in another terminal.
     #[arg(long, help_heading = "Output Modes")]
     pub(crate) headless: bool,
 
@@ -283,7 +283,7 @@ pub(crate) struct Cli {
     pub(crate) search: Option<String>,
 
     // ── Session Management ─────────────────────────────────────────────
-    /// Launch a new Claude Code session in the given directory
+    /// Launch a new Codex session in the given directory
     #[arg(long = "new", help_heading = "Session Management")]
     pub(crate) new_session: bool,
 
@@ -362,7 +362,7 @@ pub(crate) struct Cli {
     pub(crate) brain_mark_canonical: Option<String>,
 
     /// Query the brain for a single tool-call decision and exit (JSON output).
-    /// Used by Claude Code plugin hooks for inline approve/deny.
+    /// Used by Codex hooks for inline approve/deny.
     #[arg(long, help_heading = "Brain (Local LLM)")]
     pub(crate) brain_query: bool,
 
@@ -379,12 +379,12 @@ pub(crate) struct Cli {
     pub(crate) project: Option<String>,
 
     /// Set brain gate mode: on (default), off (disable), auto (full auto-approve).
-    /// Controls whether the Claude Code plugin hook queries the brain.
+    /// Controls whether Codex hooks query the brain.
     #[arg(long, help_heading = "Brain (Local LLM)")]
     pub(crate) mode: Option<String>,
 
     /// Record a tool-call outcome to the pending-outcomes spool.
-    /// Used by the Claude Code PostToolUse hook for #220 baselining.
+    /// Used by the Codex PostToolUse hook for #220 baselining.
     /// Reads pending-outcome JSON from stdin (preferred) or builds one from
     /// --tool, --tool-input, --project, --exit-code, --duration-ms, --stderr-tail.
     #[arg(long, help_heading = "Brain (Local LLM)")]
@@ -403,11 +403,11 @@ pub(crate) struct Cli {
     #[arg(long, help_heading = "Brain (Local LLM)")]
     pub(crate) stderr_tail: Option<String>,
 
-    /// Claude Code session id (passed through hook payload), optional.
+    /// Codex session id (passed through hook payload), optional.
     #[arg(long, help_heading = "Brain (Local LLM)")]
     pub(crate) session_id: Option<String>,
 
-    /// Claude Code tool_use_id (passed through hook payload), optional.
+    /// Codex tool call id (passed through hook payload), optional.
     #[arg(long, help_heading = "Brain (Local LLM)")]
     pub(crate) tool_use_id: Option<String>,
 
@@ -438,9 +438,9 @@ pub(crate) struct Cli {
     #[arg(long, help_heading = "Brain (Local LLM)", num_args = 0..=1, default_missing_value = "")]
     pub(crate) insights: Option<String>,
 
-    /// Propose CLAUDE.md additions from high-confidence brain preferences.
+    /// Propose AGENTS.md additions from high-confidence brain preferences.
     /// Use --project to scope to a specific project's preferences, and --apply
-    /// to write the suggestions to CLAUDE.md.
+    /// to write the suggestions to AGENTS.md.
     #[arg(long, help_heading = "Brain (Local LLM)")]
     pub(crate) brain_garden: bool,
 
@@ -460,7 +460,7 @@ pub(crate) struct Cli {
     #[arg(long, help_heading = "Orchestration")]
     pub(crate) decompose: Option<String>,
 
-    /// Run tasks from a JSON file (e.g., claudectl --run tasks.json)
+    /// Run tasks from a JSON file (e.g., codexctl --run tasks.json)
     #[arg(long, help_heading = "Orchestration")]
     pub(crate) run: Option<String>,
 
@@ -527,7 +527,7 @@ pub(crate) struct Cli {
     #[arg(long, help_heading = "History & Diagnostics")]
     pub(crate) config_validate: bool,
 
-    /// Write a sample .claudectl.toml in the current directory
+    /// Write a sample .codexctl.toml in the current directory
     #[arg(long, help_heading = "Setup")]
     pub(crate) config_init: bool,
 
@@ -544,15 +544,15 @@ pub(crate) struct Cli {
     pub(crate) log: Option<String>,
 
     // ── Setup ─────────────────────────────────────────────────────────
-    /// Wire up Claude Code hooks in .claude/settings.json and exit
+    /// Wire up Codex hooks in .codex/hooks.json and exit
     #[arg(long, help_heading = "Setup")]
     pub(crate) init: bool,
 
-    /// Remove claudectl hooks from .claude/settings.json and exit
+    /// Remove codexctl hooks from .codex/hooks.json and exit
     #[arg(long, help_heading = "Setup", conflicts_with = "init")]
     pub(crate) uninstall: bool,
 
-    /// Configuration scope: user (global ~/.claude/settings.json) or project (.claude/settings.local.json)
+    /// Configuration scope: user (global ~/.codex/hooks.json) or project (.codex/hooks.json)
     #[arg(short, long, default_value = "user", help_heading = "Setup")]
     pub(crate) scope: String,
 }
@@ -571,15 +571,13 @@ fn maybe_print_star_prompt(is_demo: bool) {
     let marker = std::env::var_os("HOME")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
-        .join(".claudectl/.star-prompted");
+        .join(".codexctl/.star-prompted");
 
     let first_run = !marker.exists();
 
     if is_demo || first_run {
         eprintln!();
-        eprintln!(
-            "\u{2b50} If claudectl is useful, star it: https://github.com/mercurialsolo/claudectl"
-        );
+        eprintln!("\u{2b50} If codexctl is useful, star it: https://github.com/aleadag/codexctl");
 
         if first_run {
             if let Some(parent) = marker.parent() {
@@ -591,19 +589,19 @@ fn maybe_print_star_prompt(is_demo: bool) {
 }
 
 /// First-run detection for the activation nudge (#322). Returns true when
-/// the user has neither onboarded (`~/.claudectl/onboarding.json` absent)
-/// nor installed Claude Code hooks (`~/.claude/settings.json` lacks any
-/// `claudectl` entries). When either is present, we assume the operator
+/// the user has neither onboarded (`~/.codexctl/onboarding.json` absent)
+/// nor installed Codex hooks (`~/.codex/hooks.json` lacks any `codexctl`
+/// entries). When either is present, we assume the operator
 /// knows what they're doing and stay quiet.
 fn is_first_run() -> bool {
     let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
         return false;
     };
-    let marker = home.join(".claudectl").join("onboarding.json");
-    let settings = home.join(".claude").join("settings.json");
+    let marker = home.join(".codexctl").join("onboarding.json");
+    let settings = home.join(".codex").join("hooks.json");
     let onboarded = marker.exists();
     let hooked = std::fs::read_to_string(&settings)
-        .map(|s| s.contains("claudectl"))
+        .map(|s| s.contains("codexctl"))
         .unwrap_or(false);
     !onboarded && !hooked
 }
@@ -614,15 +612,15 @@ fn is_first_run() -> bool {
 fn print_first_run_banner() {
     eprintln!();
     eprintln!("┌─────────────────────────────────────────────────────────────────┐");
-    eprintln!("│  Welcome to claudectl.                                          │");
+    eprintln!("│  Welcome to codexctl.                                           │");
     eprintln!("│                                                                 │");
     eprintln!("│  You haven't onboarded yet — the dashboard will be empty until  │");
-    eprintln!("│  Claude Code hooks are installed. Quit and run one of:          │");
+    eprintln!("│  Codex hooks are installed. Quit and run one of:                │");
     eprintln!("│                                                                 │");
-    eprintln!("│    claudectl init        Interactive 5-phase wizard (preferred) │");
-    eprintln!("│    claudectl --demo      Explore with fake sessions             │");
+    eprintln!("│    codexctl init        Interactive 5-phase wizard (preferred)  │");
+    eprintln!("│    codexctl --demo      Explore with fake sessions              │");
     eprintln!("│                                                                 │");
-    eprintln!("│  Silence this with CLAUDECTL_SKIP_FIRST_RUN=1.                  │");
+    eprintln!("│  Silence this with CODEXCTL_SKIP_FIRST_RUN=1.                  │");
     eprintln!("└─────────────────────────────────────────────────────────────────┘");
     eprintln!();
     // Tiny delay so the user actually reads the banner before the TUI
@@ -718,8 +716,8 @@ fn run_main(cli: Cli) -> io::Result<()> {
 
     if cli.doctor {
         eprintln!(
-            "note: `--doctor` is deprecated. Use `claudectl doctor` for the new \
-             structured checklist (PATH + hooks + plugin + brain + bus + sessions + \
+            "note: `--doctor` is deprecated. Use `codexctl doctor` for the new \
+             structured checklist (PATH + hooks + brain + bus + sessions + \
              terminal). The legacy report follows below."
         );
         return commands::print_doctor();
@@ -728,7 +726,7 @@ fn run_main(cli: Cli) -> io::Result<()> {
     if cli.init {
         eprintln!(
             "note: `--init` is deprecated and will be removed in a future release. \
-             Use `claudectl init` for the full onboarding wizard, or this flag for \
+             Use `codexctl init` for the full onboarding wizard, or this flag for \
              the hook-only install."
         );
         let project = cli.scope == "project";
@@ -738,7 +736,7 @@ fn run_main(cli: Cli) -> io::Result<()> {
     if cli.uninstall {
         eprintln!(
             "note: `--uninstall` is deprecated and will be removed in a future release. \
-             Use `claudectl init --remove` instead."
+             Use `codexctl init --remove` instead."
         );
         let project = cli.scope == "project";
         return init::run_uninit(project);
@@ -751,7 +749,7 @@ fn run_main(cli: Cli) -> io::Result<()> {
             println!("  {name}: {source}");
         }
         println!();
-        println!("Override: create ~/.claudectl/brain/prompts/<name>.md");
+        println!("Override: create ~/.codexctl/brain/prompts/<name>.md");
         return Ok(());
     }
 
@@ -857,12 +855,12 @@ fn run_main(cli: Cli) -> io::Result<()> {
                 }
                 if *upgrade {
                     // #327 — re-sync after `brew upgrade`. Hooks +
-                    // plugin + DB migrations + marker version, with a
+                    // hooks + DB migrations + marker version, with a
                     // per-step report.
                     return init::run_upgrade();
                 }
                 if *plugin_only {
-                    // #325 — install just the embedded plugin + hook
+                    // #325 — install just the hook
                     // entries. The other four wizard phases stay where
                     // the previous run left them (no marker rewrite).
                     return init::phases::install_plugin_now();
@@ -1054,7 +1052,7 @@ fn run_main(cli: Cli) -> io::Result<()> {
     // they understand why the dashboard is going to be empty. Skipped in
     // --demo (the wizard's whole point is moot there) and when the
     // operator opts out via env.
-    if !cli.demo && std::env::var("CLAUDECTL_SKIP_FIRST_RUN").is_err() && is_first_run() {
+    if !cli.demo && std::env::var("CODEXCTL_SKIP_FIRST_RUN").is_err() && is_first_run() {
         print_first_run_banner();
     }
 
@@ -1175,7 +1173,7 @@ fn run_tui<W: io::Write>(
                 );
             } else {
                 app.status_msg = format!(
-                    "Error: Brain endpoint {} not reachable — run `claudectl --doctor` or start ollama",
+                    "Error: Brain endpoint {} not reachable — run `codexctl doctor` or start ollama",
                     brain_cfg.endpoint
                 );
             }
@@ -1198,8 +1196,8 @@ fn run_tui<W: io::Write>(
         app.refresh();
 
         // Optional: auto-open the Skills & Hive view for recording demo GIFs.
-        // `CLAUDECTL_DEMO_SKILLS=1 claudectl --demo --record demo-skills.cast`.
-        if std::env::var("CLAUDECTL_DEMO_SKILLS").as_deref() == Ok("1") {
+        // `CODEXCTL_DEMO_SKILLS=1 codexctl --demo --record demo-skills.cast`.
+        if std::env::var("CODEXCTL_DEMO_SKILLS").as_deref() == Ok("1") {
             app.open_skills_overlay();
             // Seed a fake invite so the Hive tab has something to show when
             // we flip to it (don't actually shell out to relay invite).
@@ -1378,8 +1376,8 @@ mod first_run_tests {
     fn not_first_run_when_onboarding_marker_present() {
         let _g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let tmp = tempfile::tempdir().unwrap();
-        fs::create_dir_all(tmp.path().join(".claudectl")).unwrap();
-        fs::write(tmp.path().join(".claudectl").join("onboarding.json"), "{}").unwrap();
+        fs::create_dir_all(tmp.path().join(".codexctl")).unwrap();
+        fs::write(tmp.path().join(".codexctl").join("onboarding.json"), "{}").unwrap();
         set_home(tmp.path());
         assert!(
             !is_first_run(),
@@ -1388,13 +1386,13 @@ mod first_run_tests {
     }
 
     #[test]
-    fn not_first_run_when_settings_mentions_claudectl() {
+    fn not_first_run_when_settings_mentions_codexctl() {
         let _g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let tmp = tempfile::tempdir().unwrap();
-        fs::create_dir_all(tmp.path().join(".claude")).unwrap();
+        fs::create_dir_all(tmp.path().join(".codex")).unwrap();
         fs::write(
-            tmp.path().join(".claude").join("settings.json"),
-            r#"{"hooks":{"PostToolUse":[{"hooks":[{"command":"claudectl --json"}]}]}}"#,
+            tmp.path().join(".codex").join("hooks.json"),
+            r#"{"hooks":{"PostToolUse":[{"hooks":[{"command":"codexctl --json"}]}]}}"#,
         )
         .unwrap();
         set_home(tmp.path());

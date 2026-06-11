@@ -8,7 +8,7 @@
 //! When a task enters `ASSIGNED` / `RUNNING`, the supervisor evaluates
 //! `force_manual_tasks = ["infra-*"]` against the task name **once** and
 //! writes the effective approval mode to a per-session file at
-//! `~/.claudectl/coord/session-policy/<session_id>.json`. The brain-gate
+//! `~/.codexctl/coord/session-policy/<session_id>.json`. The brain-gate
 //! hook, on every tool call, does a single `fs::read_to_string` and
 //! short-circuits to manual approval when the file says `force_manual`.
 //!
@@ -54,11 +54,11 @@ pub enum ApproveMode {
     ForceManual,
 }
 
-/// `~/.claudectl/coord/session-policy/`. Created on demand by `write()`.
+/// `~/.codexctl/coord/session-policy/`. Created on demand by `write()`.
 pub fn dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     PathBuf::from(home)
-        .join(".claudectl")
+        .join(".codexctl")
         .join("coord")
         .join("session-policy")
 }

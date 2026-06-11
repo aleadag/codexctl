@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
-/// Unique identity for a claudectl instance in the relay network.
+/// Unique identity for a codexctl instance in the relay network.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PeerId(pub String);
 
@@ -95,7 +95,7 @@ pub fn epoch_ms() -> u64 {
 
 fn relay_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    PathBuf::from(home).join(".claudectl").join("relay")
+    PathBuf::from(home).join(".codexctl").join("relay")
 }
 
 fn identity_path() -> PathBuf {

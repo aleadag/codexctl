@@ -1,14 +1,14 @@
 # The Local Brain: Why Your Agent Orchestrator Should Think On-Device
 
-*How claudectl uses a local LLM to supervise, teach, and coordinate AI coding agents — without your reasoning traces ever leaving your machine.*
+*How codexctl uses a local LLM to supervise, teach, and coordinate AI coding agents — without your reasoning traces ever leaving your machine.*
 
 ---
 
 ## The Problem With Babysitting Agents
 
-If you run Claude Code on a non-trivial codebase, you know the rhythm: approve this Bash command, deny that file write, approve this read, wait — why is it running `rm -rf`? You're babysitting. And if you're running three sessions in parallel across a monorepo, you're babysitting three times over, context-switching between terminal tabs, trying to remember which session is doing what.
+If you run Codex on a non-trivial codebase, you know the rhythm: approve this Bash command, deny that file write, approve this read, wait — why is it running `rm -rf`? You're babysitting. And if you're running three sessions in parallel across a monorepo, you're babysitting three times over, context-switching between terminal tabs, trying to remember which session is doing what.
 
-The obvious fix is automation: write rules that auto-approve safe operations and deny dangerous ones. We built that — claudectl has a rule engine that matches on tool name, command substring, project, cost threshold, and more. Deny rules always override approvals. It works.
+The obvious fix is automation: write rules that auto-approve safe operations and deny dangerous ones. We built that — codexctl has a rule engine that matches on tool name, command substring, project, cost threshold, and more. Deny rules always override approvals. It works.
 
 But rules are static. They can't reason about *why* a session is calling `git push --force` — is it rebasing a feature branch (probably fine) or force-pushing to main (stop everything)? They can't notice that two sessions are editing the same file and decide which one should yield. They can't look at a session that's spent $8 with no file edits and decide whether it's legitimately researching or stuck in a loop.
 
@@ -16,11 +16,11 @@ You need something that can reason. The question is: where does that reasoning h
 
 ## Why Not Just Use the Cloud?
 
-The naive approach: send session context to Claude or GPT-4 and ask it what to do. This works technically — a frontier model is excellent at evaluating tool calls. But it creates three problems that compound badly at scale:
+The naive approach: send session context to Codex or GPT-4 and ask it what to do. This works technically — a frontier model is excellent at evaluating tool calls. But it creates three problems that compound badly at scale:
 
 **1. Your reasoning traces are your workflow DNA.**
 
-Every Claude Code session produces a JSONL transcript: what files were read, what edits were made, what commands were run, what the model reasoned about, what you approved and denied. Over weeks, these traces encode something extraordinarily valuable — your engineering judgment. Your code review standards. Your security practices. The architectural patterns you reach for. The commands you consider dangerous versus routine.
+Every Codex session produces a JSONL transcript: what files were read, what edits were made, what commands were run, what the model reasoned about, what you approved and denied. Over weeks, these traces encode something extraordinarily valuable — your engineering judgment. Your code review standards. Your security practices. The architectural patterns you reach for. The commands you consider dangerous versus routine.
 
 Sending these traces to a cloud API means your workflow DNA becomes training data for someone else's model. Even if the provider promises not to train on API data, the traces still transit their infrastructure, land in their logs, and are subject to their data retention policies.
 
@@ -34,7 +34,7 @@ If your cloud supervisor goes down, rate-limits, or times out, all your sessions
 
 ## The Local Brain Architecture
 
-claudectl's brain is a local LLM (Gemma 4 4B, Llama 3, or any model you run locally) that observes your sessions and makes decisions. Here's what makes it work:
+codexctl's brain is a local LLM (Gemma 4 4B, Llama 3, or any model you run locally) that observes your sessions and makes decisions. Here's what makes it work:
 
 ### What the brain sees
 
@@ -109,7 +109,7 @@ Previous decisions for similar situations:
 
 The brain adapts to your preferences without fine-tuning. Decision #5 is particularly powerful — the user rejected the brain's approval, teaching it that file writes in this project need manual review. Next time, the brain will suggest review instead of auto-approve.
 
-This learning loop stays entirely on your machine. The decision log is a JSONL file in `~/.claudectl/brain/decisions.jsonl`. You can inspect it, edit it, delete it. It's yours.
+This learning loop stays entirely on your machine. The decision log is a JSONL file in `~/.codexctl/brain/decisions.jsonl`. You can inspect it, edit it, delete it. It's yours.
 
 ### Cross-session orchestration
 
@@ -129,7 +129,7 @@ All of this orchestration happens locally. The reasoning traces — which sessio
 
 ## The Model Doesn't Need to Be Smart. It Needs to Be Agent-Aware.
 
-A common objection: "A 4B model can't reason well enough to supervise a frontier model." This misunderstands the task. The brain isn't competing with Claude on reasoning — it's making structured decisions based on observable signals.
+A common objection: "A 4B model can't reason well enough to supervise a frontier model." This misunderstands the task. The brain isn't competing with Codex on reasoning — it's making structured decisions based on observable signals.
 
 Consider what the brain actually evaluates:
 
@@ -150,7 +150,7 @@ What the model *does* need is:
 
 The last point is subtle. The brain's system prompt explicitly frames it as a supervisor:
 
-> You are a session supervisor for Claude Code agents. You observe what each session is doing and decide what to approve, deny, or coordinate. You do not write code. You evaluate tool calls.
+> You are a session supervisor for Codex agents. You observe what each session is doing and decide what to approve, deny, or coordinate. You do not write code. You evaluate tool calls.
 
 This framing matters. Without it, small models sometimes try to "help" by suggesting code changes instead of making approve/deny decisions. Agent-aware prompting keeps the model in its lane.
 
@@ -160,10 +160,10 @@ Let's be explicit about the data sovereignty model:
 
 | Data | Where it lives | Who can access it |
 |------|---------------|-------------------|
-| Session JSONL transcripts | `~/.claude/sessions/` | You |
-| Brain decision log | `~/.claudectl/brain/decisions.jsonl` | You |
+| Session JSONL transcripts | `~/.codex/sessions/` | You |
+| Brain decision log | `~/.codexctl/brain/decisions.jsonl` | You |
 | Few-shot examples | Derived from decision log at inference time | You |
-| Brain prompt templates | `~/.claudectl/brain/prompts/` (customizable) | You |
+| Brain prompt templates | `~/.codexctl/brain/prompts/` (customizable) | You |
 | Orchestration context | In-memory during TUI session | Never persisted |
 | LLM inference | localhost (ollama/llama.cpp/vLLM) | You |
 
@@ -184,22 +184,22 @@ This is your workflow, encoded as data, running on your hardware, improving with
 ## Getting Started
 
 ```bash
-# Install claudectl
-brew install mercurialsolo/tap/claudectl
+# Install codexctl
+brew install aleadag/tap/codexctl
 
 # Install and start ollama with a suitable model
 ollama pull gemma4:e4b
 ollama serve
 
 # Run with brain in advisory mode
-claudectl --brain
+codexctl --brain
 
 # Once you trust it, enable auto-execution
-claudectl --brain --auto-run
+codexctl --brain --auto-run
 ```
 
 The brain starts with zero history and defaults to conservative suggestions. As you accept and reject its proposals, it learns. There's no setup, no training pipeline, no data export. Just use it.
 
 ---
 
-*claudectl is open-source and MIT-licensed. The brain subsystem ships in the same binary — no separate service, no account, no API key. Your machine, your models, your decisions.*
+*codexctl is open-source and MIT-licensed. The brain subsystem ships in the same binary — no separate service, no account, no API key. Your machine, your models, your decisions.*

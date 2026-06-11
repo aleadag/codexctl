@@ -1,10 +1,10 @@
 #![allow(dead_code)]
 
-//! CLAUDE.md gardening (#199).
+//! AGENTS.md gardening (#199).
 //!
-//! Distilled preferences live in `~/.claudectl/brain/preferences/`. They're
-//! used by the brain prompt builder but invisible to Claude Code itself. This
-//! module promotes high-confidence patterns into proposed `CLAUDE.md` additions
+//! Distilled preferences live in `~/.codexctl/brain/preferences/`. They're
+//! used by the brain prompt builder but invisible to Codex itself. This
+//! module promotes high-confidence patterns into proposed `AGENTS.md` additions
 //! so the project's permanent instructions reflect what the user has actually
 //! taught the brain.
 
@@ -19,14 +19,14 @@ use super::preferences::{
 // Tunables
 // ────────────────────────────────────────────────────────────────────────────
 
-/// A preference must clear both bars before we even consider it for CLAUDE.md.
+/// A preference must clear both bars before we even consider it for AGENTS.md.
 /// Matches the issue: ≥90% confidence, ≥20 samples.
 const MIN_CONFIDENCE: f64 = 0.90;
 const MIN_SAMPLES: u32 = 20;
 
 /// Mark the appended block so we can find it again and avoid double-writing.
-const HEADER: &str = "<!-- claudectl-garden: auto-codified from brain preferences -->";
-const FOOTER: &str = "<!-- /claudectl-garden -->";
+const HEADER: &str = "<!-- codexctl-garden: auto-codified from brain preferences -->";
+const FOOTER: &str = "<!-- /codexctl-garden -->";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Suggestion model
@@ -36,7 +36,7 @@ const FOOTER: &str = "<!-- /claudectl-garden -->";
 pub enum SuggestionKind {
     /// A pattern to codify ("approve / deny X when Y").
     Codify,
-    /// A pattern that contradicts existing CLAUDE.md content.
+    /// A pattern that contradicts existing AGENTS.md content.
     Contradiction,
 }
 
@@ -47,7 +47,7 @@ pub struct Suggestion {
     pub line: String,
     /// Rationale shown to the user (and saved as an HTML comment if --apply).
     pub rationale: String,
-    /// Source tool for keyword matching against existing CLAUDE.md content.
+    /// Source tool for keyword matching against existing AGENTS.md content.
     pub tool: String,
     /// Source command keyword (e.g. "cargo test").
     pub cmd_keyword: Option<String>,
@@ -56,7 +56,7 @@ pub struct Suggestion {
 #[derive(Debug, Clone)]
 pub struct GardenReport {
     pub project: String,
-    pub claude_md_path: Option<PathBuf>,
+    pub agents_md_path: Option<PathBuf>,
     pub considered: u32,
     pub kept: Vec<Suggestion>,
     pub already_covered: u32,
@@ -65,15 +65,15 @@ pub struct GardenReport {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// CLAUDE.md discovery
+// AGENTS.md discovery
 // ────────────────────────────────────────────────────────────────────────────
 
-/// Find the project's CLAUDE.md. We prefer the file in the current working
-/// directory (where the user invoked claudectl), then walk up.
-pub fn find_claude_md(start: &Path) -> Option<PathBuf> {
+/// Find the project's AGENTS.md. We prefer the file in the current working
+/// directory (where the user invoked codexctl), then walk up.
+pub fn find_agents_md(start: &Path) -> Option<PathBuf> {
     let mut cur = start.canonicalize().ok()?;
     loop {
-        let candidate = cur.join("CLAUDE.md");
+        let candidate = cur.join("AGENTS.md");
         if candidate.is_file() {
             return Some(candidate);
         }
@@ -139,8 +139,8 @@ fn format_pattern(p: &PreferencePattern) -> Suggestion {
 /// Cheap, conservative match: lowercase the file and check that both the tool
 /// name and (if present) the command keyword appear in some line. Better to
 /// surface a false-already-covered than push duplicates into the file.
-fn is_already_covered(claude_md: &str, sug: &Suggestion) -> bool {
-    let lower = claude_md.to_lowercase();
+fn is_already_covered(agents_md: &str, sug: &Suggestion) -> bool {
+    let lower = agents_md.to_lowercase();
     let tool_lower = sug.tool.to_lowercase();
     match sug.cmd_keyword.as_deref() {
         Some(cmd) => {
@@ -155,8 +155,8 @@ fn is_already_covered(claude_md: &str, sug: &Suggestion) -> bool {
 /// the opposite verb. This is a conservative heuristic — we just look for
 /// "never" or "do not" or "don't" near the tool name when the brain learned to
 /// approve it (or vice versa).
-fn detect_contradictions(claude_md: &str, patterns: &[&PreferencePattern]) -> Vec<Suggestion> {
-    let lower = claude_md.to_lowercase();
+fn detect_contradictions(agents_md: &str, patterns: &[&PreferencePattern]) -> Vec<Suggestion> {
+    let lower = agents_md.to_lowercase();
     let mut out = Vec::new();
     for p in patterns {
         let Some(ref cmd) = p.command_pattern else {
@@ -182,10 +182,10 @@ fn detect_contradictions(claude_md: &str, patterns: &[&PreferencePattern]) -> Ve
         out.push(Suggestion {
             kind: SuggestionKind::Contradiction,
             line: format!(
-                "- (contradiction) `{cmd}`: CLAUDE.md says one thing, brain learned the opposite"
+                "- (contradiction) `{cmd}`: AGENTS.md says one thing, brain learned the opposite"
             ),
             rationale: format!(
-                "{} samples taught the brain to {} `{cmd}`, but CLAUDE.md instructs the opposite",
+                "{} samples taught the brain to {} `{cmd}`, but AGENTS.md instructs the opposite",
                 p.sample_count, p.preferred_action,
             ),
             tool: p.tool.clone(),
@@ -201,8 +201,8 @@ fn detect_contradictions(claude_md: &str, patterns: &[&PreferencePattern]) -> Ve
 
 pub fn run_garden(project_arg: Option<&str>, apply: bool, cwd: &Path) -> GardenReport {
     let prefs = load_preferences_for_project_or_global(project_arg);
-    let claude_md_path = find_claude_md(cwd);
-    let existing = claude_md_path
+    let agents_md_path = find_agents_md(cwd);
+    let existing = agents_md_path
         .as_ref()
         .and_then(|p| fs::read_to_string(p).ok())
         .unwrap_or_default();
@@ -236,8 +236,8 @@ pub fn run_garden(project_arg: Option<&str>, apply: bool, cwd: &Path) -> GardenR
 
     let mut applied = false;
     if apply && !kept.is_empty() {
-        if let Some(ref path) = claude_md_path {
-            if append_to_claude_md(path, &existing, &kept).is_ok() {
+        if let Some(ref path) = agents_md_path {
+            if append_to_agents_md(path, &existing, &kept).is_ok() {
                 applied = true;
             }
         }
@@ -245,7 +245,7 @@ pub fn run_garden(project_arg: Option<&str>, apply: bool, cwd: &Path) -> GardenR
 
     GardenReport {
         project: project_arg.unwrap_or("(global)").to_string(),
-        claude_md_path,
+        agents_md_path,
         considered,
         kept,
         already_covered,
@@ -261,10 +261,10 @@ fn load_preferences_for_project_or_global(project: Option<&str>) -> Option<Disti
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Apply: append a marker block to CLAUDE.md
+// Apply: append a marker block to AGENTS.md
 // ────────────────────────────────────────────────────────────────────────────
 
-fn append_to_claude_md(
+fn append_to_agents_md(
     path: &Path,
     existing: &str,
     suggestions: &[Suggestion],
@@ -294,10 +294,10 @@ fn append_to_claude_md(
 
 pub fn format_report(report: &GardenReport) -> String {
     let mut lines = Vec::new();
-    lines.push(format!("CLAUDE.md gardening — project: {}", report.project));
-    match &report.claude_md_path {
+    lines.push(format!("AGENTS.md gardening — project: {}", report.project));
+    match &report.agents_md_path {
         Some(p) => lines.push(format!("File: {}", p.display())),
-        None => lines.push("File: (no CLAUDE.md found in current directory or ancestors)".into()),
+        None => lines.push("File: (no AGENTS.md found in current directory or ancestors)".into()),
     }
     lines.push(format!(
         "Considered: {}  |  Already covered: {}  |  Suggested: {}",
@@ -313,7 +313,7 @@ pub fn format_report(report: &GardenReport) -> String {
                 "No preferences clear the gardening bar yet (≥20 samples, ≥90% confidence).".into(),
             );
         } else {
-            lines.push("Every high-confidence preference is already covered in CLAUDE.md.".into());
+            lines.push("Every high-confidence preference is already covered in AGENTS.md.".into());
         }
     } else {
         let codify: Vec<&Suggestion> = report
@@ -345,9 +345,9 @@ pub fn format_report(report: &GardenReport) -> String {
     }
 
     if report.applied {
-        lines.push("Applied: appended to CLAUDE.md.".into());
+        lines.push("Applied: appended to AGENTS.md.".into());
     } else if !report.kept.is_empty() {
-        lines.push("Re-run with --apply to append these to CLAUDE.md.".into());
+        lines.push("Re-run with --apply to append these to AGENTS.md.".into());
     }
     lines.join("\n")
 }
@@ -448,8 +448,8 @@ mod tests {
     #[test]
     fn apply_appends_marker_block() {
         let tmp = tempfile::tempdir().unwrap();
-        let claude_md = tmp.path().join("CLAUDE.md");
-        fs::write(&claude_md, "# project\n\nsome instructions\n").unwrap();
+        let agents_md = tmp.path().join("AGENTS.md");
+        fs::write(&agents_md, "# project\n\nsome instructions\n").unwrap();
         let sug = Suggestion {
             kind: SuggestionKind::Codify,
             line: "- always approve `cargo test`".into(),
@@ -457,8 +457,8 @@ mod tests {
             tool: "Bash".into(),
             cmd_keyword: Some("cargo test".into()),
         };
-        append_to_claude_md(&claude_md, "# project\n\nsome instructions\n", &[sug]).unwrap();
-        let out = fs::read_to_string(&claude_md).unwrap();
+        append_to_agents_md(&agents_md, "# project\n\nsome instructions\n", &[sug]).unwrap();
+        let out = fs::read_to_string(&agents_md).unwrap();
         assert!(out.contains(HEADER));
         assert!(out.contains(FOOTER));
         assert!(out.contains("cargo test"));

@@ -11,7 +11,7 @@
 //!
 //! Emission paths:
 //!
-//! - `claudectl --watch --json` (NDJSON over stdout)
+//! - `codexctl --watch --json` (NDJSON over stdout)
 //! - Webhook delivery (when configured)
 //! - The coord `events` table (durable replay for crash recovery)
 //!

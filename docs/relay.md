@@ -4,10 +4,10 @@ Share learnings, delegate tasks, and collaborate across machines — all peer-to
 
 ## What is it?
 
-The relay connects two or more claudectl instances over TCP. Once connected, they can:
+The relay connects two or more codexctl instances over TCP. Once connected, they can:
 
 - **Share brain knowledge** — patterns your brain learns ("always approve `cargo test`") propagate to peers automatically
-- **Delegate tasks** — offload work to a remote machine running Claude Code
+- **Delegate tasks** — offload work to a remote machine running Codex
 - **Synchronize insights** — friction patterns, error loops, and accuracy data merge across the network
 
 Every instance stays sovereign. Your local preferences always override peer knowledge. No cloud, no central server.
@@ -19,7 +19,7 @@ Every instance stays sovereign. Your local preferences always override peer know
 Hive (local knowledge) is included by default. For cross-machine networking, add the relay feature:
 
 ```bash
-cargo install claudectl --features relay
+cargo install codexctl --features relay
 ```
 
 Without relay, hive works locally — knowledge is distilled, archived, and used by the brain, but not synced to peers.
@@ -29,7 +29,7 @@ Without relay, hive works locally — knowledge is distilled, archived, and used
 On Machine A:
 
 ```bash
-claudectl relay invite
+codexctl relay invite
 ```
 
 Output:
@@ -43,14 +43,14 @@ Your identity: laptop-a3f2
 
 Share any of the above with your peer. They run:
 
-  claudectl relay join YEK-AGA-YHK-QAA-BM
-  claudectl relay join cctl://laptop-a3f2@192.168.1.50:9847/k/a3f29b1cd4e5f678
+  codexctl relay join YEK-AGA-YHK-QAA-BM
+  codexctl relay join cctl://laptop-a3f2@192.168.1.50:9847/k/a3f29b1cd4e5f678
 ```
 
 ### Step 3: Join from Machine B
 
 ```bash
-claudectl relay join YEK-AGA-YHK-QAA-BM
+codexctl relay join YEK-AGA-YHK-QAA-BM
 ```
 
 That's it. Both machines are paired and connected.
@@ -60,13 +60,13 @@ That's it. Both machines are paired and connected.
 On Machine A (the one that generated the invite):
 
 ```bash
-claudectl relay serve
+codexctl relay serve
 ```
 
 Machine B connects:
 
 ```bash
-claudectl relay connect 192.168.1.50:9847
+codexctl relay connect 192.168.1.50:9847
 ```
 
 ## Three Ways to Share a Code
@@ -84,7 +84,7 @@ YEK-AGA-YHK-QAA-BM
 ### Word Phrase (memorable)
 
 ```bash
-claudectl relay invite --words
+codexctl relay invite --words
 ```
 
 ```
@@ -96,7 +96,7 @@ fur-hue-ace-bid-ice-ape-cod-elk-ace
 ### Invite Link + QR Code
 
 ```bash
-claudectl relay invite --qr
+codexctl relay invite --qr
 ```
 
 ```
@@ -108,17 +108,17 @@ Plus a scannable QR code in the terminal (requires `qrencode` installed).
 The `join` command auto-detects the format:
 
 ```bash
-claudectl relay join YEK-AGA-YHK-QAA-BM           # relay code
-claudectl relay join fur-hue-ace-bid-ice-..."        # word phrase
-claudectl relay join cctl://laptop-a3f2@..."         # invite link
+codexctl relay join YEK-AGA-YHK-QAA-BM           # relay code
+codexctl relay join fur-hue-ace-bid-ice-..."        # word phrase
+codexctl relay join cctl://laptop-a3f2@..."         # invite link
 ```
 
 ## LAN Discovery
 
-Find nearby claudectl instances without codes:
+Find nearby codexctl instances without codes:
 
 ```bash
-claudectl relay discover
+codexctl relay discover
 ```
 
 ```
@@ -130,7 +130,7 @@ Found 2 instance(s):
   ci-runner-9d1e       192.168.1.101:9847       v0.40.0
 ```
 
-This sends a UDP broadcast and listens for 3 seconds. Peers running `claudectl relay serve` announce themselves automatically.
+This sends a UDP broadcast and listens for 3 seconds. Peers running `codexctl relay serve` announce themselves automatically.
 
 ## Hive Mind: Knowledge Sharing
 
@@ -139,7 +139,7 @@ The hive mind is the layer that makes connected brains smarter. It works automat
 ### How it works
 
 1. Your brain distills patterns every 10 decisions (e.g., "approve `cargo test` at 95% confidence")
-2. These patterns become **knowledge units** stored in `~/.claudectl/hive/knowledge.jsonl`
+2. These patterns become **knowledge units** stored in `~/.codexctl/hive/knowledge.jsonl`
 3. When connected to peers, knowledge units sync via **gossip protocol** — new units are sent to all peers
 4. Incoming knowledge is **merged** using conflict resolution — your local preferences always win
 5. Peer knowledge appears in the brain prompt with trust labels
@@ -161,43 +161,43 @@ Trust adjusts automatically: when your brain makes a decision that agrees with h
 
 ```bash
 # Overview
-claudectl hive status
+codexctl hive status
 
 # List all knowledge units
-claudectl hive knowledge
+codexctl hive knowledge
 
 # Filter by source peer
-claudectl hive knowledge --from ci-runner
+codexctl hive knowledge --from ci-runner
 
 # Filter by scope
-claudectl hive knowledge --scope project:myapp
+codexctl hive knowledge --scope project:myapp
 
 # Export all knowledge as JSON
-claudectl hive export > team-knowledge.json
+codexctl hive export > team-knowledge.json
 
 # Import knowledge from a file
-claudectl hive import team-knowledge.json
+codexctl hive import team-knowledge.json
 
 # Remove a specific unit
-claudectl hive forget ku_1745539200_3
+codexctl hive forget ku_1745539200_3
 ```
 
 ### Manage trust
 
 ```bash
 # Show all peer trust levels
-claudectl hive trust
+codexctl hive trust
 
 # Show trust for one peer
-claudectl hive trust ci-runner
+codexctl hive trust ci-runner
 
 # Manually set trust
-claudectl hive trust ci-runner 0.9
+codexctl hive trust ci-runner 0.9
 ```
 
 ## Remote Task Delegation
 
-Delegate orchestrator tasks to connected peers. The remote machine spawns its own Claude Code session and reports status back.
+Delegate orchestrator tasks to connected peers. The remote machine spawns its own Codex session and reports status back.
 
 ### Task file with peer routing
 
@@ -224,17 +224,17 @@ Tasks with `"peer"` are delegated to the remote machine. Tasks without `"peer"` 
 ### Manual delegation
 
 ```bash
-claudectl relay delegate ci-runner 'Fix the auth tests' --cwd /project
+codexctl relay delegate ci-runner 'Fix the auth tests' --cwd /project
 ```
 
 ### Interrupts
 
 ```bash
 # Nudge a remote task (informational)
-claudectl relay interrupt task_123 nudge 'dependency resolved'
+codexctl relay interrupt task_123 nudge 'dependency resolved'
 
 # Stop a remote task
-claudectl relay interrupt task_123 stop 'no longer needed'
+codexctl relay interrupt task_123 stop 'no longer needed'
 ```
 
 ## TUI Integration
@@ -262,7 +262,7 @@ When the brain evaluates a session, hive knowledge appears as a separate section
 
 ## Configuration
 
-Add to `.claudectl.toml` or `~/.config/claudectl/config.toml`:
+Add to `.codexctl.toml` or `~/.config/codexctl/config.toml`:
 
 ```toml
 [relay]

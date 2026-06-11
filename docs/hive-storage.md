@@ -18,7 +18,7 @@ We need unbounded learning capacity without unbounded memory usage, plus a disti
 │  ~2KB of prompt text                                     │
 ├──────────────────────────────────────────────────────────┤
 │  WARM TIER (local store)                                 │
-│  Up to 500 active units in ~/.claudectl/hive/            │
+│  Up to 500 active units in ~/.codexctl/hive/            │
 │  HashMap in memory, JSONL on disk                        │
 │  Compacted every distillation cycle                      │
 ├──────────────────────────────────────────────────────────┤
@@ -66,14 +66,14 @@ pull_on_miss = true             # when brain needs knowledge not in warm tier, q
 
 # S3 backend
 [hive.storage.s3]
-bucket = "team-claudectl-hive"
+bucket = "team-codexctl-hive"
 prefix = "knowledge/"
 region = "us-east-1"
 # Credentials via AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env vars
 
 # GCS backend
 [hive.storage.gcs]
-bucket = "team-claudectl-hive"
+bucket = "team-codexctl-hive"
 prefix = "knowledge/"
 # Credentials via GOOGLE_APPLICATION_CREDENTIALS env var
 
@@ -81,7 +81,7 @@ prefix = "knowledge/"
 [hive.storage.git]
 repo = "/path/to/shared-repo"
 branch = "hive"
-path = ".claudectl/knowledge/"
+path = ".codexctl/knowledge/"
 ```
 
 ## Lifecycle: From Raw Signal to Distilled Curriculum
@@ -203,7 +203,7 @@ The distillation pipeline is designed to prevent the hive mind from drifting tow
 The local backend implements the storage trait using a second JSONL file (`archive.jsonl`):
 
 ```
-~/.claudectl/hive/
+~/.codexctl/hive/
   knowledge.jsonl       ← warm tier (active, bounded)
   archive.jsonl         ← cold tier (evicted units, unbounded on disk)
   curriculum.json       ← latest distilled curriculum
@@ -242,28 +242,28 @@ if warm_store.find_by_tool("docker").is_empty() {
 A background thread (or CLI command) runs distillation:
 
 ```bash
-claudectl hive distill          # manual trigger
-claudectl hive curriculum       # show current curriculum
-claudectl hive curriculum --pull  # pull latest into warm tier
+codexctl hive distill          # manual trigger
+codexctl hive curriculum       # show current curriculum
+codexctl hive curriculum --pull  # pull latest into warm tier
 ```
 
 ## CLI
 
 ```bash
 # Archive management
-claudectl hive archive          # show archive stats
-claudectl hive archive --prune 90d  # prune archive entries older than 90 days
+codexctl hive archive          # show archive stats
+codexctl hive archive --prune 90d  # prune archive entries older than 90 days
 
 # Distillation
-claudectl hive distill          # run cold distillation now
-claudectl hive curriculum       # show current curriculum
-claudectl hive curriculum --pull    # pull curriculum into warm tier
-claudectl hive curriculum --pin v3  # pin to a specific curriculum version
+codexctl hive distill          # run cold distillation now
+codexctl hive curriculum       # show current curriculum
+codexctl hive curriculum --pull    # pull curriculum into warm tier
+codexctl hive curriculum --pin v3  # pin to a specific curriculum version
 
 # Storage backend
-claudectl hive storage status     # show backend config and stats
-claudectl hive storage push       # manually push warm tier to cold
-claudectl hive storage pull       # manually pull from cold to warm
+codexctl hive storage status     # show backend config and stats
+codexctl hive storage push       # manually push warm tier to cold
+codexctl hive storage pull       # manually pull from cold to warm
 ```
 
 ## Future: Cloud Backends

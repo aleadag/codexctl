@@ -1,13 +1,13 @@
-//! `claudectl bus …` subcommand.
+//! `codexctl bus …` subcommand.
 //!
 //! Exposes the bus surface to the shell:
 //!
-//! * `claudectl bus stdio` — run the MCP server on stdin/stdout. This is what
-//!   the Claude Code plugin registers in `.mcp.json`.
-//! * `claudectl bus role bind <NAME> <CWD>` — register or update a role.
-//! * `claudectl bus role list` — list registered roles.
-//! * `claudectl bus send <ROLE> <BODY>` — quick directed send for ops debug.
-//! * `claudectl bus inbox <ROLE>` — drain a role's mailbox (CLI form of the
+//! * `codexctl bus stdio` — run the MCP server on stdin/stdout. This is what
+//!   the Codex plugin registers in `.mcp.json`.
+//! * `codexctl bus role bind <NAME> <CWD>` — register or update a role.
+//! * `codexctl bus role list` — list registered roles.
+//! * `codexctl bus send <ROLE> <BODY>` — quick directed send for ops debug.
+//! * `codexctl bus inbox <ROLE>` — drain a role's mailbox (CLI form of the
 //!   `read_inbox` MCP tool).
 
 use std::path::PathBuf;
@@ -24,7 +24,7 @@ use super::suggest;
 
 #[derive(Subcommand)]
 pub enum BusCommand {
-    /// Run the agent-bus MCP server on stdio (used by the Claude Code plugin).
+    /// Run the agent-bus MCP server on stdio (used by the Codex plugin).
     Stdio,
     /// Manage roles.
     Role {
@@ -75,7 +75,7 @@ pub enum BusCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Stop-hook driver for the Claude Code plugin (Trigger A). Drains the
+    /// Stop-hook driver for the Codex plugin (Trigger A). Drains the
     /// caller's mailbox; when there's mail, emits Stop-hook output so the
     /// agent picks the work up in-turn. Silent + exit 0 in every other case
     /// so a missing role / empty inbox / unbound cwd never blocks a session.
@@ -109,7 +109,7 @@ pub enum RoleCommand {
         /// ancestor chain contains this pid.
         #[arg(long, conflicts_with = "self_bind")]
         pid: Option<u32>,
-        /// Bind from inside a Claude Code session: auto-detect Claude's pid
+        /// Bind from inside a Codex session: auto-detect Codex's pid
         /// by walking the caller's ancestor chain, and capture the current
         /// cwd. Used by the plugin `/bind` slash command (#310).
         #[arg(long = "self", conflicts_with = "cwd")]
@@ -121,7 +121,7 @@ pub enum RoleCommand {
     /// Pure analysis — never writes a binding, never queries the LLM.
     Suggest {
         /// PID of the session to analyze. When omitted, walks the caller's
-        /// ancestor chain to find a Claude process (same logic as `--self`).
+        /// ancestor chain to find a Codex process (same logic as `--self`).
         #[arg(long)]
         pid: Option<u32>,
         /// Maximum suggestions to return, ranked by score descending.
@@ -171,9 +171,9 @@ fn dispatch_role(cmd: &RoleCommand) -> Result<(), String> {
             // caller's process tree; the explicit form takes the positional
             // CWD and any --pid override.
             let (cwd_resolved, pid_resolved) = if *self_bind {
-                let detected = roles::find_claude_ancestor_pid().ok_or_else(|| {
-                    "--self: could not find a Claude Code process in the ancestor chain. \
-                     Run this from inside a Claude session, or pass --pid explicitly."
+                let detected = roles::find_codex_ancestor_pid().ok_or_else(|| {
+                    "--self: could not find a Codex process in the ancestor chain. \
+                     Run this from inside a Codex session, or pass --pid explicitly."
                         .to_string()
                 })?;
                 let cwd = std::env::current_dir()
@@ -203,7 +203,7 @@ fn dispatch_role(cmd: &RoleCommand) -> Result<(), String> {
         RoleCommand::List => {
             let rows = store::list_roles(&conn)?;
             if rows.is_empty() {
-                println!("(no roles bound — run `claudectl bus role bind <name> <cwd>`)");
+                println!("(no roles bound — run `codexctl bus role bind <name> <cwd>`)");
                 return Ok(());
             }
             for r in rows {
@@ -227,12 +227,12 @@ fn dispatch_role(cmd: &RoleCommand) -> Result<(), String> {
 /// Ctrl+R prompt and the plugin's `/bind` command will call this with
 /// `--json` to prefill the bind input.
 fn dispatch_suggest(pid: Option<u32>, top: usize, json: bool) -> Result<(), String> {
-    use claudectl_core::discovery;
+    use codexctl_core::discovery;
 
     let target_pid = match pid {
         Some(p) => p,
-        None => roles::find_claude_ancestor_pid().ok_or_else(|| {
-            "no --pid given and no Claude process found in ancestor chain".to_string()
+        None => roles::find_codex_ancestor_pid().ok_or_else(|| {
+            "no --pid given and no Codex process found in ancestor chain".to_string()
         })?,
     };
 
@@ -241,7 +241,7 @@ fn dispatch_suggest(pid: Option<u32>, top: usize, json: bool) -> Result<(), Stri
     let session = sessions
         .iter()
         .find(|s| s.pid == target_pid)
-        .ok_or_else(|| format!("no running Claude session with pid {target_pid}"))?;
+        .ok_or_else(|| format!("no running Codex session with pid {target_pid}"))?;
 
     let suggestions = suggest::suggest_for_session(
         session.jsonl_path.as_deref(),
@@ -355,7 +355,7 @@ impl From<MessageRow> for InboxMessageJson {
 
 /// Resolve the caller's role and drain its mailbox. Soft-fails: unbound and
 /// ambiguous cwds produce a `note` rather than an error, so JSON callers (the
-/// Stop hook) can no-op cleanly without aborting a Claude Code session.
+/// Stop hook) can no-op cleanly without aborting a Codex session.
 ///
 /// `peek=true` switches to the non-destructive read path (#344): same rows,
 /// `status='pending'` left untouched, so a subsequent drain still hands the
@@ -466,7 +466,7 @@ fn dispatch_prune(days: u64, dry_run: bool) -> Result<(), String> {
 
 // ---------------- Stop hook -------------------------------------------------
 
-/// Drive the Claude Code Stop-hook protocol. Silent + exit 0 on any failure
+/// Drive the Codex Stop-hook protocol. Silent + exit 0 on any failure
 /// (missing DB, unbound role, ambiguous cwd, drain error) so the hook never
 /// blocks a session because of a bus problem.
 fn dispatch_stop_hook() -> Result<(), String> {

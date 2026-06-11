@@ -50,7 +50,7 @@ impl ShareMode {
 fn exposure_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     PathBuf::from(home)
-        .join(".claudectl")
+        .join(".codexctl")
         .join("hive")
         .join("exposure.json")
 }

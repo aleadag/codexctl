@@ -1,10 +1,10 @@
 #!/bin/sh
-# claudectl installer — downloads the latest release binary for your platform.
-# Usage: curl -fsSL https://raw.githubusercontent.com/mercurialsolo/claudectl/main/install.sh | sh
+# codexctl installer — downloads the latest release binary for your platform.
+# Usage: curl -fsSL https://raw.githubusercontent.com/aleadag/codexctl/main/install.sh | sh
 
 set -e
 
-REPO="mercurialsolo/claudectl"
+REPO="aleadag/codexctl"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 
 # Detect OS and architecture
@@ -34,9 +34,9 @@ if [ -z "$LATEST" ]; then
     exit 1
 fi
 
-echo "Installing claudectl ${LATEST} for ${TARGET}..."
+echo "Installing codexctl ${LATEST} for ${TARGET}..."
 
-ARCHIVE="claudectl-${LATEST}-${TARGET}.tar.gz"
+ARCHIVE="codexctl-${LATEST}-${TARGET}.tar.gz"
 URL="https://github.com/${REPO}/releases/download/${LATEST}/${ARCHIVE}"
 CHECKSUM_URL="${URL}.sha256"
 
@@ -61,13 +61,13 @@ fi
 tar xzf "${TMP_DIR}/${ARCHIVE}" -C "$TMP_DIR"
 
 if [ -w "$INSTALL_DIR" ]; then
-    mv "${TMP_DIR}/claudectl" "${INSTALL_DIR}/claudectl"
+    mv "${TMP_DIR}/codexctl" "${INSTALL_DIR}/codexctl"
 else
     echo "Installing to ${INSTALL_DIR} (requires sudo)..."
-    sudo mv "${TMP_DIR}/claudectl" "${INSTALL_DIR}/claudectl"
+    sudo mv "${TMP_DIR}/codexctl" "${INSTALL_DIR}/codexctl"
 fi
 
-chmod +x "${INSTALL_DIR}/claudectl"
+chmod +x "${INSTALL_DIR}/codexctl"
 
-echo "claudectl ${LATEST} installed to ${INSTALL_DIR}/claudectl"
-echo "Run 'claudectl --help' to get started."
+echo "codexctl ${LATEST} installed to ${INSTALL_DIR}/codexctl"
+echo "Run 'codexctl --help' to get started."

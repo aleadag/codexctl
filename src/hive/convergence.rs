@@ -3,7 +3,7 @@
 //
 // Unlike the other discovery/effectiveness queries, convergence depends on
 // the gossip-layer's per-peer sync state. That state lives in
-// `~/.claudectl/hive/sync_state.json` (managed by `hive::gossip`), so this
+// `~/.codexctl/hive/sync_state.json` (managed by `hive::gossip`), so this
 // module reads it directly when `relay` is enabled. When `relay` is off
 // the file simply doesn't exist and `peer_convergence` returns empty.
 
@@ -57,7 +57,7 @@ struct SyncStateRecord {
 fn sync_state_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     PathBuf::from(home)
-        .join(".claudectl")
+        .join(".codexctl")
         .join("hive")
         .join("sync_state.json")
 }

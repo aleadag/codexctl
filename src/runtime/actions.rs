@@ -3,12 +3,12 @@
 
 use std::fs;
 
-use claudectl_core::discovery;
-use claudectl_core::helpers;
-use claudectl_core::runtime::{
+use codexctl_core::discovery;
+use codexctl_core::helpers;
+use codexctl_core::runtime::{
     Actions, BrainGateMode, DecisionScope, LogDecisionInput, ObservationInput,
 };
-use claudectl_core::terminals;
+use codexctl_core::terminals;
 
 use crate::brain;
 
@@ -65,7 +65,7 @@ impl Actions for LiveActions {
         // The trait's PendingSuggestion uses `action: String`; the brain
         // log_decision needs a `BrainSuggestion` with a real `RuleAction`.
         // Drop silently on unknown labels (caller validates upstream).
-        let Some(rule_action) = claudectl_core::rules::RuleAction::parse(&input.suggestion.action)
+        let Some(rule_action) = codexctl_core::rules::RuleAction::parse(&input.suggestion.action)
         else {
             return Err(format!("unknown action label: {}", input.suggestion.action));
         };
