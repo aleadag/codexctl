@@ -1120,13 +1120,40 @@ impl crate::coord::supervisor::Sensors for NoopSensors {
     }
 }
 
+/// Build the detached headless Codex process used by supervisor `Spawn`.
+#[cfg(feature = "coord")]
+fn build_codex_exec_spawn_command(cwd: &std::path::Path, prompt: &str) -> std::process::Command {
+    let mut cmd = std::process::Command::new("codex");
+    cmd.arg("exec")
+        .arg(prompt)
+        .current_dir(cwd)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    cmd
+}
+
+#[cfg(feature = "coord")]
+fn spawn_codex_exec_session(cwd: &std::path::Path, prompt: &str) -> Result<String, String> {
+    let mut child = build_codex_exec_spawn_command(cwd, prompt)
+        .spawn()
+        .map_err(|e| format!("spawn codex exec: {e}"))?;
+    let pid = child.id();
+
+    std::thread::Builder::new()
+        .name(format!("codexctl-supervisor-spawn-{pid}"))
+        .spawn(move || {
+            let _ = child.wait();
+        })
+        .map_err(|e| format!("spawn codex exec reaper for pid {pid}: {e}"))?;
+
+    Ok(format!("codex-exec-{pid}"))
+}
+
 /// Real side effects for the supervisor's actuator (#345). Routes
 /// `AssignViaMailbox` through the bus's publish path (sanitized body,
-/// hop guard from PR2). `spawn_session` is stubbed for this PR — the
-/// `launch::launch` path requires an attached terminal and is wired in
-/// PR5 alongside the verifier runner. Until then, the spawn fallback
-/// path returns a synthetic error and the reconciler will retry on
-/// the next tick.
+/// hop guard from PR2). `spawn_session` runs a detached headless
+/// `codex exec` process and records its pid-derived session id.
 #[cfg(all(feature = "coord", feature = "bus"))]
 struct LiveSideEffects;
 #[cfg(all(feature = "coord", feature = "bus"))]
@@ -1222,11 +1249,8 @@ impl crate::coord::actuator::SideEffects for LiveSideEffects {
             hop_count,
         )
     }
-    fn spawn_session(&self, _cwd: &std::path::Path, _prompt: &str) -> Result<String, String> {
-        // Spawn path lands in PR5 once `launch::launch` has a non-tty
-        // adapter; for now report a structured error so the reconciler
-        // can log + retry without taking the session-died code path.
-        Err("spawn fallback not implemented in PR4 — pending PR5 launch adapter".into())
+    fn spawn_session(&self, cwd: &std::path::Path, prompt: &str) -> Result<String, String> {
+        spawn_codex_exec_session(cwd, prompt)
     }
 }
 
@@ -1268,8 +1292,8 @@ impl crate::coord::actuator::SideEffects for NoopSideEffects {
     ) -> Result<String, String> {
         Err("bus feature not compiled in; AssignViaMailbox is unavailable".into())
     }
-    fn spawn_session(&self, _cwd: &std::path::Path, _prompt: &str) -> Result<String, String> {
-        Err("spawn fallback not implemented in PR4".into())
+    fn spawn_session(&self, cwd: &std::path::Path, prompt: &str) -> Result<String, String> {
+        spawn_codex_exec_session(cwd, prompt)
     }
 }
 
@@ -2021,5 +2045,24 @@ mod digest_parser_tests {
     #[test]
     fn returns_none_for_invalid_json() {
         assert!(digest_from_hook_payload("Edit", "{not json").is_none());
+    }
+}
+
+#[cfg(all(test, feature = "coord"))]
+mod supervisor_spawn_tests {
+    use super::*;
+
+    #[test]
+    fn codex_exec_spawn_command_preserves_prompt_and_cwd() {
+        let temp = tempfile::tempdir().unwrap();
+        let prompt = "Use skill `loop-triage` before acting.\n\nHandle issue #1.";
+        let cmd = build_codex_exec_spawn_command(temp.path(), prompt);
+
+        assert_eq!(cmd.get_program(), std::ffi::OsStr::new("codex"));
+        assert_eq!(
+            cmd.get_args().collect::<Vec<_>>(),
+            vec![std::ffi::OsStr::new("exec"), std::ffi::OsStr::new(prompt)]
+        );
+        assert_eq!(cmd.get_current_dir(), Some(temp.path()));
     }
 }
