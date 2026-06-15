@@ -20,12 +20,14 @@ Escalate destructive, security-sensitive, or ambiguous work.
 
 [triage.allowed]
 actions = ["ignore", "report", "submit", "escalate"]
-worktree = ["none", "existing"]
+worktree = ["none", "existing", "required", "auto"]
 verifiers = ["cargo test", "cargo clippy -- -D warnings"]
 
 [execution]
 cwd = "."
-worktree = "existing"
+worktree = "auto"
+worktree_root = "../codexctl-worktrees"
+branch_template = "loop/{loop}/{source_item_id}"
 session = "headless"
 max_retries = 2
 timeout_min = 90
@@ -43,5 +45,5 @@ max_items_per_run = 1
 max_concurrent = 1
 require_human_for = ["destructive", "ambiguous", "security-sensitive"]
 allow_source_updates = false
-allow_pr_create = false
+allow_pr_create = true
 allow_issue_comment = false

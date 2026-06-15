@@ -11,6 +11,7 @@ use super::prompt;
 use super::sources::{SourceItem, source_from_config};
 use super::store::{self, LoopItemState, NewLoopItem};
 use super::submit;
+use super::worktree;
 
 #[derive(Debug, Subcommand)]
 pub enum LoopCommand {
@@ -179,7 +180,7 @@ fn run_loop_once(
                 );
                 continue;
             }
-            let worktree_path = resolve_worktree_path(cfg, &decision)?;
+            let worktree_path = resolve_worktree_path(Path::new("."), cfg, &item, &decision)?;
             submit::submit_coord_task(
                 coord_conn,
                 loop_conn,
@@ -230,16 +231,18 @@ fn state_for_decision(action: LoopAction) -> LoopItemState {
 }
 
 fn resolve_worktree_path(
+    root: &Path,
     cfg: &LoopConfig,
+    item: &SourceItem,
     decision: &super::policy::LoopDecision,
 ) -> LoopResult<Option<String>> {
     let mode = decision.worktree.unwrap_or(cfg.execution.worktree);
     match mode {
         WorktreeMode::None | WorktreeMode::Existing => Ok(None),
-        WorktreeMode::Required | WorktreeMode::Auto => Err(
-            "worktree preparation is not wired in this vertical slice; use worktree = \"none\" or \"existing\""
-                .into(),
-        ),
+        WorktreeMode::Required | WorktreeMode::Auto => {
+            let plan = worktree::prepare(root, cfg, item)?;
+            Ok(Some(plan.path.to_string_lossy().into_owned()))
+        }
     }
 }
 
@@ -272,6 +275,9 @@ fn logs(name: &str, item: Option<&str>) -> LoopResult<()> {
         println!("{}  {}  {}", row.id, row.state.as_str(), row.title);
         if let Some(task_id) = row.coord_task_id {
             println!("  coord_task_id={task_id}");
+        }
+        if let Some(result_url) = row.result_url {
+            println!("  result_url={result_url}");
         }
         if let Some(error) = row.last_error {
             println!("  error={error}");

@@ -4,6 +4,7 @@
 //! called from `run_main()` dispatch in main.rs.
 
 use std::io;
+use std::path::Path;
 use std::time::Duration;
 
 use crate::Cli;
@@ -1038,6 +1039,28 @@ pub(crate) fn run_headless(
                         json_mode,
                     );
                 }
+            }
+        }
+        #[cfg(feature = "coord")]
+        match crate::r#loop::publish::publish_completed(Path::new(".")) {
+            Ok(summary) if summary.published > 0 || summary.failed > 0 => {
+                emit_headless_event(
+                    "loop_publish",
+                    serde_json::json!({
+                        "published": summary.published,
+                        "skipped": summary.skipped,
+                        "failed": summary.failed,
+                    }),
+                    json_mode,
+                );
+            }
+            Ok(_) => {}
+            Err(e) => {
+                emit_headless_event(
+                    "loop_publish_error",
+                    serde_json::json!({"error": e}),
+                    json_mode,
+                );
             }
         }
 

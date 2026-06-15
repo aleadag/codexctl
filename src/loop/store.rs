@@ -93,6 +93,7 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
             decision_json   TEXT,
             coord_task_id   TEXT,
             worktree_path   TEXT,
+            result_url      TEXT,
             first_seen_at   TEXT NOT NULL,
             last_seen_at    TEXT NOT NULL,
             updated_at      TEXT NOT NULL,
@@ -115,7 +116,29 @@ fn migrate(conn: &Connection) -> Result<(), rusqlite::Error> {
         CREATE INDEX IF NOT EXISTS idx_loop_events_loop ON loop_events(loop_name, created_at);
         CREATE INDEX IF NOT EXISTS idx_loop_events_item ON loop_events(item_id, created_at);
         ",
-    )
+    )?;
+    ensure_column(conn, "loop_items", "result_url", "TEXT")?;
+    Ok(())
+}
+
+fn ensure_column(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    column_type: &str,
+) -> Result<(), rusqlite::Error> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    for row in rows {
+        if row? == column {
+            return Ok(());
+        }
+    }
+    conn.execute(
+        &format!("ALTER TABLE {table} ADD COLUMN {column} {column_type}"),
+        [],
+    )?;
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -207,6 +230,7 @@ pub struct LoopItemRow {
     pub decision_json: Option<serde_json::Value>,
     pub coord_task_id: Option<String>,
     pub worktree_path: Option<String>,
+    pub result_url: Option<String>,
     pub last_error: Option<String>,
 }
 
@@ -318,6 +342,20 @@ pub fn list_items(conn: &Connection, loop_name: Option<&str>) -> LoopResult<Vec<
     Ok(rows)
 }
 
+pub fn list_publishable_items(conn: &Connection) -> LoopResult<Vec<LoopItemRow>> {
+    let sql = item_select_sql(
+        "WHERE state = 'submitted' AND coord_task_id IS NOT NULL AND worktree_path IS NOT NULL
+         ORDER BY updated_at ASC",
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|e| format!("prepare: {e}"))?;
+    let rows = stmt
+        .query_map([], row_to_item)
+        .map_err(|e| format!("query publishable loop items: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("row publishable loop item: {e}"))?;
+    Ok(rows)
+}
+
 pub fn mark_decision(
     conn: &Connection,
     item_id: &str,
@@ -349,6 +387,28 @@ pub fn mark_submitted(
         params![task_id, worktree_path, now, item_id],
     )
     .map_err(|e| format!("mark submitted: {e}"))?;
+    Ok(())
+}
+
+pub fn mark_done(conn: &Connection, item_id: &str, result_url: Option<&str>) -> LoopResult<()> {
+    let now = now_iso();
+    conn.execute(
+        "UPDATE loop_items
+         SET state = 'done', result_url = ?1, last_error = NULL, updated_at = ?2
+         WHERE id = ?3",
+        params![result_url, now, item_id],
+    )
+    .map_err(|e| format!("mark done: {e}"))?;
+    Ok(())
+}
+
+pub fn mark_failed(conn: &Connection, item_id: &str, error: &str) -> LoopResult<()> {
+    let now = now_iso();
+    conn.execute(
+        "UPDATE loop_items SET state = 'failed', last_error = ?1, updated_at = ?2 WHERE id = ?3",
+        params![error, now, item_id],
+    )
+    .map_err(|e| format!("mark failed: {e}"))?;
     Ok(())
 }
 
@@ -385,7 +445,8 @@ fn dedupe_key(loop_name: &str, source_kind: &str, source_item_id: &str) -> Strin
 fn item_select_sql(suffix: &str) -> String {
     format!(
         "SELECT id, loop_name, source_kind, source_item_id, title, body_summary, url,
-                raw_json, state, decision_json, coord_task_id, worktree_path, last_error
+                raw_json, state, decision_json, coord_task_id, worktree_path, result_url,
+                last_error
          FROM loop_items {suffix}"
     )
 }
@@ -407,7 +468,8 @@ fn row_to_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<LoopItemRow> {
         decision_json: decision_json.and_then(|json| serde_json::from_str(&json).ok()),
         coord_task_id: row.get(10)?,
         worktree_path: row.get(11)?,
-        last_error: row.get(12)?,
+        result_url: row.get(12)?,
+        last_error: row.get(13)?,
     })
 }
 
@@ -448,5 +510,25 @@ mod tests {
         assert_eq!(row.state, LoopItemState::Submitted);
         assert_eq!(row.coord_task_id.as_deref(), Some("task_1"));
         assert_eq!(row.worktree_path.as_deref(), Some("/tmp/worktree"));
+    }
+
+    #[test]
+    fn mark_done_stores_result_url() {
+        let conn = open_memory();
+        let id = upsert_item(&conn, &NewLoopItem::for_test("loop-a", "source-1")).unwrap();
+
+        mark_done(
+            &conn,
+            &id,
+            Some("https://github.com/aleadag/codexctl/pull/1"),
+        )
+        .unwrap();
+        let row = get_item(&conn, &id).unwrap().unwrap();
+
+        assert_eq!(row.state, LoopItemState::Done);
+        assert_eq!(
+            row.result_url.as_deref(),
+            Some("https://github.com/aleadag/codexctl/pull/1")
+        );
     }
 }
