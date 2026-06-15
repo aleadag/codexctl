@@ -1,0 +1,942 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Orchestrate a swarm of Codex agents with a local-LLM brain that learns from you.">
+      
+      
+      
+        <link rel="canonical" href="https://aleadag.github.io/codexctl/superpowers/plans/2026-06-11-codex-only-migration-implementation/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Codex-Only Migration Implementation Plan - codexctl</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="light-green">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#codex-only-migration-implementation-plan" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="codexctl" class="md-header__button md-logo" aria-label="codexctl" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            codexctl
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Codex-Only Migration Implementation Plan
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="light-green"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="green"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/aleadag/codexctl" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    aleadag/codexctl
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="codexctl" class="md-nav__button md-logo" aria-label="codexctl" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    codexctl
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/aleadag/codexctl" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    aleadag/codexctl
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../agent-bus/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent Bus
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../relay/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Relay & Hive Mind
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../terminal-support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Terminal Support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#file-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File Structure
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#task-1-codex-transcript-parser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 1: Codex Transcript Parser
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#task-2-codex-session-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 2: Codex Session Discovery
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#task-3-monitor-codex-jsonl-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 3: Monitor Codex JSONL Events
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#task-4-tui-and-json-source-stability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 4: TUI and JSON Source Stability
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#task-5-codex-adapter-and-hook-install" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 5: Codex Adapter and Hook Install
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#task-6-public-binary-name-and-focused-verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 6: Public Binary Name and Focused Verification
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="codex-only-migration-implementation-plan">Codex-Only Migration Implementation Plan</h1>
+<blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Make the active runtime path discover, parse, and display Codex sessions instead of Codex sessions.</p>
+<p><strong>Architecture:</strong> Keep the existing crates and broad session struct for phase 1, but switch the data source to Codex JSONL transcripts. Add a Codex transcript parser and transcript-backed session discovery, then guard process enrichment so transcript-only sessions are not incorrectly marked finished. Replace the active Codex adapter stub and Codex hook install path after the core session path works.</p>
+<p><strong>Tech Stack:</strong> Rust 2024, serde_json, clap, ratatui, Cargo integration/unit tests.</p>
+<hr />
+<h2 id="file-structure">File Structure</h2>
+<ul>
+<li>Modify <code>crates/codexctl-core/src/session.rs</code>: add a <code>process_backed</code> flag and a constructor for Codex transcript sessions while leaving the existing struct name in place.</li>
+<li>Modify <code>crates/codexctl-core/src/discovery.rs</code>: replace Codex pointer-file scanning with Codex JSONL scanning; add <code>CODEXCTL_CODEX_HOME</code> test override.</li>
+<li>Create <code>crates/codexctl-core/src/codex_transcript.rs</code>: parse Codex JSONL events into normalized metadata and transcript events.</li>
+<li>Modify <code>crates/codexctl-core/src/transcript.rs</code>: keep Codex parsing for fixture compatibility only; do not extend it with Codex logic.</li>
+<li>Modify <code>crates/codexctl-core/src/monitor.rs</code>: use Codex parser when a transcript is marked as Codex; preserve existing Codex parser tests during transition.</li>
+<li>Modify <code>crates/codexctl-core/src/process.rs</code>: skip live <code>ps</code> termination for transcript-backed sessions.</li>
+<li>Modify <code>crates/codexctl-core/src/lib.rs</code>: export the new Codex parser module.</li>
+<li>Modify <code>crates/codexctl-tui/src/app.rs</code>: key preserved session state by session id instead of PID for Codex transcript sessions.</li>
+<li>Modify <code>src/coord/adapter.rs</code> and <code>src/coord/adapter_codex.rs</code>: remove Codex adapter registration and make Codex discovery real.</li>
+<li>Modify <code>src/init/hooks.rs</code>: write Codex hook config under <code>~/.codex/hooks.json</code> or <code>.codex/hooks.json</code>.</li>
+<li>Modify <code>src/main.rs</code>, <code>src/commands.rs</code>, <code>Cargo.toml</code>, and <code>flake.nix</code>: phase-1 public naming from <code>codexctl</code> to <code>codexctl</code> for the binary/help and hook commands.</li>
+<li>Add tests in <code>tests/integration_tests.rs</code> and fixtures under <code>tests/fixtures/</code>.</li>
+</ul>
+<h2 id="task-1-codex-transcript-parser">Task 1: Codex Transcript Parser</h2>
+<p><strong>Files:</strong>
+- Create: <code>crates/codexctl-core/src/codex_transcript.rs</code>
+- Modify: <code>crates/codexctl-core/src/lib.rs</code>
+- Test: <code>tests/fixtures/codex-session-meta.json</code>
+- Test: <code>tests/fixtures/codex-tool-call.json</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Write failing parser tests</strong></li>
+</ul>
+<p>Add unit tests in <code>codex_transcript.rs</code> that parse:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="cp">#[test]</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">fn</span><span class="w"> </span><span class="nf">parses_session_meta</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">line</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="fm">include_str!</span><span class="p">(</span><span class="s">&quot;../../../tests/fixtures/codex-session-meta.json&quot;</span><span class="p">);</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="nb">Some</span><span class="p">(</span><span class="n">CodexEvent</span><span class="p">::</span><span class="n">SessionMeta</span><span class="p">(</span><span class="n">meta</span><span class="p">))</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">parse_line</span><span class="p">(</span><span class="n">line</span><span class="p">.</span><span class="n">trim</span><span class="p">())</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">        </span><span class="fm">panic!</span><span class="p">(</span><span class="s">&quot;expected session meta&quot;</span><span class="p">);</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="p">};</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span><span class="fm">assert_eq!</span><span class="p">(</span><span class="n">meta</span><span class="p">.</span><span class="n">session_id</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;019eb6ac-6d30-7301-885d-ff4d354c0116&quot;</span><span class="p">);</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">    </span><span class="fm">assert_eq!</span><span class="p">(</span><span class="n">meta</span><span class="p">.</span><span class="n">cwd</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;/home/alexander/hacking/aleadag/codexctl&quot;</span><span class="p">);</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">    </span><span class="fm">assert_eq!</span><span class="p">(</span><span class="n">meta</span><span class="p">.</span><span class="n">model_provider</span><span class="p">.</span><span class="n">as_deref</span><span class="p">(),</span><span class="w"> </span><span class="nb">Some</span><span class="p">(</span><span class="s">&quot;openai&quot;</span><span class="p">));</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="p">}</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="cp">#[test]</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="k">fn</span><span class="w"> </span><span class="nf">parses_function_call</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">line</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="fm">include_str!</span><span class="p">(</span><span class="s">&quot;../../../tests/fixtures/codex-tool-call.json&quot;</span><span class="p">);</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="nb">Some</span><span class="p">(</span><span class="n">CodexEvent</span><span class="p">::</span><span class="n">ResponseItem</span><span class="p">(</span><span class="n">item</span><span class="p">))</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">parse_line</span><span class="p">(</span><span class="n">line</span><span class="p">.</span><span class="n">trim</span><span class="p">())</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="w">        </span><span class="fm">panic!</span><span class="p">(</span><span class="s">&quot;expected response item&quot;</span><span class="p">);</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="w">    </span><span class="p">};</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="w">    </span><span class="fm">assert_eq!</span><span class="p">(</span><span class="n">item</span><span class="p">.</span><span class="n">kind</span><span class="p">,</span><span class="w"> </span><span class="n">CodexResponseKind</span><span class="p">::</span><span class="n">FunctionCall</span><span class="p">);</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="w">    </span><span class="fm">assert_eq!</span><span class="p">(</span><span class="n">item</span><span class="p">.</span><span class="n">name</span><span class="p">.</span><span class="n">as_deref</span><span class="p">(),</span><span class="w"> </span><span class="nb">Some</span><span class="p">(</span><span class="s">&quot;exec_command&quot;</span><span class="p">));</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="w">    </span><span class="fm">assert!</span><span class="p">(</span><span class="n">item</span><span class="p">.</span><span class="n">arguments</span><span class="p">.</span><span class="n">as_deref</span><span class="p">().</span><span class="n">unwrap</span><span class="p">().</span><span class="n">contains</span><span class="p">(</span><span class="s">&quot;cargo test&quot;</span><span class="p">));</span>
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>[ ] <strong>Step 2: Run parser tests and verify RED</strong></li>
+</ul>
+<p>Run: <code>cargo test -p codexctl-core codex_transcript -- --nocapture</code></p>
+<p>Expected: FAIL because <code>codex_transcript</code> does not exist.</p>
+<ul>
+<li>[ ] <strong>Step 3: Implement minimal parser</strong></li>
+</ul>
+<p>Create <code>CodexEvent</code>, <code>CodexSessionMeta</code>, <code>CodexResponseItem</code>, and <code>parse_line</code>.
+Parse only the fields the tests assert plus optional <code>turn_context</code> status data.</p>
+<ul>
+<li>[ ] <strong>Step 4: Run parser tests and verify GREEN</strong></li>
+</ul>
+<p>Run: <code>cargo test -p codexctl-core codex_transcript -- --nocapture</code></p>
+<p>Expected: parser tests PASS.</p>
+<h2 id="task-2-codex-session-discovery">Task 2: Codex Session Discovery</h2>
+<p><strong>Files:</strong>
+- Modify: <code>crates/codexctl-core/src/session.rs</code>
+- Modify: <code>crates/codexctl-core/src/discovery.rs</code>
+- Test: <code>tests/integration_tests.rs</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Write failing discovery test</strong></li>
+</ul>
+<p>Add a test that creates:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>&lt;temp&gt;/.codex/sessions/2026/06/11/rollout-2026-06-11T20-33-34-019eb6ac-6d30-7301-885d-ff4d354c0116.jsonl
+</code></pre></div>
+<p>with a <code>session_meta</code> line, sets <code>CODEXCTL_CODEX_HOME=&lt;temp&gt;/.codex</code>, calls
+<code>discovery::scan_sessions()</code>, and asserts:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="fm">assert_eq!</span><span class="p">(</span><span class="n">sessions</span><span class="p">.</span><span class="n">len</span><span class="p">(),</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="fm">assert_eq!</span><span class="p">(</span><span class="n">sessions</span><span class="p">[</span><span class="mi">0</span><span class="p">].</span><span class="n">session_id</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;019eb6ac-6d30-7301-885d-ff4d354c0116&quot;</span><span class="p">);</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="fm">assert_eq!</span><span class="p">(</span><span class="n">sessions</span><span class="p">[</span><span class="mi">0</span><span class="p">].</span><span class="n">cwd</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;/home/alexander/hacking/aleadag/codexctl&quot;</span><span class="p">);</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="fm">assert_eq!</span><span class="p">(</span><span class="n">sessions</span><span class="p">[</span><span class="mi">0</span><span class="p">].</span><span class="n">jsonl_path</span><span class="p">.</span><span class="n">as_ref</span><span class="p">().</span><span class="n">unwrap</span><span class="p">(),</span><span class="w"> </span><span class="o">&amp;</span><span class="n">jsonl_path</span><span class="p">);</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="fm">assert!</span><span class="p">(</span><span class="o">!</span><span class="n">sessions</span><span class="p">[</span><span class="mi">0</span><span class="p">].</span><span class="n">process_backed</span><span class="p">);</span>
+</code></pre></div>
+<ul>
+<li>[ ] <strong>Step 2: Run discovery test and verify RED</strong></li>
+</ul>
+<p>Run: <code>cargo test codex_discovery_scans_rollout_jsonl -- --nocapture</code></p>
+<p>Expected: FAIL because discovery still scans <code>~/.codex/sessions</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Implement Codex discovery</strong></li>
+</ul>
+<p>Add <code>codex_home()</code>, <code>sessions_dir()</code>, recursive JSONL scanning, and
+<code>CodexSession::from_codex_meta(...)</code>. Use a stable synthetic PID from the
+session id hash because the current UI requires a numeric key.</p>
+<ul>
+<li>[ ] <strong>Step 4: Run discovery test and verify GREEN</strong></li>
+</ul>
+<p>Run: <code>cargo test codex_discovery_scans_rollout_jsonl -- --nocapture</code></p>
+<p>Expected: PASS.</p>
+<h2 id="task-3-monitor-codex-jsonl-events">Task 3: Monitor Codex JSONL Events</h2>
+<p><strong>Files:</strong>
+- Modify: <code>crates/codexctl-core/src/monitor.rs</code>
+- Test: <code>tests/integration_tests.rs</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Write failing monitor test</strong></li>
+</ul>
+<p>Add a test that builds a transcript-backed session with a Codex function call
+event and a function call output event, then calls <code>monitor::update_tokens</code>.
+Assert:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="fm">assert_eq!</span><span class="p">(</span><span class="n">session</span><span class="p">.</span><span class="n">telemetry_status</span><span class="p">,</span><span class="w"> </span><span class="n">TelemetryStatus</span><span class="p">::</span><span class="n">Available</span><span class="p">);</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="fm">assert_eq!</span><span class="p">(</span><span class="n">session</span><span class="p">.</span><span class="n">tool_usage</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="s">&quot;exec_command&quot;</span><span class="p">).</span><span class="n">unwrap</span><span class="p">().</span><span class="n">calls</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="fm">assert_eq!</span><span class="p">(</span><span class="n">session</span><span class="p">.</span><span class="n">pending_tool_name</span><span class="p">,</span><span class="w"> </span><span class="nb">None</span><span class="p">);</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="fm">assert!</span><span class="p">(</span><span class="o">!</span><span class="n">session</span><span class="p">.</span><span class="n">last_tool_error</span><span class="p">);</span>
+</code></pre></div>
+<ul>
+<li>[ ] <strong>Step 2: Run monitor test and verify RED</strong></li>
+</ul>
+<p>Run: <code>cargo test codex_monitor_records_function_calls -- --nocapture</code></p>
+<p>Expected: FAIL because monitor treats Codex JSONL as unsupported.</p>
+<ul>
+<li>[ ] <strong>Step 3: Implement Codex event handling in monitor</strong></li>
+</ul>
+<p>When <code>session.process_backed == false</code>, parse lines with <code>codex_transcript</code>.
+Record response item function calls as tool usage. Treat function call outputs
+with non-empty output as completed tool calls. Keep unavailable token/cost
+metrics as unavailable.</p>
+<ul>
+<li>[ ] <strong>Step 4: Run monitor test and verify GREEN</strong></li>
+</ul>
+<p>Run: <code>cargo test codex_monitor_records_function_calls -- --nocapture</code></p>
+<p>Expected: PASS.</p>
+<h2 id="task-4-tui-and-json-source-stability">Task 4: TUI and JSON Source Stability</h2>
+<p><strong>Files:</strong>
+- Modify: <code>crates/codexctl-core/src/process.rs</code>
+- Modify: <code>crates/codexctl-tui/src/app.rs</code>
+- Modify: <code>src/runtime/sessions.rs</code>
+- Test: <code>tests/integration_tests.rs</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Write failing process test</strong></li>
+</ul>
+<p>Add a test that creates a transcript-backed session, calls
+<code>process::fetch_and_enrich</code>, and asserts the status is not forced to
+<code>Finished</code>.</p>
+<ul>
+<li>[ ] <strong>Step 2: Run process test and verify RED</strong></li>
+</ul>
+<p>Run: <code>cargo test transcript_backed_sessions_are_not_marked_finished_by_ps -- --nocapture</code></p>
+<p>Expected: FAIL because <code>fetch_and_enrich</code> marks missing PIDs as finished.</p>
+<ul>
+<li>[ ] <strong>Step 3: Implement process-backed guard</strong></li>
+</ul>
+<p>Skip <code>ps</code> lookup for sessions where <code>process_backed == false</code>. In app refresh,
+preserve existing state by <code>session_id</code> for transcript-backed sessions and by
+PID for process-backed sessions.</p>
+<ul>
+<li>[ ] <strong>Step 4: Run process test and relevant integration tests</strong></li>
+</ul>
+<p>Run: <code>cargo test transcript_backed_sessions_are_not_marked_finished_by_ps -- --nocapture</code></p>
+<p>Expected: PASS.</p>
+<h2 id="task-5-codex-adapter-and-hook-install">Task 5: Codex Adapter and Hook Install</h2>
+<p><strong>Files:</strong>
+- Modify: <code>src/coord/adapter.rs</code>
+- Delete or stop using the legacy coord adapter file
+- Modify: <code>src/coord/adapter_codex.rs</code>
+- Modify: <code>src/init/hooks.rs</code>
+- Test: <code>tests/unit_tests.rs</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Write failing adapter and hook tests</strong></li>
+</ul>
+<p>Adapter test:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kd">let</span><span class="w"> </span><span class="n">adapters</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">adapter</span><span class="p">::</span><span class="n">all_adapters</span><span class="p">();</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="fm">assert_eq!</span><span class="p">(</span><span class="n">adapters</span><span class="p">.</span><span class="n">len</span><span class="p">(),</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="fm">assert_eq!</span><span class="p">(</span><span class="n">adapters</span><span class="p">[</span><span class="mi">0</span><span class="p">].</span><span class="n">family</span><span class="p">(),</span><span class="w"> </span><span class="n">AgentFamily</span><span class="p">::</span><span class="n">Codex</span><span class="p">);</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="fm">assert!</span><span class="p">(</span><span class="n">adapter</span><span class="p">::</span><span class="n">get_adapter</span><span class="p">(</span><span class="s">&quot;codex&quot;</span><span class="p">).</span><span class="n">is_none</span><span class="p">());</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="fm">assert!</span><span class="p">(</span><span class="n">adapter</span><span class="p">::</span><span class="n">get_adapter</span><span class="p">(</span><span class="s">&quot;codex&quot;</span><span class="p">).</span><span class="n">is_some</span><span class="p">());</span>
+</code></pre></div>
+<p>Hook test:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kd">let</span><span class="w"> </span><span class="n">hooks</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">build_hooks_value</span><span class="p">();</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="fm">assert!</span><span class="p">(</span><span class="n">hooks</span><span class="p">[</span><span class="s">&quot;hooks&quot;</span><span class="p">][</span><span class="s">&quot;PermissionRequest&quot;</span><span class="p">].</span><span class="n">is_array</span><span class="p">());</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="fm">assert!</span><span class="p">(</span><span class="n">hooks</span><span class="p">.</span><span class="n">to_string</span><span class="p">().</span><span class="n">contains</span><span class="p">(</span><span class="s">&quot;codexctl&quot;</span><span class="p">));</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="fm">assert!</span><span class="p">(</span><span class="o">!</span><span class="n">hooks</span><span class="p">.</span><span class="n">to_string</span><span class="p">().</span><span class="n">contains</span><span class="p">(</span><span class="s">&quot;codexctl&quot;</span><span class="p">));</span>
+</code></pre></div>
+<ul>
+<li>[ ] <strong>Step 2: Run tests and verify RED</strong></li>
+</ul>
+<p>Run: <code>cargo test adapter hook -- --nocapture</code></p>
+<p>Expected: FAIL because Codex adapter is still registered and hooks use Codex
+paths/commands.</p>
+<ul>
+<li>[ ] <strong>Step 3: Implement Codex-only adapter and hooks</strong></li>
+</ul>
+<p>Remove Codex adapter registration. Make <code>CodexAdapter::discover_sessions</code>
+call <code>discovery::scan_sessions()</code>. Change init hook settings paths to
+<code>~/.codex/hooks.json</code> and <code>.codex/hooks.json</code>, and command strings to
+<code>codexctl</code>.</p>
+<ul>
+<li>[ ] <strong>Step 4: Run tests and verify GREEN</strong></li>
+</ul>
+<p>Run: <code>cargo test adapter hook -- --nocapture</code></p>
+<p>Expected: PASS.</p>
+<h2 id="task-6-public-binary-name-and-focused-verification">Task 6: Public Binary Name and Focused Verification</h2>
+<p><strong>Files:</strong>
+- Modify: <code>Cargo.toml</code>
+- Modify: <code>flake.nix</code>
+- Modify: <code>src/main.rs</code>
+- Modify: <code>src/commands.rs</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Write failing CLI metadata test or run metadata check</strong></li>
+</ul>
+<p>Run: <code>cargo run -- --help</code></p>
+<p>Expected before implementation: help displays <code>codexctl</code>.</p>
+<ul>
+<li>[ ] <strong>Step 2: Rename binary surface to codexctl</strong></li>
+</ul>
+<p>Change package and binary <code>name</code> fields to <code>codexctl</code>; leave internal crate
+names alone. Update obvious user-facing help text in <code>src/main.rs</code> and
+<code>src/commands.rs</code> that mentions Codex hook setup.</p>
+<ul>
+<li>[ ] <strong>Step 3: Run focused command checks</strong></li>
+</ul>
+<p>Run:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>cargo<span class="w"> </span>run<span class="w"> </span>--<span class="w"> </span>--help
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>cargo<span class="w"> </span>run<span class="w"> </span>--<span class="w"> </span>--json
+</code></pre></div>
+<p>Expected: help displays <code>codexctl</code>; JSON command exits successfully and lists
+Codex sessions when local transcripts are available.</p>
+<ul>
+<li>[ ] <strong>Step 4: Full verification</strong></li>
+</ul>
+<p>Run:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>cargo<span class="w"> </span>fmt<span class="w"> </span>--check
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>cargo<span class="w"> </span><span class="nb">test</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>cargo<span class="w"> </span>clippy<span class="w"> </span>--<span class="w"> </span>-D<span class="w"> </span>warnings
+</code></pre></div>
+<p>Expected: all commands exit 0, or failures are investigated with
+<code>superpowers:systematic-debugging</code> before any completion claim.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/aleadag/codexctl" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "toc.follow"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
