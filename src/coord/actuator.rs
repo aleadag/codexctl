@@ -47,7 +47,12 @@ pub trait SideEffects: VerifierBackend {
     /// attempt. The crash-safety guarantee means callers MUST treat a
     /// returned session_id as durable — restarting the daemon shouldn't
     /// re-spawn the same task.
-    fn spawn_session(&self, cwd: &std::path::Path, prompt: &str) -> Result<String, String>;
+    fn spawn_session(
+        &self,
+        cwd: &std::path::Path,
+        prompt: &str,
+        sandbox: &str,
+    ) -> Result<String, String>;
 }
 
 /// Carry out one action against the SQL store and the side-effect
@@ -108,7 +113,8 @@ pub fn apply(conn: &mut Connection, fx: &dyn SideEffects, action: &Action) -> Re
             } else {
                 task.prompt.clone()
             };
-            let session_id = fx.spawn_session(cwd, &prompt)?;
+            let sandbox = codex_exec_sandbox_from_policy(task.policy.as_ref());
+            let session_id = fx.spawn_session(cwd, &prompt, sandbox)?;
             let _attempt_id =
                 insert_attempt(conn, task_id, next_num, Some(&session_id), None, None)?;
             transition(
@@ -317,6 +323,18 @@ fn stamp_attempt_bus_id(
     Ok(())
 }
 
+fn codex_exec_sandbox_from_policy(policy: Option<&serde_json::Value>) -> &'static str {
+    match policy
+        .and_then(|policy| policy.pointer("/codex_exec/sandbox"))
+        .and_then(|sandbox| sandbox.as_str())
+    {
+        Some("read-only") => "read-only",
+        Some("workspace-write") => "workspace-write",
+        Some("danger-full-access") => "danger-full-access",
+        _ => "workspace-write",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -330,7 +348,7 @@ mod tests {
     /// tests script each verifier's verdict deterministically.
     struct RecordingFx {
         published: std::cell::RefCell<Vec<(String, String, u32)>>,
-        spawned: std::cell::RefCell<Vec<(std::path::PathBuf, String)>>,
+        spawned: std::cell::RefCell<Vec<(std::path::PathBuf, String, String)>>,
         next_message_id: std::cell::RefCell<u64>,
         next_session_id: std::cell::RefCell<u64>,
         shell_results:
@@ -411,13 +429,20 @@ mod tests {
             *id += 1;
             Ok(out)
         }
-        fn spawn_session(&self, cwd: &std::path::Path, prompt: &str) -> Result<String, String> {
+        fn spawn_session(
+            &self,
+            cwd: &std::path::Path,
+            prompt: &str,
+            sandbox: &str,
+        ) -> Result<String, String> {
             let mut id = self.next_session_id.borrow_mut();
             let out = format!("sess_test_{id}");
             *id += 1;
-            self.spawned
-                .borrow_mut()
-                .push((cwd.to_path_buf(), prompt.to_string()));
+            self.spawned.borrow_mut().push((
+                cwd.to_path_buf(),
+                prompt.to_string(),
+                sandbox.to_string(),
+            ));
             Ok(out)
         }
     }
@@ -482,11 +507,40 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(fx.spawned.borrow().len(), 1);
+        let spawned = fx.spawned.borrow();
+        assert_eq!(spawned.len(), 1);
+        assert_eq!(spawned[0].2, "workspace-write");
         let task = get_task(&conn, &id).unwrap().unwrap();
         assert_eq!(task.state, TaskState::Running);
         let hist = list_transitions(&conn, &id).unwrap();
         assert_eq!(hist.last().unwrap().2, "spawned");
+    }
+
+    #[test]
+    fn spawn_uses_codex_exec_sandbox_from_task_policy() {
+        let mut conn = store::open_memory();
+        let mut task = sample_with_role(None);
+        task.policy = Some(serde_json::json!({
+            "codex_exec": {
+                "sandbox": "danger-full-access",
+            },
+        }));
+        let id = insert_task(&conn, &task).unwrap();
+        let fx = RecordingFx::default();
+
+        apply(
+            &mut conn,
+            &fx,
+            &Action::Spawn {
+                task_id: id,
+                cwd: std::path::PathBuf::from("/work/x"),
+            },
+        )
+        .unwrap();
+
+        let spawned = fx.spawned.borrow();
+        assert_eq!(spawned.len(), 1);
+        assert_eq!(spawned[0].2, "danger-full-access");
     }
 
     #[test]

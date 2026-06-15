@@ -26,6 +26,7 @@ verifiers = ["cargo clippy --all-targets -- -D warnings", "cargo clippy --all-ta
 [execution]
 cwd = "."
 worktree = "auto"
+sandbox = "danger-full-access"
 worktree_root = "../codexctl-worktrees"
 branch_template = "loop/{loop}/{source_item_id}"
 session = "headless"

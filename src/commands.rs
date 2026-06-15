@@ -1208,11 +1208,15 @@ fn pid_is_alive(pid: u32) -> bool {
 
 /// Build the detached headless Codex process used by supervisor `Spawn`.
 #[cfg(feature = "coord")]
-fn build_codex_exec_spawn_command(cwd: &std::path::Path, prompt: &str) -> std::process::Command {
+fn build_codex_exec_spawn_command(
+    cwd: &std::path::Path,
+    prompt: &str,
+    sandbox: &str,
+) -> std::process::Command {
     let mut cmd = std::process::Command::new("codex");
     cmd.arg("exec")
         .arg("--sandbox")
-        .arg("workspace-write")
+        .arg(sandbox)
         .arg("--cd")
         .arg(cwd)
         .arg("--add-dir")
@@ -1227,8 +1231,12 @@ fn build_codex_exec_spawn_command(cwd: &std::path::Path, prompt: &str) -> std::p
 }
 
 #[cfg(feature = "coord")]
-fn spawn_codex_exec_session(cwd: &std::path::Path, prompt: &str) -> Result<String, String> {
-    let mut child = build_codex_exec_spawn_command(cwd, prompt)
+fn spawn_codex_exec_session(
+    cwd: &std::path::Path,
+    prompt: &str,
+    sandbox: &str,
+) -> Result<String, String> {
+    let mut child = build_codex_exec_spawn_command(cwd, prompt, sandbox)
         .spawn()
         .map_err(|e| format!("spawn codex exec: {e}"))?;
     let pid = child.id();
@@ -1361,8 +1369,13 @@ impl crate::coord::actuator::SideEffects for LiveSideEffects {
             hop_count,
         )
     }
-    fn spawn_session(&self, cwd: &std::path::Path, prompt: &str) -> Result<String, String> {
-        spawn_codex_exec_session(cwd, prompt)
+    fn spawn_session(
+        &self,
+        cwd: &std::path::Path,
+        prompt: &str,
+        sandbox: &str,
+    ) -> Result<String, String> {
+        spawn_codex_exec_session(cwd, prompt, sandbox)
     }
 }
 
@@ -1404,8 +1417,13 @@ impl crate::coord::actuator::SideEffects for NoopSideEffects {
     ) -> Result<String, String> {
         Err("bus feature not compiled in; AssignViaMailbox is unavailable".into())
     }
-    fn spawn_session(&self, cwd: &std::path::Path, prompt: &str) -> Result<String, String> {
-        spawn_codex_exec_session(cwd, prompt)
+    fn spawn_session(
+        &self,
+        cwd: &std::path::Path,
+        prompt: &str,
+        sandbox: &str,
+    ) -> Result<String, String> {
+        spawn_codex_exec_session(cwd, prompt, sandbox)
     }
 }
 
@@ -2168,7 +2186,7 @@ mod supervisor_spawn_tests {
     fn codex_exec_spawn_command_preserves_prompt_and_cwd() {
         let temp = tempfile::tempdir().unwrap();
         let prompt = "Use skill `loop-triage` before acting.\n\nHandle issue #1.";
-        let cmd = build_codex_exec_spawn_command(temp.path(), prompt);
+        let cmd = build_codex_exec_spawn_command(temp.path(), prompt, "workspace-write");
 
         assert_eq!(cmd.get_program(), std::ffi::OsStr::new("codex"));
         assert_eq!(
@@ -2186,6 +2204,18 @@ mod supervisor_spawn_tests {
             ]
         );
         assert_eq!(cmd.get_current_dir(), Some(temp.path()));
+    }
+
+    #[test]
+    fn codex_exec_spawn_command_uses_configured_sandbox() {
+        let temp = tempfile::tempdir().unwrap();
+        let prompt = "Create the PR.";
+        let cmd = build_codex_exec_spawn_command(temp.path(), prompt, "danger-full-access");
+
+        assert_eq!(
+            cmd.get_args().collect::<Vec<_>>()[2],
+            std::ffi::OsStr::new("danger-full-access")
+        );
     }
 
     #[test]
