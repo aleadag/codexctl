@@ -9,22 +9,22 @@ use super::config::LoopConfig;
 use super::store;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LoopDaemonStatus {
+pub(crate) enum LoopTickStatus {
     Due,
     NotDue,
     Skipped,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LoopDaemonDecision {
+pub(crate) struct LoopTickDecision {
     pub(crate) loop_name: String,
-    pub(crate) status: LoopDaemonStatus,
+    pub(crate) status: LoopTickStatus,
     pub(crate) reason: Option<String>,
     pub(crate) next_due_epoch: Option<u64>,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct DaemonSummary {
+pub(crate) struct TickSummary {
     pub(crate) ran: usize,
     pub(crate) skipped: usize,
     pub(crate) not_due: usize,
@@ -46,7 +46,7 @@ pub(crate) fn run_tick_once(
     name: Option<&str>,
     json: bool,
     app_cfg: &crate::config::Config,
-) -> LoopResult<DaemonSummary> {
+) -> LoopResult<TickSummary> {
     run_due_once(root, name, json, app_cfg, "loop_tick")
 }
 
@@ -56,7 +56,7 @@ fn run_due_once(
     json: bool,
     app_cfg: &crate::config::Config,
     summary_event: &str,
-) -> LoopResult<DaemonSummary> {
+) -> LoopResult<TickSummary> {
     let loops = cli::select_loops(root, name)?;
     let loop_conn = store::open()?;
     let coord_conn = crate::coord::store::open()?;
@@ -78,14 +78,14 @@ fn run_due_once(
             0
         }
     };
-    let mut summary = DaemonSummary {
+    let mut summary = TickSummary {
         reconciled,
-        ..DaemonSummary::default()
+        ..TickSummary::default()
     };
 
     for decision in decisions {
         match decision.status {
-            LoopDaemonStatus::Due => {
+            LoopTickStatus::Due => {
                 let Some(cfg) = loops.iter().find(|cfg| cfg.name == decision.loop_name) else {
                     summary.failed += 1;
                     continue;
@@ -102,7 +102,7 @@ fn run_due_once(
                     }
                 }
             }
-            LoopDaemonStatus::Skipped => {
+            LoopTickStatus::Skipped => {
                 summary.skipped += 1;
                 emit_event(
                     json,
@@ -112,7 +112,7 @@ fn run_due_once(
                     decision.reason.as_deref(),
                 );
             }
-            LoopDaemonStatus::NotDue => {
+            LoopTickStatus::NotDue => {
                 summary.not_due += 1;
                 emit_event(json, "debug", Some(&decision.loop_name), "not_due", None);
             }
@@ -128,7 +128,7 @@ pub(crate) fn select_due_loop_configs<F, G>(
     mut last_finished_epoch: F,
     mut is_paused: G,
     now_epoch: u64,
-) -> LoopResult<Vec<LoopDaemonDecision>>
+) -> LoopResult<Vec<LoopTickDecision>>
 where
     F: FnMut(&str) -> Option<u64>,
     G: FnMut(&str) -> bool,
@@ -136,18 +136,18 @@ where
     let mut decisions = Vec::new();
     for cfg in configs {
         if !cfg.enabled {
-            decisions.push(LoopDaemonDecision {
+            decisions.push(LoopTickDecision {
                 loop_name: cfg.name.clone(),
-                status: LoopDaemonStatus::Skipped,
+                status: LoopTickStatus::Skipped,
                 reason: Some("disabled".into()),
                 next_due_epoch: None,
             });
             continue;
         }
         if is_paused(&cfg.name) {
-            decisions.push(LoopDaemonDecision {
+            decisions.push(LoopTickDecision {
                 loop_name: cfg.name.clone(),
-                status: LoopDaemonStatus::Skipped,
+                status: LoopTickStatus::Skipped,
                 reason: Some("paused".into()),
                 next_due_epoch: None,
             });
@@ -157,9 +157,9 @@ where
         let cadence = match cfg.cadence.as_deref().map(parse_cadence).transpose() {
             Ok(cadence) => cadence,
             Err(err) => {
-                decisions.push(LoopDaemonDecision {
+                decisions.push(LoopTickDecision {
                     loop_name: cfg.name.clone(),
-                    status: LoopDaemonStatus::Skipped,
+                    status: LoopTickStatus::Skipped,
                     reason: Some(err),
                     next_due_epoch: None,
                 });
@@ -167,18 +167,18 @@ where
             }
         };
         let Some(cadence) = cadence else {
-            decisions.push(LoopDaemonDecision {
+            decisions.push(LoopTickDecision {
                 loop_name: cfg.name.clone(),
-                status: LoopDaemonStatus::Due,
+                status: LoopTickStatus::Due,
                 reason: None,
                 next_due_epoch: None,
             });
             continue;
         };
         let Some(last_finished) = last_finished_epoch(&cfg.name) else {
-            decisions.push(LoopDaemonDecision {
+            decisions.push(LoopTickDecision {
                 loop_name: cfg.name.clone(),
-                status: LoopDaemonStatus::Due,
+                status: LoopTickStatus::Due,
                 reason: None,
                 next_due_epoch: None,
             });
@@ -186,16 +186,16 @@ where
         };
         let next_due = last_finished.saturating_add(cadence.as_secs());
         if now_epoch >= next_due {
-            decisions.push(LoopDaemonDecision {
+            decisions.push(LoopTickDecision {
                 loop_name: cfg.name.clone(),
-                status: LoopDaemonStatus::Due,
+                status: LoopTickStatus::Due,
                 reason: None,
                 next_due_epoch: Some(next_due),
             });
         } else {
-            decisions.push(LoopDaemonDecision {
+            decisions.push(LoopTickDecision {
                 loop_name: cfg.name.clone(),
-                status: LoopDaemonStatus::NotDue,
+                status: LoopTickStatus::NotDue,
                 reason: Some("cadence".into()),
                 next_due_epoch: Some(next_due),
             });
@@ -318,7 +318,7 @@ fn emit_event(
     }
 }
 
-fn emit_summary(json: bool, summary: &DaemonSummary, event: &str) {
+fn emit_summary(json: bool, summary: &TickSummary, event: &str) {
     if json {
         println!(
             "{}",
@@ -333,7 +333,7 @@ fn emit_summary(json: bool, summary: &DaemonSummary, event: &str) {
         );
     } else {
         println!(
-            "daemon: ran={} skipped={} not_due={} failed={} reconciled={}",
+            "tick: ran={} skipped={} not_due={} failed={} reconciled={}",
             summary.ran, summary.skipped, summary.not_due, summary.failed, summary.reconciled
         );
     }
@@ -381,7 +381,7 @@ mod tests {
 
         assert_eq!(decisions.len(), 1);
         assert_eq!(decisions[0].loop_name, "issue-triage");
-        assert_eq!(decisions[0].status, LoopDaemonStatus::Due);
+        assert_eq!(decisions[0].status, LoopTickStatus::Due);
     }
 
     #[test]
@@ -393,7 +393,7 @@ mod tests {
             select_due_loop_configs(&[cfg], |_| Some(1000), |_| false, 1000 + 60 * 60).unwrap();
 
         assert_eq!(decisions.len(), 1);
-        assert_eq!(decisions[0].status, LoopDaemonStatus::NotDue);
+        assert_eq!(decisions[0].status, LoopTickStatus::NotDue);
     }
 
     #[test]
@@ -404,7 +404,7 @@ mod tests {
             select_due_loop_configs(&[cfg], |_| None, |name| name == "issue-triage", 100).unwrap();
 
         assert_eq!(decisions.len(), 1);
-        assert_eq!(decisions[0].status, LoopDaemonStatus::Skipped);
+        assert_eq!(decisions[0].status, LoopTickStatus::Skipped);
         assert_eq!(decisions[0].reason.as_deref(), Some("paused"));
     }
 

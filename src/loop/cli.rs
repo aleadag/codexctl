@@ -6,12 +6,12 @@ use clap::Subcommand;
 
 use super::LoopResult;
 use super::config::{LoopConfig, TriageMode, WorktreeMode, discover_project_loops};
-use super::daemon;
 use super::policy::{LoopAction, deterministic_decision, parse_and_validate_decision};
 use super::prompt;
 use super::sources::{SourceItem, source_from_config};
 use super::store::{self, LoopItemState, NewLoopItem};
 use super::submit;
+use super::tick;
 use super::worktree;
 
 #[derive(Debug, Subcommand)]
@@ -76,7 +76,7 @@ fn dispatch_inner(cmd: &LoopCommand, cfg: &crate::config::Config) -> LoopResult<
             limit,
         } => run_loop(Path::new("."), name, *dry_run, *limit, cfg),
         LoopCommand::Tick { name, json } => {
-            daemon::run_tick(Path::new("."), name.as_deref(), *json, cfg)
+            tick::run_tick(Path::new("."), name.as_deref(), *json, cfg)
         }
         LoopCommand::Status { name } => status(name.as_deref()),
         LoopCommand::Logs { name, item } => logs(name, item.as_deref()),
