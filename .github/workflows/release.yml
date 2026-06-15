@@ -16,7 +16,7 @@ jobs:
     name: Verify tag
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Ensure Cargo version matches tag
         run: |
           TAG="${GITHUB_REF#refs/tags/v}"
@@ -43,7 +43,7 @@ jobs:
             runner: ubuntu-latest
             archive: tar.gz
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -119,7 +119,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Publish claudectl-core
@@ -143,7 +143,7 @@ jobs:
     needs: publish-crate-core
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Wait for claudectl-core on crates.io
@@ -186,7 +186,7 @@ jobs:
     needs: publish-crate-tui
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Wait for claudectl-tui on crates.io
@@ -218,7 +218,7 @@ jobs:
       - publish-crate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/download-artifact@v4
         with:
@@ -240,11 +240,11 @@ jobs:
       - release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           path: claudectl
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           repository: mercurialsolo/homebrew-tap
           path: homebrew-tap
