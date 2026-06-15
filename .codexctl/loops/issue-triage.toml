@@ -1,0 +1,47 @@
+name = "issue-triage"
+enabled = true
+mode = "assisted"
+cadence = "2h"
+
+[source]
+kind = "github_issues"
+repo = "aleadag/codexctl"
+query = "is:open label:codexctl-loop"
+limit = 5
+
+[triage]
+mode = "deterministic"
+skill = "loop-triage"
+instructions = """
+Review each source item and decide whether Codex should act.
+Prefer report-only when requirements are unclear.
+Escalate destructive, security-sensitive, or ambiguous work.
+"""
+
+[triage.allowed]
+actions = ["ignore", "report", "submit", "escalate"]
+worktree = ["none", "existing"]
+verifiers = ["cargo test", "cargo clippy -- -D warnings"]
+
+[execution]
+cwd = "."
+worktree = "existing"
+session = "headless"
+max_retries = 2
+timeout_min = 90
+
+[[verify]]
+kind = "run"
+command = "cargo test"
+
+[[verify]]
+kind = "run"
+command = "cargo clippy -- -D warnings"
+
+[gates]
+max_items_per_run = 1
+max_concurrent = 1
+require_human_for = ["destructive", "ambiguous", "security-sensitive"]
+allow_source_updates = false
+allow_pr_create = false
+allow_issue_comment = false
