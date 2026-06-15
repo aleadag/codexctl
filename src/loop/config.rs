@@ -92,6 +92,32 @@ impl WorktreeMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SandboxMode {
+    ReadOnly,
+    WorkspaceWrite,
+    DangerFullAccess,
+}
+
+impl SandboxMode {
+    pub fn parse(value: &str) -> LoopResult<Self> {
+        match value {
+            "read-only" => Ok(Self::ReadOnly),
+            "workspace-write" => Ok(Self::WorkspaceWrite),
+            "danger-full-access" => Ok(Self::DangerFullAccess),
+            other => Err(format!("unknown sandbox mode {other}")),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "read-only",
+            Self::WorkspaceWrite => "workspace-write",
+            Self::DangerFullAccess => "danger-full-access",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct LoopConfig {
     pub name: String,
@@ -129,6 +155,7 @@ pub struct TriageConfig {
 pub struct ExecutionConfig {
     pub cwd: String,
     pub worktree: WorktreeMode,
+    pub sandbox: SandboxMode,
     pub worktree_root: Option<String>,
     pub branch_template: Option<String>,
     pub session: String,
@@ -201,6 +228,7 @@ impl LoopConfig {
             execution: ExecutionConfig {
                 cwd: ".".into(),
                 worktree: WorktreeMode::None,
+                sandbox: SandboxMode::WorkspaceWrite,
                 worktree_root: None,
                 branch_template: None,
                 session: "headless".into(),
@@ -307,6 +335,12 @@ pub fn parse_loop_config(body: &str, path: PathBuf) -> LoopResult<LoopConfig> {
                     .get("worktree")
                     .map(String::as_str)
                     .unwrap_or("existing"),
+            )?,
+            sandbox: SandboxMode::parse(
+                execution
+                    .get("sandbox")
+                    .map(String::as_str)
+                    .unwrap_or("workspace-write"),
             )?,
             worktree_root: execution.get("worktree_root").cloned(),
             branch_template: execution.get("branch_template").cloned(),
@@ -498,7 +532,54 @@ max_concurrent = 1
         assert_eq!(cfg.source.kind, SourceKind::Shell);
         assert_eq!(cfg.source.command.as_deref(), Some("printf '{}\\n'"));
         assert_eq!(cfg.execution.worktree, WorktreeMode::None);
+        assert_eq!(cfg.execution.sandbox, SandboxMode::WorkspaceWrite);
         assert_eq!(cfg.gates.max_items_per_run, 2);
+    }
+
+    #[test]
+    fn parse_loop_config_accepts_execution_sandbox() {
+        let body = r#"
+name = "issue-triage"
+
+[source]
+kind = "github_issues"
+repo = "aleadag/codexctl"
+
+[execution]
+cwd = "."
+sandbox = "danger-full-access"
+"#;
+
+        let cfg = parse_loop_config(
+            body,
+            std::path::PathBuf::from(".codexctl/loops/issue-triage.toml"),
+        )
+        .unwrap();
+
+        assert_eq!(cfg.execution.sandbox, SandboxMode::DangerFullAccess);
+    }
+
+    #[test]
+    fn parse_loop_config_rejects_unknown_execution_sandbox() {
+        let body = r#"
+name = "issue-triage"
+
+[source]
+kind = "github_issues"
+repo = "aleadag/codexctl"
+
+[execution]
+cwd = "."
+sandbox = "network-only"
+"#;
+
+        let err = parse_loop_config(
+            body,
+            std::path::PathBuf::from(".codexctl/loops/issue-triage.toml"),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("unknown sandbox mode network-only"));
     }
 
     #[test]

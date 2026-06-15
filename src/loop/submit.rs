@@ -46,7 +46,11 @@ pub fn submit_coord_task(
         max_retries: cfg.execution.max_retries,
         timeout_min: cfg.execution.timeout_min,
         depends_on: Vec::new(),
-        policy: None,
+        policy: Some(serde_json::json!({
+            "codex_exec": {
+                "sandbox": cfg.execution.sandbox.as_str(),
+            },
+        })),
         verifiers,
     };
     let task_id = crate::coord::tasks::insert_task(coord_conn, &new_task)?;
@@ -90,5 +94,42 @@ mod tests {
             .unwrap();
         assert_eq!(task.name, "Fix it");
         assert_eq!(item.coord_task_id.as_deref(), Some(task_id.as_str()));
+    }
+
+    #[test]
+    fn submit_decision_stores_execution_sandbox_policy() {
+        let loop_conn = crate::r#loop::store::open_memory();
+        let coord_conn = crate::coord::store::open_memory();
+        let mut cfg = crate::r#loop::config::LoopConfig::minimal_for_test("issue-triage");
+        cfg.execution.sandbox = crate::r#loop::config::SandboxMode::DangerFullAccess;
+        let source_item = crate::r#loop::sources::SourceItem::for_test("github:repo#1");
+        let loop_item_id = crate::r#loop::store::upsert_item(
+            &loop_conn,
+            &crate::r#loop::store::NewLoopItem::from_source("issue-triage", &source_item),
+        )
+        .unwrap();
+        let decision = crate::r#loop::policy::LoopDecision::submit_for_test("Fix it");
+
+        let task_id = submit_coord_task(
+            &coord_conn,
+            &loop_conn,
+            &cfg,
+            &loop_item_id,
+            &source_item,
+            &decision,
+            None,
+        )
+        .unwrap();
+
+        let task = crate::coord::tasks::get_task(&coord_conn, &task_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            task.policy
+                .as_ref()
+                .and_then(|policy| policy.pointer("/codex_exec/sandbox"))
+                .and_then(|sandbox| sandbox.as_str()),
+            Some("danger-full-access")
+        );
     }
 }
