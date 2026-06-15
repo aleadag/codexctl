@@ -48,7 +48,7 @@ pub fn reconcile_completed_with_transcripts(
 
         let Some(transcript) = transcripts
             .iter()
-            .find(|transcript| transcript.cwd == task.cwd)
+            .find(|transcript| cwd_matches(&transcript.cwd, &task.cwd))
         else {
             let error = "completed task transcript not found";
             mark_outcome_failed(loop_conn, &item.id, error)?;
@@ -105,6 +105,20 @@ fn mark_task_needs_human(
         crate::coord::tasks::TaskState::NeedsHuman,
         &format!("loop-outcome-missing: {error}"),
     )
+}
+
+fn cwd_matches(transcript_cwd: &str, task_cwd: &str) -> bool {
+    if transcript_cwd == task_cwd {
+        return true;
+    }
+
+    match (
+        Path::new(transcript_cwd).canonicalize(),
+        Path::new(task_cwd).canonicalize(),
+    ) {
+        (Ok(transcript_cwd), Ok(task_cwd)) => transcript_cwd == task_cwd,
+        _ => false,
+    }
 }
 
 fn scan_transcript_outcomes() -> Vec<TranscriptOutcome> {
@@ -279,6 +293,36 @@ mod tests {
             row.result_url.as_deref(),
             Some("https://github.com/aleadag/codexctl/pull/4")
         );
+    }
+
+    #[test]
+    fn reconciles_transcript_when_task_cwd_contains_parent_component() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        let worktrees = temp.path().join("worktrees");
+        let task_dir = worktrees.join("task-1");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::create_dir_all(&task_dir).unwrap();
+
+        let loop_conn = store::open_memory();
+        let mut coord_conn = crate::coord::store::open_memory();
+        let task_cwd = repo.join("../worktrees/task-1");
+        let (item_id, _) = done_loop_task(&loop_conn, &mut coord_conn, task_cwd.to_str().unwrap());
+
+        let summary = reconcile_completed_with_transcripts(
+            &loop_conn,
+            &mut coord_conn,
+            &[TranscriptOutcome {
+                cwd: task_dir.to_str().unwrap().into(),
+                final_message: "Opened PR: https://github.com/aleadag/codexctl/pull/4".into(),
+            }],
+        )
+        .unwrap();
+        let row = store::get_item(&loop_conn, &item_id).unwrap().unwrap();
+
+        assert_eq!(summary.resolved, 1);
+        assert_eq!(summary.failed, 0);
+        assert_eq!(row.state, store::LoopItemState::Done);
     }
 
     #[test]
