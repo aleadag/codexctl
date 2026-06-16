@@ -5,8 +5,13 @@ use std::path::{Path, PathBuf};
 use clap::Subcommand;
 
 use super::LoopResult;
-use super::config::{LoopConfig, TriageMode, WorktreeMode, discover_project_loops};
-use super::policy::{LoopAction, deterministic_decision, parse_and_validate_decision};
+use super::config::{
+    GateConfig, LoopConfig, LoopMode, SandboxMode, SourceConfig, SourceKind, TriageConfig,
+    TriageMode, VerifierConfig, WorktreeMode, discover_project_loops,
+};
+use super::policy::{
+    LoopAction, LoopDecision, deterministic_decision, parse_and_validate_decision,
+};
 use super::prompt;
 use super::sources::{SourceItem, source_from_config};
 use super::store::{self, LoopItemState, NewLoopItem};
@@ -32,6 +37,24 @@ pub enum LoopCommand {
         /// Override source/config item limit for this run.
         #[arg(long)]
         limit: Option<usize>,
+    },
+    /// Submit a local spec file as a one-shot coord task.
+    Handoff {
+        /// Markdown/design/spec file to submit.
+        #[arg(long)]
+        file: PathBuf,
+        /// Task title. Defaults to the file stem.
+        #[arg(long)]
+        name: Option<String>,
+        /// Override the loop execution worktree mode.
+        #[arg(long, value_parser = parse_worktree_mode_arg)]
+        worktree: Option<WorktreeMode>,
+        /// Loop config to reuse for cwd, sandbox, model, timeout, verifiers, and worktree root.
+        #[arg(long = "loop")]
+        loop_name: Option<String>,
+        /// Print the planned task/worktree without writing coord state.
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Run due project loops once and reconcile completed loop tasks.
     Tick {
@@ -75,6 +98,20 @@ fn dispatch_inner(cmd: &LoopCommand, cfg: &crate::config::Config) -> LoopResult<
             dry_run,
             limit,
         } => run_loop(Path::new("."), name, *dry_run, *limit, cfg),
+        LoopCommand::Handoff {
+            file,
+            name,
+            worktree,
+            loop_name,
+            dry_run,
+        } => handoff(
+            Path::new("."),
+            file,
+            name.as_deref(),
+            *worktree,
+            loop_name.as_deref(),
+            *dry_run,
+        ),
         LoopCommand::Tick { name, json } => {
             tick::run_tick(Path::new("."), name.as_deref(), *json, cfg)
         }
@@ -245,6 +282,304 @@ fn run_loop_once(
     Ok(summary)
 }
 
+fn parse_worktree_mode_arg(value: &str) -> Result<WorktreeMode, String> {
+    WorktreeMode::parse(value)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HandoffPlan {
+    pub(crate) task_name: String,
+    pub(crate) prompt_source: String,
+    pub(crate) cwd: String,
+    pub(crate) worktree_path: Option<String>,
+    pub(crate) verifiers: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HandoffOutcome {
+    pub(crate) task_id: Option<String>,
+    pub(crate) plan: HandoffPlan,
+}
+
+fn handoff(
+    root: &Path,
+    file: &Path,
+    name: Option<&str>,
+    worktree: Option<WorktreeMode>,
+    loop_name: Option<&str>,
+    dry_run: bool,
+) -> LoopResult<()> {
+    let cfg = if let Some(loop_name) = loop_name {
+        select_one_loop(root, loop_name)?
+    } else {
+        manual_handoff_config(root)
+    };
+    let loop_conn = store::open()?;
+    let coord_conn = crate::coord::store::open()?;
+    let outcome = submit_handoff(
+        root,
+        &cfg,
+        &loop_conn,
+        &coord_conn,
+        file,
+        name,
+        worktree,
+        dry_run,
+    )?;
+    if let Some(task_id) = outcome.task_id {
+        println!("submitted {task_id}");
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn submit_handoff(
+    root: &Path,
+    cfg: &LoopConfig,
+    loop_conn: &rusqlite::Connection,
+    coord_conn: &rusqlite::Connection,
+    file: &Path,
+    name: Option<&str>,
+    worktree: Option<WorktreeMode>,
+    dry_run: bool,
+) -> LoopResult<HandoffOutcome> {
+    let item = handoff_source_item_from_file(file, name)?;
+    let task_name = item.title.clone();
+    let plan = plan_handoff(root, cfg, &item, &task_name, worktree, dry_run)?;
+    if dry_run {
+        print_handoff_dry_run(&plan);
+        return Ok(HandoffOutcome {
+            task_id: None,
+            plan,
+        });
+    }
+
+    let mode = worktree.unwrap_or(cfg.execution.worktree);
+    let worktree_path = match mode {
+        WorktreeMode::None | WorktreeMode::Existing => None,
+        WorktreeMode::Required | WorktreeMode::Auto => {
+            let prepared = worktree::prepare(root, cfg, &item)?;
+            Some(prepared.path.to_string_lossy().into_owned())
+        }
+    };
+    let decision = handoff_decision(cfg, &task_name, Some(mode));
+    let loop_item_id = store::upsert_item(loop_conn, &NewLoopItem::from_source(&cfg.name, &item))?;
+    store::mark_decision(
+        loop_conn,
+        &loop_item_id,
+        LoopItemState::Seen,
+        &decision.to_json(),
+    )?;
+    let task_id = submit::submit_coord_task(
+        coord_conn,
+        loop_conn,
+        cfg,
+        &loop_item_id,
+        &item,
+        &decision,
+        worktree_path.as_deref(),
+    )?;
+
+    Ok(HandoffOutcome {
+        task_id: Some(task_id),
+        plan: HandoffPlan {
+            cwd: worktree_path.unwrap_or_else(|| cfg.execution.cwd.clone()),
+            ..plan
+        },
+    })
+}
+
+pub(crate) fn handoff_source_item_from_file(
+    file: &Path,
+    name: Option<&str>,
+) -> LoopResult<SourceItem> {
+    let body = std::fs::read_to_string(file)
+        .map_err(|e| format!("read handoff file {}: {e}", file.display()))?;
+    let prompt_source = file
+        .canonicalize()
+        .unwrap_or_else(|_| file.to_path_buf())
+        .to_string_lossy()
+        .into_owned();
+    let title = name
+        .and_then(|value| {
+            let trimmed = value.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        })
+        .unwrap_or_else(|| {
+            file.file_stem()
+                .and_then(|stem| stem.to_str())
+                .filter(|stem| !stem.is_empty())
+                .unwrap_or("manual handoff")
+                .to_string()
+        });
+    let fingerprint = fingerprint(&body);
+
+    Ok(SourceItem {
+        source_kind: "manual".into(),
+        source_item_id: format!(
+            "manual:{}:{fingerprint:016x}",
+            sanitize_source_id(&prompt_source)
+        ),
+        title,
+        body,
+        url: None,
+        raw_json: serde_json::json!({
+            "file": prompt_source,
+            "fingerprint": format!("{fingerprint:016x}"),
+        }),
+    })
+}
+
+pub(crate) fn plan_handoff(
+    root: &Path,
+    cfg: &LoopConfig,
+    item: &SourceItem,
+    task_name: &str,
+    worktree: Option<WorktreeMode>,
+    _dry_run: bool,
+) -> LoopResult<HandoffPlan> {
+    let mode = worktree.unwrap_or(cfg.execution.worktree);
+    let worktree_path = match mode {
+        WorktreeMode::None | WorktreeMode::Existing => None,
+        WorktreeMode::Required | WorktreeMode::Auto => Some(
+            worktree::plan_for_source_item(root, cfg, item)?
+                .path
+                .to_string_lossy()
+                .into_owned(),
+        ),
+    };
+    let cwd = worktree_path
+        .as_ref()
+        .cloned()
+        .unwrap_or_else(|| cfg.execution.cwd.clone());
+    let prompt_source = item
+        .raw_json
+        .get("file")
+        .and_then(|value| value.as_str())
+        .unwrap_or(&item.source_item_id)
+        .to_string();
+
+    Ok(HandoffPlan {
+        task_name: task_name.into(),
+        prompt_source,
+        cwd,
+        worktree_path,
+        verifiers: cfg.verify.iter().map(|v| v.command.clone()).collect(),
+    })
+}
+
+fn handoff_decision(
+    cfg: &LoopConfig,
+    task_name: &str,
+    worktree: Option<WorktreeMode>,
+) -> LoopDecision {
+    LoopDecision {
+        action: LoopAction::Submit,
+        risk: "low".into(),
+        reason: "manual handoff from local spec".into(),
+        task_name: Some(task_name.into()),
+        task_prompt: Some("Implement the local spec from the source body.".into()),
+        worktree,
+        verifiers: cfg.verify.iter().map(|v| v.command.clone()).collect(),
+    }
+}
+
+fn print_handoff_dry_run(plan: &HandoffPlan) {
+    println!("[dry-run] task: {}", plan.task_name);
+    println!("[dry-run] prompt source: {}", plan.prompt_source);
+    println!("[dry-run] cwd: {}", plan.cwd);
+    println!(
+        "[dry-run] worktree: {}",
+        plan.worktree_path.as_deref().unwrap_or("(none)")
+    );
+    if plan.verifiers.is_empty() {
+        println!("[dry-run] verifiers: (none)");
+    } else {
+        println!("[dry-run] verifiers:");
+        for verifier in &plan.verifiers {
+            println!("  - {verifier}");
+        }
+    }
+}
+
+fn manual_handoff_config(root: &Path) -> LoopConfig {
+    LoopConfig {
+        name: "manual-handoff".into(),
+        enabled: true,
+        mode: LoopMode::Assisted,
+        cadence: None,
+        path: root.join("<manual-handoff>"),
+        source: SourceConfig {
+            kind: SourceKind::Shell,
+            repo: None,
+            query: None,
+            command: Some("manual".into()),
+            limit: 1,
+        },
+        triage: TriageConfig {
+            mode: TriageMode::Deterministic,
+            skill: None,
+            instructions: None,
+            allowed_actions: vec!["submit".into()],
+            allowed_worktree: vec![
+                WorktreeMode::None,
+                WorktreeMode::Existing,
+                WorktreeMode::Required,
+                WorktreeMode::Auto,
+            ],
+            allowed_verifiers: Vec::new(),
+        },
+        execution: super::config::ExecutionConfig {
+            cwd: root
+                .canonicalize()
+                .unwrap_or_else(|_| root.to_path_buf())
+                .to_string_lossy()
+                .into_owned(),
+            worktree: WorktreeMode::Existing,
+            sandbox: SandboxMode::WorkspaceWrite,
+            worktree_root: None,
+            branch_template: None,
+            session: "headless".into(),
+            model: None,
+            budget_usd: None,
+            max_retries: None,
+            timeout_min: None,
+        },
+        verify: Vec::<VerifierConfig>::new(),
+        gates: GateConfig {
+            max_items_per_run: 1,
+            max_concurrent: 1,
+            require_human_for: Vec::new(),
+        },
+    }
+}
+
+fn sanitize_source_id(value: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            last_dash = false;
+        } else if !last_dash {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    let trimmed = out.trim_matches('-');
+    if trimmed.is_empty() {
+        "spec".into()
+    } else {
+        trimmed.chars().take(96).collect()
+    }
+}
+
+fn fingerprint(value: &str) -> u64 {
+    value.bytes().fold(0xcbf29ce484222325, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+    })
+}
+
 fn decide_item(
     cfg: &LoopConfig,
     item: &SourceItem,
@@ -410,6 +745,7 @@ fn set_paused(name: &str, paused: bool) -> LoopResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::FromArgMatches;
 
     #[test]
     fn clap_accepts_tick_for_due_loop_polling() {
@@ -436,5 +772,164 @@ mod tests {
         let err = cmd.try_get_matches_from(["loop", "daemon"]).unwrap_err();
 
         assert_eq!(err.kind(), clap::error::ErrorKind::InvalidSubcommand);
+    }
+
+    #[test]
+    fn clap_accepts_handoff_options() {
+        let cmd = clap::Command::new("loop").subcommand_required(true);
+        let cmd = LoopCommand::augment_subcommands(cmd);
+        let matches = cmd
+            .try_get_matches_from([
+                "loop",
+                "handoff",
+                "--file",
+                "docs/design.md",
+                "--name",
+                "implement design",
+                "--worktree",
+                "required",
+                "--loop",
+                "issue-triage",
+                "--dry-run",
+            ])
+            .unwrap();
+
+        let parsed = LoopCommand::from_arg_matches(&matches).unwrap();
+
+        match parsed {
+            LoopCommand::Handoff {
+                file,
+                name,
+                worktree,
+                loop_name,
+                dry_run,
+            } => {
+                assert_eq!(file, PathBuf::from("docs/design.md"));
+                assert_eq!(name.as_deref(), Some("implement design"));
+                assert_eq!(worktree, Some(WorktreeMode::Required));
+                assert_eq!(loop_name.as_deref(), Some("issue-triage"));
+                assert!(dry_run);
+            }
+            _ => panic!("expected handoff command"),
+        }
+    }
+
+    #[test]
+    fn handoff_source_item_reads_markdown_spec() {
+        let temp = tempfile::tempdir().unwrap();
+        let spec = temp.path().join("design.md");
+        std::fs::write(&spec, "# Design\n\nBuild the thing.\n").unwrap();
+
+        let item = handoff_source_item_from_file(&spec, Some("implement design")).unwrap();
+
+        assert_eq!(item.source_kind, "manual");
+        assert_eq!(item.title, "implement design");
+        assert_eq!(item.body, "# Design\n\nBuild the thing.\n");
+        assert!(item.source_item_id.starts_with("manual:"));
+        assert_eq!(
+            item.raw_json
+                .get("file")
+                .and_then(|value| value.as_str())
+                .map(PathBuf::from),
+            Some(spec)
+        );
+    }
+
+    #[test]
+    fn handoff_plan_uses_worktree_for_required_mode() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("codexctl");
+        std::fs::create_dir_all(&repo).unwrap();
+        let mut cfg = LoopConfig::minimal_for_test("manual-handoff");
+        cfg.execution.cwd = repo.to_string_lossy().into_owned();
+        let item = SourceItem::for_test("manual:docs-design-md");
+
+        let plan = plan_handoff(
+            temp.path(),
+            &cfg,
+            &item,
+            "implement design",
+            Some(WorktreeMode::Required),
+            true,
+        )
+        .unwrap();
+
+        assert!(plan.worktree_path.is_some());
+        assert_eq!(
+            plan.cwd,
+            plan.worktree_path.as_deref().expect("worktree path")
+        );
+    }
+
+    #[test]
+    fn handoff_submission_inserts_coord_task_and_loop_item() {
+        let temp = tempfile::tempdir().unwrap();
+        let spec = temp.path().join("design.md");
+        std::fs::write(&spec, "# Design\n\nBuild the thing.\n").unwrap();
+        let loop_conn = store::open_memory();
+        let coord_conn = crate::coord::store::open_memory();
+        let mut cfg = LoopConfig::minimal_for_test("manual-handoff");
+        cfg.execution.cwd = temp.path().to_string_lossy().into_owned();
+        cfg.execution.worktree = WorktreeMode::None;
+        cfg.verify.clear();
+
+        let outcome = submit_handoff(
+            temp.path(),
+            &cfg,
+            &loop_conn,
+            &coord_conn,
+            &spec,
+            Some("implement design"),
+            Some(WorktreeMode::None),
+            false,
+        )
+        .unwrap();
+
+        let task = crate::coord::tasks::get_task(&coord_conn, &outcome.task_id.unwrap())
+            .unwrap()
+            .unwrap();
+        let rows = store::list_items(&loop_conn, Some("manual-handoff")).unwrap();
+
+        assert_eq!(task.name, "implement design");
+        assert!(task.prompt.contains("# Design"));
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].source_kind, "manual");
+        assert_eq!(rows[0].state, LoopItemState::Submitted);
+        assert_eq!(rows[0].coord_task_id.as_deref(), Some(task.id.as_str()));
+    }
+
+    #[test]
+    fn handoff_dry_run_does_not_insert_coord_or_loop_rows() {
+        let temp = tempfile::tempdir().unwrap();
+        let spec = temp.path().join("design.md");
+        std::fs::write(&spec, "# Design\n\nBuild the thing.\n").unwrap();
+        let loop_conn = store::open_memory();
+        let coord_conn = crate::coord::store::open_memory();
+        let mut cfg = LoopConfig::minimal_for_test("manual-handoff");
+        cfg.execution.cwd = temp.path().to_string_lossy().into_owned();
+
+        let outcome = submit_handoff(
+            temp.path(),
+            &cfg,
+            &loop_conn,
+            &coord_conn,
+            &spec,
+            Some("implement design"),
+            Some(WorktreeMode::None),
+            true,
+        )
+        .unwrap();
+
+        assert!(outcome.task_id.is_none());
+        assert!(
+            store::list_items(&loop_conn, Some("manual-handoff"))
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            crate::coord::tasks::list_tasks(&coord_conn, None)
+                .unwrap()
+                .is_empty()
+        );
     }
 }
