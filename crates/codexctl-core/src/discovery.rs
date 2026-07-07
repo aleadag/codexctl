@@ -2,9 +2,13 @@ use std::cmp::Reverse;
 use std::fs;
 use std::io::BufRead;
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use crate::codex_transcript::{CodexEvent, parse_line};
 use crate::session::CodexSession;
+
+const TRANSCRIPT_INDEX_TTL: Duration = Duration::from_secs(10);
 
 fn sessions_dir() -> PathBuf {
     codex_home().join("sessions")
@@ -53,6 +57,18 @@ struct CodexTranscriptSummary {
     cwd: String,
     path: PathBuf,
     mtime_ms: u64,
+}
+
+struct CachedTranscriptIndex {
+    sessions_dir: PathBuf,
+    refreshed_at: Instant,
+    transcripts: Vec<CodexTranscriptSummary>,
+}
+
+static TRANSCRIPT_INDEX_CACHE: OnceLock<Mutex<Option<CachedTranscriptIndex>>> = OnceLock::new();
+
+fn transcript_index_cache() -> &'static Mutex<Option<CachedTranscriptIndex>> {
+    TRANSCRIPT_INDEX_CACHE.get_or_init(|| Mutex::new(None))
 }
 
 fn scan_live_codex_processes() -> Vec<LiveCodexProcess> {
@@ -163,8 +179,28 @@ fn args_after_codex(args: &str) -> String {
 
 fn collect_transcript_summaries() -> Vec<CodexTranscriptSummary> {
     let dir = sessions_dir();
+    if let Ok(mut cached) = transcript_index_cache().lock() {
+        if let Some(index) = cached.as_ref() {
+            if index.sessions_dir == dir && index.refreshed_at.elapsed() < TRANSCRIPT_INDEX_TTL {
+                return index.transcripts.clone();
+            }
+        }
+
+        let transcripts = collect_transcript_summaries_uncached(&dir);
+        *cached = Some(CachedTranscriptIndex {
+            sessions_dir: dir,
+            refreshed_at: Instant::now(),
+            transcripts: transcripts.clone(),
+        });
+        return transcripts;
+    }
+
+    collect_transcript_summaries_uncached(&dir)
+}
+
+fn collect_transcript_summaries_uncached(dir: &PathBuf) -> Vec<CodexTranscriptSummary> {
     let mut paths = Vec::new();
-    collect_rollout_jsonls(&dir, &mut paths);
+    collect_rollout_jsonls(dir, &mut paths);
 
     let mut transcripts: Vec<CodexTranscriptSummary> = paths
         .into_iter()
@@ -623,5 +659,52 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_id, "codex-99");
         assert_eq!(sessions[0].jsonl_path, None);
+    }
+
+    #[test]
+    fn transcript_summary_scan_reuses_fresh_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let codex_home = dir.path().join(".codex");
+        let first = codex_home
+            .join("sessions")
+            .join("2026")
+            .join("07")
+            .join("07")
+            .join("rollout-first.jsonl");
+        write_transcript(&first, "sess-first", "/repo");
+
+        unsafe {
+            std::env::set_var("CODEXCTL_CODEX_HOME", &codex_home);
+        }
+        let summaries = collect_transcript_summaries();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].session_id, "sess-first");
+
+        let second = codex_home
+            .join("sessions")
+            .join("2026")
+            .join("07")
+            .join("07")
+            .join("rollout-second.jsonl");
+        write_transcript(&second, "sess-second", "/repo");
+
+        let summaries = collect_transcript_summaries();
+        unsafe {
+            std::env::remove_var("CODEXCTL_CODEX_HOME");
+        }
+
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].session_id, "sess-first");
+    }
+
+    fn write_transcript(path: &std::path::Path, session_id: &str, cwd: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            path,
+            format!(
+                r#"{{"timestamp":"2026-07-07T00:00:00Z","type":"session_meta","payload":{{"id":"{session_id}","timestamp":"2026-07-07T00:00:00Z","cwd":"{cwd}","model_provider":"openai"}}}}"#
+            ),
+        )
+        .unwrap();
     }
 }
