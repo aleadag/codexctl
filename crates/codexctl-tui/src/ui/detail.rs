@@ -64,34 +64,6 @@ pub fn render_detail_panel(frame: &mut Frame, area: Rect, session: &CodexSession
         session.telemetry_label().to_string()
     };
 
-    // Bus role binding (#307). Look up by pid first — TUI-bound roles attach
-    // by pid so this catches the bind without an extra cwd-prefix lookup. We
-    // fall back to cwd_selector matching for cwd-only bindings made via
-    // `codexctl bus role bind <name> <cwd>` outside the TUI.
-    let bus_role_line = {
-        let roles = app.runtime.bus.list_roles();
-        let by_pid = roles.iter().find(|r| r.pid == Some(session.pid));
-        let by_cwd = roles
-            .iter()
-            .find(|r| !r.cwd_selector.is_empty() && session.cwd.starts_with(&r.cwd_selector));
-        match by_pid.or(by_cwd) {
-            Some(r) => detail_line(
-                "Bus role",
-                &format!(
-                    "{} (bound by {})",
-                    r.name,
-                    if r.pid == Some(session.pid) {
-                        "pid"
-                    } else {
-                        "cwd"
-                    }
-                ),
-                t,
-            ),
-            None => detail_line("Bus role", "— (Ctrl+R to bind)", t),
-        }
-    };
-
     let mut lines = vec![
         detail_line("PID", &pid, t),
         detail_line("Session ID", &session.session_id, t),
@@ -99,7 +71,6 @@ pub fn render_detail_panel(frame: &mut Frame, area: Rect, session: &CodexSession
         detail_line("Project", &session.project_name, t),
         detail_line("Model", &model, t),
         detail_line("Status", &status, t),
-        bus_role_line,
         detail_line("Telemetry", &telemetry, t),
         detail_line("TTY", &tty, t),
         detail_line("Elapsed", &elapsed, t),
@@ -276,97 +247,6 @@ pub fn render_detail_panel(frame: &mut Frame, area: Rect, session: &CodexSession
                     &format!("also edited by {}", others.join(", ")),
                     t,
                 ));
-            }
-        }
-    }
-
-    // Coordination section (leases and handoffs for this session)
-    #[cfg(feature = "coord")]
-    {
-        let session_leases: Vec<&codexctl_core::runtime::LeaseSummary> = app
-            .coord_leases
-            .iter()
-            .filter(|l| l.owner_session_id == session.session_id)
-            .collect();
-
-        let session_handoffs: Vec<&codexctl_core::runtime::HandoffSummary> = app
-            .coord_handoffs
-            .iter()
-            .filter(|h| {
-                h.from_session_id == session.session_id
-                    || h.to_session_id.as_deref() == Some(&*session.session_id)
-            })
-            .collect();
-
-        if !session_leases.is_empty() || !session_handoffs.is_empty() {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                " Coordination",
-                Style::default().fg(t.header).add_modifier(Modifier::BOLD),
-            )));
-
-            if !session_leases.is_empty() {
-                lines.push(detail_line(
-                    "  Leases",
-                    &format!("{} active", session_leases.len()),
-                    t,
-                ));
-                for lease in session_leases.iter().take(5) {
-                    let resource = format!("{}:{}", lease.resource_kind, lease.resource_value);
-                    let expires = lease.expires_at.as_deref().unwrap_or("no expiry");
-                    lines.push(detail_line(
-                        &format!("    {}", lease.mode),
-                        &format!("{resource} ({expires})"),
-                        t,
-                    ));
-                }
-            }
-
-            if !session_handoffs.is_empty() {
-                lines.push(detail_line(
-                    "  Handoffs",
-                    &format!("{} pending", session_handoffs.len()),
-                    t,
-                ));
-                for handoff in session_handoffs.iter().take(5) {
-                    let direction = if handoff.from_session_id == session.session_id {
-                        "to"
-                    } else {
-                        "from"
-                    };
-                    let other = if direction == "to" {
-                        handoff.to_session_id.as_deref().unwrap_or("unassigned")
-                    } else {
-                        &handoff.from_session_id
-                    };
-                    lines.push(detail_line(
-                        &format!("    {direction} {other}"),
-                        &handoff.summary,
-                        t,
-                    ));
-                }
-            }
-
-            // Pending interrupts targeting this session
-            let session_interrupts: Vec<&codexctl_core::runtime::InterruptSummary> = app
-                .coord_pending_interrupts
-                .iter()
-                .filter(|i| i.target_session_id == session.session_id)
-                .collect();
-
-            if !session_interrupts.is_empty() {
-                lines.push(detail_line(
-                    "  Interrupts",
-                    &format!("{} pending", session_interrupts.len()),
-                    t,
-                ));
-                for intr in session_interrupts.iter().take(5) {
-                    lines.push(detail_line(
-                        &format!("    {} [{}]", intr.interrupt_type, intr.priority),
-                        &intr.reason,
-                        t,
-                    ));
-                }
             }
         }
     }

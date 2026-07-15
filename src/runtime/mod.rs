@@ -1,7 +1,7 @@
 //! Binary-side implementations of the `codexctl-core` runtime traits.
 //!
 //! Each submodule provides a `Live*` adapter that reads from the binary
-//! crate's actual subsystem (brain, coord, bus, discovery) and projects it
+//! crate's actual brain and discovery subsystems and projects them
 //! into the core-owned DTOs the TUI will consume.
 //!
 //! The runtime is **read-only**. Side-effecting paths (terminate, inject,
@@ -18,10 +18,7 @@ mod actions;
 mod brain;
 mod brain_driver;
 mod brain_review;
-mod bus;
-mod coord;
-mod hive;
-mod orchestrator;
+mod delivery;
 mod sessions;
 
 pub use actions::LiveActions;
@@ -31,10 +28,7 @@ pub use brain::LiveBrainView;
 #[allow(unused_imports)]
 pub use brain_driver::LiveBrainDriver;
 pub use brain_review::LiveBrainReviewView;
-pub use bus::LiveBusView;
-pub use coord::LiveCoordView;
-pub use hive::LiveHiveActions;
-pub use orchestrator::LiveOrchestrator;
+pub use delivery::LiveBrainDelivery;
 pub use sessions::LiveSessionSource;
 
 /// Assemble the production runtime: each view backed by the corresponding
@@ -48,11 +42,8 @@ pub fn build_runtime() -> Runtime {
     Runtime::new(
         Arc::new(LiveSessionSource),
         Arc::new(LiveBrainView),
-        Arc::new(LiveCoordView),
-        Arc::new(LiveBusView),
         Arc::new(LiveActions),
         Arc::new(LiveBrainReviewView),
-        Arc::new(LiveOrchestrator),
-        Arc::new(LiveHiveActions),
+        Arc::new(LiveBrainDelivery),
     )
 }

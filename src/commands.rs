@@ -883,7 +883,6 @@ pub(crate) fn run_headless(
     app.health_thresholds = cfg.health.clone();
     app.file_conflicts_enabled = cfg.file_conflicts;
     app.auto_deny_file_conflicts = cfg.auto_deny_file_conflicts;
-    app.idle_config = cfg.idle.clone();
     app.brain_config = cfg.brain.clone();
     app.budget_usd = cfg.budget;
     app.kill_on_budget = cfg.kill_on_budget;
@@ -1061,21 +1060,6 @@ pub(crate) fn run_headless(
                     json_mode,
                 );
             }
-        }
-
-        // Periodic coordination summary (every ~30s)
-        #[cfg(feature = "coord")]
-        if tick_count % 15 == 0 {
-            emit_headless_event(
-                "coord_summary",
-                serde_json::json!({
-                    "active_leases": app.coord_leases.len(),
-                    "pending_handoffs": app.coord_handoffs.len(),
-                    "pending_interrupts": app.coord_pending_interrupts.len(),
-                    "sessions": app.sessions.len(),
-                }),
-                json_mode,
-            );
         }
 
         // Auto-prune old coordination data (every ~1 hour = 1800 ticks at 2s)

@@ -75,7 +75,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                         .fg(t.highlight_key)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(" for Skills & Hive.", Style::default().fg(t.text_muted)),
+                Span::styled(" for Skills.", Style::default().fg(t.text_muted)),
             ]),
         ];
 
@@ -490,24 +490,6 @@ fn session_row(s: &CodexSession, app: &App) -> Row<'static> {
         (false, true, false) => "!! ",
         (false, false, true) => "REC ",
         (false, false, false) => "",
-    };
-    // Coordination badges: L = active lease, H = pending handoff, I = pending interrupt
-    #[cfg(feature = "coord")]
-    let prefix = {
-        let has_lease = app.session_has_lease(&s.session_id);
-        let has_handoff = app.session_has_handoff(&s.session_id);
-        let has_interrupt = app.session_has_interrupt(&s.session_id);
-        let mut p = prefix.to_string();
-        if has_lease {
-            p.push_str("L ");
-        }
-        if has_handoff {
-            p.push_str("H ");
-        }
-        if has_interrupt {
-            p.push_str("I ");
-        }
-        p
     };
     let health_icon = codexctl_core::health::status_icon(s, &app.health_thresholds);
     let health_suffix = if health_icon.is_empty() {

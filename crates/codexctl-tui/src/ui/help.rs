@@ -99,16 +99,8 @@ pub fn render_help_overlay(frame: &mut Frame, area: Rect, app: &App) {
             Span::raw("  Toggle brain on/off"),
         ]),
         Line::from(vec![
-            Span::styled("  Ctrl+r         ", Style::default().fg(t.highlight_key)),
-            Span::raw("  Bind agent-bus role to selected session"),
-        ]),
-        Line::from(vec![
             Span::styled("  g              ", Style::default().fg(t.highlight_key)),
             Span::raw("  Toggle grouped view by project"),
-        ]),
-        Line::from(vec![
-            Span::styled("  p              ", Style::default().fg(t.highlight_key)),
-            Span::raw("  Toggle peers panel (relay feature)"),
         ]),
         Line::from(vec![
             Span::styled("  r              ", Style::default().fg(t.highlight_key)),
@@ -116,7 +108,7 @@ pub fn render_help_overlay(frame: &mut Frame, area: Rect, app: &App) {
         ]),
         Line::from(vec![
             Span::styled("  K              ", Style::default().fg(t.highlight_key)),
-            Span::raw("  Skills & Hive — list skills, share to hive, start/invite/join"),
+            Span::raw("  Skills — list locally discovered skills"),
         ]),
         Line::from(vec![
             Span::styled("  M              ", Style::default().fg(t.highlight_key)),

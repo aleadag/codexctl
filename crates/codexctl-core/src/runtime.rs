@@ -2,23 +2,23 @@
 //!
 //! Tracking: issue #274 of the workspace-refactor epic (#279).
 //!
-//! The TUI today reaches deep into brain / coord / bus / rules internals. This
+//! The TUI today reaches deep into brain and rules internals. This
 //! module defines the **read-only** boundary it should reach through instead,
 //! so a future `codexctl-tui` crate (#275) can be extracted and iterated on
-//! without recompiling brain or the bus.
+//! without recompiling binary-only brain code.
 //!
 //! ## Why traits, why core-owned DTOs
 //!
 //! Each view is a trait, not a concrete struct, so:
 //!
 //! - The binary crate can hand the TUI a real implementation backed by SQLite
-//!   / the engine / the bus DB. A future remote frontend can hand it an HTTP
+//!   / the engine. A future remote frontend can hand it an HTTP
 //!   client. Tests hand it a fixture.
 //! - Adding a method to a trait is a contract change reviewable in one PR;
 //!   adding a method to a concrete struct ripples through every caller.
 //!
-//! Each DTO (`SessionSnapshot`, `LeaseSummary`, …) is owned by `core` so the
-//! traits don't drag `brain::DecisionRecord` / `coord::Lease` upward into the
+//! Each DTO is owned by `core` so the traits don't drag binary-only brain
+//! types upward into the
 //! TUI's dependency surface. Conversion happens once, in the wrapper.
 //!
 //! ## What's in scope here
@@ -239,85 +239,6 @@ pub trait BrainReviewView: Send + Sync {
 }
 
 // ============================================================================
-// Coordination layer
-// ============================================================================
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LeaseSummary {
-    pub id: String,
-    pub owner_session_id: String,
-    pub resource_kind: String,
-    pub resource_value: String,
-    pub mode: String,
-    pub acquired_at: String,
-    /// ISO timestamp when the lease expires. `None` for leases held without
-    /// an explicit deadline.
-    #[serde(default)]
-    pub expires_at: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HandoffSummary {
-    pub id: String,
-    pub from_session_id: String,
-    pub to_session_id: Option<String>,
-    pub task_id: String,
-    pub summary: String,
-    pub priority: String,
-    pub created_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InterruptSummary {
-    pub id: String,
-    pub interrupt_type: String,
-    pub priority: String,
-    pub target_session_id: String,
-    pub reason: String,
-    pub created_at: String,
-}
-
-/// Read access to coordination state (leases, handoffs, interrupts).
-/// Backed today by the `coord` SQLite store; in tests, by a fixture.
-pub trait CoordView: Send + Sync {
-    fn active_leases(&self) -> Vec<LeaseSummary>;
-    fn pending_handoffs(&self) -> Vec<HandoffSummary>;
-    fn pending_interrupts(&self) -> Vec<InterruptSummary>;
-}
-
-// ============================================================================
-// Agent bus
-// ============================================================================
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentDirectoryEntry {
-    pub session_id: String,
-    pub pid: u32,
-    pub cwd: String,
-    pub project: String,
-    pub status: String,
-    pub role: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RoleBinding {
-    pub name: String,
-    pub cwd_selector: String,
-    pub last_session_id: Option<String>,
-    pub last_seen: String,
-    /// PID this role is bound to (#307). `None` for cwd-only bindings.
-    pub pid: Option<u32>,
-}
-
-/// Read access to the agent-bus roster + role table. Disabled implementations
-/// (`bus` feature off in the binary) return empty vectors so the TUI can
-/// render the panel as "no bus" without conditional compilation.
-pub trait BusView: Send + Sync {
-    fn list_agents(&self) -> Vec<AgentDirectoryEntry>;
-    fn list_roles(&self) -> Vec<RoleBinding>;
-}
-
-// ============================================================================
 // Actions (write surface)
 // ============================================================================
 
@@ -396,8 +317,6 @@ pub struct LogDecisionInput {
 /// - `launch::*` — launching a new Codex session is wider than a single
 ///   call (cwd selection, model defaults, plugin propagation). Will get its
 ///   own trait once the TUI's launcher surface is refactored alongside #275.
-/// - `mailbox::deliver_pending` — orchestrator-style mailbox delivery; should
-///   eventually move to an `Orchestrator` trait, not `Actions`.
 /// - `log_decision` (vs. `log_observation`) — currently only called from the
 ///   plugin gate path, not the TUI. Stays a direct call until a TUI site
 ///   needs it.
@@ -432,50 +351,6 @@ pub trait Actions: Send + Sync {
     /// Mark a past brain decision as canonical for teaching. Optional `note`
     /// is the operator's annotation. Used by the Brain Review surface.
     fn mark_canonical(&self, decision_id: &str, note: Option<String>) -> Result<(), String>;
-
-    /// Bind an agent-bus role to a `(cwd, pid)` pair. The TUI calls this from
-    /// the new role-bind key (Ctrl+R) so the operator can attach a role to a
-    /// specific running Codex session without dropping to another terminal.
-    /// Returns `Err` when the bus feature is compiled out or the DB write
-    /// fails. See issue #307.
-    fn bind_bus_role(&self, name: &str, cwd: &str, pid: u32) -> Result<(), String>;
-}
-
-// ============================================================================
-// Hive actions — knowledge-store (`hive`) + transport (`relay`) reads/writes
-// ============================================================================
-
-/// Snapshot of local hive state the overlay reads to render the Hive tab.
-///
-/// Mirrors the binary's same-named struct, lifted here so the TUI can hold
-/// it without depending on the binary's app module.
-#[derive(Debug, Clone, Default)]
-pub struct HiveViewSnapshot {
-    /// Local relay identity (peer ID string). `None` when the `relay`
-    /// feature is compiled out.
-    pub identity: Option<String>,
-    /// Known peers, paired with last-seen address when available.
-    pub peers: Vec<(String, Option<String>)>,
-}
-
-/// Hive + relay surface the TUI needs to render the Skills and Hive panels.
-///
-/// Separate trait from `Actions` because the underlying subsystems are
-/// feature-gated (`hive`, `relay`) — when those features are off the
-/// implementation returns empty/no-op values rather than failing.
-pub trait HiveActions: Send + Sync {
-    /// Semantic keys (`skill:<lowered-name>`) of skills already shared into
-    /// the local hive store. Used by the Skills overlay to mark "already
-    /// shared" rows.
-    fn shared_skill_keys(&self) -> std::collections::HashSet<String>;
-
-    /// Share a discovered skill into the local hive store. Returns the new
-    /// unit ID on success.
-    fn share_skill(&self, skill: &crate::skills::DiscoveredSkill) -> Result<String, String>;
-
-    /// Current view of the local relay identity + known peers for the Hive
-    /// tab.
-    fn hive_view_snapshot(&self) -> HiveViewSnapshot;
 }
 
 // ============================================================================
@@ -559,41 +434,15 @@ pub trait BrainDriver: Send {
 }
 
 // ============================================================================
-// Orchestrator
+// Brain delivery
 // ============================================================================
 
-/// Tick the orchestration layer once per refresh: deliver pending mailbox
-/// messages, deliver pending coordination interrupts, and bookkeep stale
-/// rows in the underlying stores.
-///
-/// Each `deliver_*` method returns `(id, status_message)` tuples the TUI
-/// surfaces in the status bar. `id` is a `u32` for mailbox (matching the
-/// brain's per-PID queue) and a `String` for interrupts (matching the
-/// coord interrupt_id). They differ deliberately — keeping the trait honest
-/// to the underlying surfaces rather than papering over the distinction.
-///
-/// Unlike `CoordView` / `BrainView` which are read-only, this trait is
-/// stateful: each call writes to the brain/coord SQLite stores. It still
-/// boxes as `Arc<dyn>` because no method needs `&mut self` — implementations
-/// open a connection per call.
-///
-/// Implementations may be no-ops when the relevant feature is off (e.g. the
-/// `coord` feature is disabled at compile time), so call sites don't need
-/// `#[cfg(feature = "...")]` guards.
-pub trait Orchestrator: Send + Sync {
+/// Deliver pending local-brain mailbox messages to live sessions.
+pub trait BrainDelivery: Send + Sync {
     /// Drain pending mailbox messages addressed to running sessions and
     /// deliver them to the live terminals. Used by `App::tick` to surface
     /// `"Brain → sess_X: 'go ahead'"` style messages.
     fn deliver_mailbox(&self, sessions: &[SessionSnapshot]) -> Vec<(u32, String)>;
-
-    /// Deliver pending coordination interrupts (cross-agent signals) to
-    /// running sessions. Returns `(interrupt_id, status_message)` tuples.
-    fn deliver_interrupts(&self, sessions: &[SessionSnapshot]) -> Vec<(String, String)>;
-
-    /// Expire stale leases and interrupts that have passed their deadline.
-    /// Bookkeeping side-effect; best-effort, no return. Implementations
-    /// log failures rather than propagating them.
-    fn expire_stale(&self);
 }
 
 // ============================================================================
@@ -609,38 +458,25 @@ pub trait Orchestrator: Send + Sync {
 pub struct Runtime {
     pub sessions: Arc<dyn SessionSource>,
     pub brain: Arc<dyn BrainView>,
-    pub coord: Arc<dyn CoordView>,
-    pub bus: Arc<dyn BusView>,
     pub actions: Arc<dyn Actions>,
     pub review: Arc<dyn BrainReviewView>,
-    pub orchestrator: Arc<dyn Orchestrator>,
-    pub hive: Arc<dyn HiveActions>,
+    pub delivery: Arc<dyn BrainDelivery>,
 }
 
 impl Runtime {
-    // 8-trait composition root; each view is its own arc. Splitting this into
-    // sub-records would just trade one wide ctor for several narrow ones with
-    // the same total fan-out.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         sessions: Arc<dyn SessionSource>,
         brain: Arc<dyn BrainView>,
-        coord: Arc<dyn CoordView>,
-        bus: Arc<dyn BusView>,
         actions: Arc<dyn Actions>,
         review: Arc<dyn BrainReviewView>,
-        orchestrator: Arc<dyn Orchestrator>,
-        hive: Arc<dyn HiveActions>,
+        delivery: Arc<dyn BrainDelivery>,
     ) -> Self {
         Self {
             sessions,
             brain,
-            coord,
-            bus,
             actions,
             review,
-            orchestrator,
-            hive,
+            delivery,
         }
     }
 }
@@ -652,7 +488,7 @@ impl Runtime {
 /// In-memory runtime backed by `Vec`s and interior-mutable counters. Used by
 /// tests in this crate to verify the trait shapes compile and roundtrip
 /// cleanly, and by the future `codexctl-tui` crate's tests to render the
-/// TUI against fixtures without dragging in brain / coord / bus.
+/// TUI against fixtures without dragging in binary-only brain code.
 ///
 /// `Actions` impls record their calls in `actions_log` so tests can assert
 /// "the TUI invoked the right side-effect" without spying on real I/O.
@@ -662,11 +498,7 @@ pub struct MockRuntime {
     pub gate_mode: std::sync::Mutex<Option<BrainGateMode>>,
     pub decisions: Vec<DecisionSummary>,
     pub review_queue: Vec<ReviewItemSummary>,
-    pub leases: Vec<LeaseSummary>,
-    pub handoffs: Vec<HandoffSummary>,
-    pub interrupts: Vec<InterruptSummary>,
-    pub agents: Vec<AgentDirectoryEntry>,
-    pub roles: Vec<RoleBinding>,
+    pub mailbox_deliveries: Vec<(u32, String)>,
     pub actions_log: std::sync::Mutex<Vec<MockAction>>,
 }
 
@@ -687,11 +519,6 @@ pub enum MockAction {
     MarkCanonical {
         decision_id: String,
         note: Option<String>,
-    },
-    BindBusRole {
-        name: String,
-        cwd: String,
-        pid: u32,
     },
 }
 
@@ -729,16 +556,7 @@ impl Eq for LogDecisionInput {}
 impl MockRuntime {
     pub fn into_runtime(self) -> Runtime {
         let arc = Arc::new(self);
-        Runtime::new(
-            arc.clone(),
-            arc.clone(),
-            arc.clone(),
-            arc.clone(),
-            arc.clone(),
-            arc.clone(),
-            arc.clone(),
-            arc,
-        )
+        Runtime::new(arc.clone(), arc.clone(), arc.clone(), arc.clone(), arc)
     }
 
     pub fn actions(&self) -> Vec<MockAction> {
@@ -770,27 +588,6 @@ impl BrainView for MockRuntime {
     }
 }
 
-impl CoordView for MockRuntime {
-    fn active_leases(&self) -> Vec<LeaseSummary> {
-        self.leases.clone()
-    }
-    fn pending_handoffs(&self) -> Vec<HandoffSummary> {
-        self.handoffs.clone()
-    }
-    fn pending_interrupts(&self) -> Vec<InterruptSummary> {
-        self.interrupts.clone()
-    }
-}
-
-impl BusView for MockRuntime {
-    fn list_agents(&self) -> Vec<AgentDirectoryEntry> {
-        self.agents.clone()
-    }
-    fn list_roles(&self) -> Vec<RoleBinding> {
-        self.roles.clone()
-    }
-}
-
 impl BrainReviewView for MockRuntime {
     fn all_decisions(&self) -> Vec<DecisionSummary> {
         self.decisions.clone()
@@ -800,25 +597,9 @@ impl BrainReviewView for MockRuntime {
     }
 }
 
-impl Orchestrator for MockRuntime {
+impl BrainDelivery for MockRuntime {
     fn deliver_mailbox(&self, _sessions: &[SessionSnapshot]) -> Vec<(u32, String)> {
-        Vec::new()
-    }
-    fn deliver_interrupts(&self, _sessions: &[SessionSnapshot]) -> Vec<(String, String)> {
-        Vec::new()
-    }
-    fn expire_stale(&self) {}
-}
-
-impl HiveActions for MockRuntime {
-    fn shared_skill_keys(&self) -> std::collections::HashSet<String> {
-        std::collections::HashSet::new()
-    }
-    fn share_skill(&self, _skill: &crate::skills::DiscoveredSkill) -> Result<String, String> {
-        Err("MockRuntime does not implement skill sharing".into())
-    }
-    fn hive_view_snapshot(&self) -> HiveViewSnapshot {
-        HiveViewSnapshot::default()
+        self.mailbox_deliveries.clone()
     }
 }
 
@@ -872,17 +653,6 @@ impl Actions for MockRuntime {
             });
         Ok(())
     }
-    fn bind_bus_role(&self, name: &str, cwd: &str, pid: u32) -> Result<(), String> {
-        self.actions_log
-            .lock()
-            .expect("actions_log poisoned")
-            .push(MockAction::BindBusRole {
-                name: name.into(),
-                cwd: cwd.into(),
-                pid,
-            });
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -913,6 +683,26 @@ mod tests {
         let listed = rt.sessions.list();
         assert_eq!(listed.len(), 2);
         assert_eq!(listed[0].session_id, "sess_a");
+    }
+
+    #[test]
+    fn runtime_exposes_nonempty_brain_delivery_without_coordination_views() {
+        let mock = std::sync::Arc::new(MockRuntime {
+            mailbox_deliveries: vec![(42, "Delivered 1 message".into())],
+            ..MockRuntime::default()
+        });
+        let runtime = Runtime::new(
+            mock.clone(),
+            mock.clone(),
+            mock.clone(),
+            mock.clone(),
+            mock.clone(),
+        );
+
+        assert_eq!(
+            runtime.delivery.deliver_mailbox(&[]),
+            vec![(42, "Delivered 1 message".into())]
+        );
     }
 
     #[test]
@@ -961,21 +751,6 @@ mod tests {
         assert_eq!(rt.brain.gate_mode(), BrainGateMode::On);
     }
 
-    #[test]
-    fn coord_view_reports_empty_state_cleanly() {
-        let rt = MockRuntime::default().into_runtime();
-        assert!(rt.coord.active_leases().is_empty());
-        assert!(rt.coord.pending_handoffs().is_empty());
-        assert!(rt.coord.pending_interrupts().is_empty());
-    }
-
-    #[test]
-    fn bus_view_reports_empty_state_cleanly() {
-        let rt = MockRuntime::default().into_runtime();
-        assert!(rt.bus.list_agents().is_empty());
-        assert!(rt.bus.list_roles().is_empty());
-    }
-
     /// Smoke test that the trait shapes are usable behind `dyn`. If this
     /// compiles, the boxed-trait composition works.
     #[test]
@@ -1003,9 +778,6 @@ mod tests {
         let mock = MockRuntime::default();
         let arc = Arc::new(mock);
         let rt = Runtime::new(
-            arc.clone(),
-            arc.clone(),
-            arc.clone(),
             arc.clone(),
             arc.clone(),
             arc.clone(),
@@ -1040,9 +812,6 @@ mod tests {
             arc.clone(),
             arc.clone(),
             arc.clone(),
-            arc.clone(),
-            arc.clone(),
-            arc.clone(),
         );
         let obs = ObservationInput {
             session_pid: 12345,
@@ -1061,9 +830,6 @@ mod tests {
         let mock = MockRuntime::default();
         let arc = Arc::new(mock);
         let rt = Runtime::new(
-            arc.clone(),
-            arc.clone(),
-            arc.clone(),
             arc.clone(),
             arc.clone(),
             arc.clone(),

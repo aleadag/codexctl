@@ -257,14 +257,6 @@ pub struct App {
     pub input_mode: bool,
     pub input_buffer: String,
     pub input_target_pid: Option<u32>,
-    // ── Role-bind input mode (#307) ──────────────────────────────────────
-    /// When true, keystrokes accumulate in `role_bind_buffer` instead of
-    /// triggering normal-mode handlers. Entered via Ctrl+R on the
-    /// dashboard; Esc cancels, Enter commits via `Actions::bind_bus_role`.
-    pub role_bind_mode: bool,
-    pub role_bind_buffer: String,
-    pub role_bind_target_pid: Option<u32>,
-    pub role_bind_target_cwd: Option<String>,
     pub notify: bool,
     pub prev_statuses: HashMap<u32, SessionStatus>,
     pub show_help: bool,
@@ -322,65 +314,15 @@ pub struct App {
     /// configured. Held as `Box<dyn BrainDriver>` (not `Arc`) because every
     /// method needs `&mut`. `None` when the brain is off.
     pub brain_driver: Option<Box<dyn codexctl_core::runtime::BrainDriver>>,
-    pub idle_config: codexctl_core::config::IdleConfig,
-    pub last_user_interaction: std::time::Instant,
-    pub idle_mode_active: bool,
-    pub idle_tasks_launched: Vec<String>,
-    pub idle_report: Vec<String>,
-    // Coordination layer (feature-gated)
-    #[cfg(feature = "coord")]
-    pub coord_leases: Vec<codexctl_core::runtime::LeaseSummary>,
-    #[cfg(feature = "coord")]
-    pub coord_handoffs: Vec<codexctl_core::runtime::HandoffSummary>,
-    #[cfg(feature = "coord")]
-    pub coord_lease_sessions: HashSet<String>,
-    #[cfg(feature = "coord")]
-    pub coord_handoff_sessions: HashSet<String>,
-    #[cfg(feature = "coord")]
-    pub coord_interrupt_targets: HashSet<String>,
-    #[cfg(feature = "coord")]
-    pub coord_pending_interrupts: Vec<codexctl_core::runtime::InterruptSummary>,
-    #[cfg(feature = "coord")]
-    pub coord_tick: u32,
-    // Relay peers panel (feature-gated)
-    #[cfg(feature = "relay")]
-    pub show_peers_panel: bool,
-    // relay_peers is populated when relay serve is active and rendered by
-    // ui::peers::render_peers_panel when show_peers_panel is true. Currently
-    // a stub — rendering integration is wired when the relay serve loop runs
-    // inside the TUI (not yet connected to the TUI render loop).
-    #[cfg(feature = "relay")]
-    #[allow(dead_code)]
-    pub relay_peers: Vec<crate::ui::peers::PeerDisplayInfo>,
-    /// Remote sessions received from connected worker peers (relay heartbeats).
-    #[cfg(feature = "relay")]
-    pub remote_sessions: Vec<codexctl_core::session::CodexSession>,
-
-    // ── Skills & Hive overlay state ────────────────────────────────────────
-    /// Whether the skills/hive overlay is open.
+    // ── Skills overlay state ───────────────────────────────────────────────
+    /// Whether the skills overlay is open.
     pub show_skills: bool,
-    /// Which tab is currently active inside the overlay.
-    pub skills_tab: SkillsTab,
     /// Currently selected index into `skills`.
     pub skills_selected: usize,
     /// Discovered skills (refreshed when the overlay opens or `r` is pressed).
     pub skills: Vec<codexctl_core::skills::DiscoveredSkill>,
-    /// Semantic keys (`skill:<name>`) for skills already present in the hive store.
-    pub shared_skill_keys: std::collections::HashSet<String>,
     /// Transient status message shown in the overlay footer.
     pub skills_status_msg: Option<String>,
-    /// True when a `codexctl relay serve` subprocess has been started from the TUI.
-    pub hive_listener_running: bool,
-    /// Local peer identity, populated when the Hive tab is opened.
-    pub hive_identity: Option<String>,
-    /// Known peers from the local relay state (peer id, optional last address).
-    pub hive_known_peers: Vec<(String, Option<String>)>,
-    /// Last invite generated from the TUI (held in memory only).
-    pub hive_last_invite: Option<HiveInvite>,
-    /// When true, the overlay captures text input for a join code.
-    pub hive_join_input_mode: bool,
-    /// Buffer for the join input.
-    pub hive_join_buffer: String,
 
     // ── Brain review overlay state ─────────────────────────────────────────
     /// Whether the brain review/scorecard overlay is open.
@@ -403,24 +345,9 @@ pub struct App {
     /// UI ↔ runtime contract (epic #279, issue #275). `App::new` starts with
     /// an in-memory `MockRuntime`; `main` swaps in the live runtime at
     /// startup. Call sites prefer `self.runtime.{view,actions,...}.method()`
-    /// over `crate::brain::*` / `crate::coord::*` so that future TUI
+    /// over binary-only brain internals so that future TUI
     /// extraction is a mechanical file move.
     pub runtime: codexctl_core::runtime::Runtime,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SkillsTab {
-    Skills,
-    Hive,
-}
-
-impl SkillsTab {
-    pub fn toggle(self) -> Self {
-        match self {
-            Self::Skills => Self::Hive,
-            Self::Hive => Self::Skills,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -436,13 +363,6 @@ impl BrainTab {
             Self::Review => Self::Scorecard,
         }
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct HiveInvite {
-    pub relay_code: String,
-    pub invite_link: String,
-    pub word_phrase: String,
 }
 
 #[derive(Default, Clone)]
@@ -559,10 +479,6 @@ impl App {
             status_msg: String::new(),
             pending_kill: None,
             input_mode: false,
-            role_bind_mode: false,
-            role_bind_buffer: String::new(),
-            role_bind_target_pid: None,
-            role_bind_target_cwd: None,
             input_buffer: String::new(),
             input_target_pid: None,
             notify: false,
@@ -619,43 +535,10 @@ impl App {
             brain_config: None,
             brain_driver: None,
             runtime: codexctl_core::runtime::MockRuntime::default().into_runtime(),
-            idle_config: codexctl_core::config::IdleConfig::default(),
-            last_user_interaction: std::time::Instant::now(),
-            idle_mode_active: false,
-            idle_tasks_launched: Vec::new(),
-            idle_report: Vec::new(),
-            #[cfg(feature = "coord")]
-            coord_leases: Vec::new(),
-            #[cfg(feature = "coord")]
-            coord_handoffs: Vec::new(),
-            #[cfg(feature = "coord")]
-            coord_lease_sessions: HashSet::new(),
-            #[cfg(feature = "coord")]
-            coord_handoff_sessions: HashSet::new(),
-            #[cfg(feature = "coord")]
-            coord_interrupt_targets: HashSet::new(),
-            #[cfg(feature = "coord")]
-            coord_pending_interrupts: Vec::new(),
-            #[cfg(feature = "coord")]
-            coord_tick: 0,
-            #[cfg(feature = "relay")]
-            show_peers_panel: false,
-            #[cfg(feature = "relay")]
-            relay_peers: Vec::new(),
-            #[cfg(feature = "relay")]
-            remote_sessions: Vec::new(),
             show_skills: false,
-            skills_tab: SkillsTab::Skills,
             skills_selected: 0,
             skills: Vec::new(),
-            shared_skill_keys: std::collections::HashSet::new(),
             skills_status_msg: None,
-            hive_listener_running: false,
-            hive_identity: None,
-            hive_known_peers: Vec::new(),
-            hive_last_invite: None,
-            hive_join_input_mode: false,
-            hive_join_buffer: String::new(),
             show_brain: false,
             brain_tab: BrainTab::Scorecard,
             brain_review_selected: 0,
@@ -665,8 +548,6 @@ impl App {
             brain_note_input_mode: false,
             brain_note_buffer: String::new(),
         };
-        #[cfg(feature = "coord")]
-        app.coord_refresh();
         app.refresh();
         if app.visible_session_count() > 0 {
             app.table_state.select(Some(0));
@@ -1090,14 +971,6 @@ impl App {
 
         self.sessions = sessions;
 
-        // Append remote sessions from relay peers (if relay feature active)
-        #[cfg(feature = "relay")]
-        {
-            for remote in &self.remote_sessions {
-                self.sessions.push(remote.clone());
-            }
-        }
-
         self.normalize_selection();
 
         // Record debug timings
@@ -1158,30 +1031,12 @@ impl App {
         self.demo_tick += 1;
         let mut sessions = crate::demo::generate_sessions(self.demo_tick);
 
-        // When the Skills & Hive view is open during a demo, scripted
-        // navigation: cycle selection on the Skills tab, then flip to Hive
-        // around tick 6, then back to Skills around tick 12.
+        // When the Skills view is open during a demo, cycle the selection.
         if self.show_skills {
-            let phase = self.demo_tick % 14;
-            match phase {
-                1..=5 => {
-                    self.skills_tab = SkillsTab::Skills;
-                    if !self.skills.is_empty() {
-                        self.skills_selected =
-                            ((phase as usize - 1) % self.skills.len()).min(self.skills.len() - 1);
-                    }
-                }
-                6 => {
-                    self.skills_tab = SkillsTab::Hive;
-                    self.skills_status_msg = Some("Hive: 2 peers connected".into());
-                }
-                7..=11 => {
-                    self.skills_tab = SkillsTab::Hive;
-                }
-                _ => {
-                    self.skills_tab = SkillsTab::Skills;
-                    self.skills_status_msg = None;
-                }
+            let phase = self.demo_tick % 5;
+            if !self.skills.is_empty() {
+                self.skills_selected =
+                    (phase as usize % self.skills.len()).min(self.skills.len() - 1);
             }
         }
 
@@ -1225,39 +1080,6 @@ impl App {
                     // Show brain activity via status message
                 }
                 crate::demo::EventKind::Route | crate::demo::EventKind::HealthAlert => {}
-                crate::demo::EventKind::HiveSync | crate::demo::EventKind::HiveInfluence => {}
-            }
-        }
-
-        // Update demo peers panel and remote sessions
-        #[cfg(feature = "relay")]
-        {
-            self.relay_peers = crate::demo::demo_peers(self.demo_tick);
-            // Auto-show peers panel on first hive sync event
-            if self.demo_tick % 32 == 14 && !self.show_peers_panel {
-                self.show_peers_panel = true;
-            }
-            // Demo remote sessions from connected peers
-            self.remote_sessions.clear();
-            if self.demo_tick % 32 >= 14 {
-                let remote_json = serde_json::json!({
-                    "pid": 99001, "project": "backend",
-                    "status": "Processing", "cost_usd": 1.4,
-                    "elapsed_secs": 320, "context_pct": 42.0,
-                });
-                if let Some(s) = CodexSession::from_remote_json("ci-runner-9d1e", &remote_json) {
-                    self.remote_sessions.push(s);
-                }
-            }
-            if self.demo_tick % 32 >= 28 {
-                let remote_json = serde_json::json!({
-                    "pid": 99002, "project": "frontend",
-                    "status": "Needs Input", "cost_usd": 0.32,
-                    "elapsed_secs": 150,
-                });
-                if let Some(s) = CodexSession::from_remote_json("alice-mbp-f3a1", &remote_json) {
-                    self.remote_sessions.push(s);
-                }
             }
         }
 
@@ -1355,25 +1177,12 @@ impl App {
         self.refresh();
         self.run_auto_actions();
 
-        // Check idle mode transition
-        self.check_idle_mode();
-
         // Refresh weekly summary every ~30s (15 ticks at 2s interval)
         self.weekly_summary_tick += 1;
         if self.weekly_summary_tick >= 15 {
             self.weekly_summary_tick = 0;
             self.weekly_summary = codexctl_core::history::weekly_summary();
             self.check_aggregate_budgets();
-        }
-
-        // Refresh coordination state every ~6s (3 ticks at 2s interval)
-        #[cfg(feature = "coord")]
-        {
-            self.coord_tick += 1;
-            if self.coord_tick >= 3 {
-                self.coord_tick = 0;
-                self.coord_refresh();
-            }
         }
     }
 
@@ -1393,60 +1202,6 @@ impl App {
         } else {
             Some(format!("{}m {}s", secs / 60, secs % 60))
         }
-    }
-
-    /// Refresh cached coordination state from the runtime.
-    ///
-    /// The `expire_stale_*` calls remain direct because they're side-effects
-    /// on the SQLite store (bookkeeping), not part of the read-only
-    /// `CoordView` surface. The actual list queries go through the runtime
-    /// trait so the binary-coord coupling stays one layer thick.
-    #[cfg(feature = "coord")]
-    pub fn coord_refresh(&mut self) {
-        // Bookkeeping (expire stale leases + interrupts). Best-effort; the
-        // orchestrator logs failures internally and never propagates them.
-        self.runtime.orchestrator.expire_stale();
-
-        self.coord_leases = self.runtime.coord.active_leases();
-        self.coord_handoffs = self.runtime.coord.pending_handoffs();
-        self.coord_pending_interrupts = self.runtime.coord.pending_interrupts();
-
-        self.coord_lease_sessions = self
-            .coord_leases
-            .iter()
-            .map(|l| l.owner_session_id.clone())
-            .collect();
-        self.coord_handoff_sessions = self
-            .coord_handoffs
-            .iter()
-            .flat_map(|h| {
-                let mut ids = vec![h.from_session_id.clone()];
-                if let Some(ref to) = h.to_session_id {
-                    ids.push(to.clone());
-                }
-                ids
-            })
-            .collect();
-        self.coord_interrupt_targets = self
-            .coord_pending_interrupts
-            .iter()
-            .map(|i| i.target_session_id.clone())
-            .collect();
-    }
-
-    #[cfg(feature = "coord")]
-    pub fn session_has_lease(&self, session_id: &str) -> bool {
-        self.coord_lease_sessions.contains(session_id)
-    }
-
-    #[cfg(feature = "coord")]
-    pub fn session_has_handoff(&self, session_id: &str) -> bool {
-        self.coord_handoff_sessions.contains(session_id)
-    }
-
-    #[cfg(feature = "coord")]
-    pub fn session_has_interrupt(&self, session_id: &str) -> bool {
-        self.coord_interrupt_targets.contains(session_id)
     }
 
     /// Compute budget exhaustion ETA based on current burn rate.
@@ -1551,25 +1306,6 @@ impl App {
                 }
             }
         }
-    }
-
-    fn check_idle_mode(&mut self) {
-        if !self.idle_config.enabled {
-            return;
-        }
-        let idle_threshold = std::time::Duration::from_secs(self.idle_config.after_idle_mins * 60);
-        let was_idle = self.idle_mode_active;
-        self.idle_mode_active = self.last_user_interaction.elapsed() > idle_threshold;
-
-        if self.idle_mode_active && !was_idle {
-            codexctl_core::logger::log("IDLE", "Entering idle mode");
-        }
-    }
-
-    /// Check if currently in idle mode (used by other systems like lifecycle restart).
-    #[allow(dead_code)]
-    pub fn is_idle(&self) -> bool {
-        self.idle_mode_active
     }
 
     fn run_auto_actions(&mut self) {
@@ -1735,28 +1471,16 @@ impl App {
             }
 
             driver.cleanup(&snapshots);
-
-            // Deliver pending mailbox messages to sessions waiting for input.
-            // The orchestrator resolves SessionSnapshot back to live sessions
-            // internally; we project once here.
-            let snapshots: Vec<_> = self.sessions.iter().map(snapshot_from).collect();
-            let deliveries = self.runtime.orchestrator.deliver_mailbox(&snapshots);
-            for (_pid, msg) in deliveries {
-                codexctl_core::logger::log("MAILBOX", &msg);
-                self.status_msg = msg;
-            }
         }
 
-        // Deliver pending typed interrupts from the coordination bus. The
-        // orchestrator handles the SQLite connection internally.
-        #[cfg(feature = "coord")]
-        {
-            let snapshots: Vec<_> = self.sessions.iter().map(snapshot_from).collect();
-            let deliveries = self.runtime.orchestrator.deliver_interrupts(&snapshots);
-            for (_intr_id, msg) in deliveries {
-                codexctl_core::logger::log("INTERRUPT", &msg);
-                self.status_msg = msg;
-            }
+        let snapshots = self.sessions.iter().map(snapshot_from).collect::<Vec<_>>();
+        self.deliver_brain_mailbox(&snapshots);
+    }
+
+    fn deliver_brain_mailbox(&mut self, snapshots: &[codexctl_core::runtime::SessionSnapshot]) {
+        for (_, message) in self.runtime.delivery.deliver_mailbox(snapshots) {
+            codexctl_core::logger::log("MAILBOX", &message);
+            self.status_msg = message;
         }
     }
 
@@ -1866,19 +1590,6 @@ impl App {
 
     /// Handle a key event. Returns false if the application should quit.
     pub fn handle_key(&mut self, key: KeyEvent) -> bool {
-        self.last_user_interaction = std::time::Instant::now();
-
-        // Transition out of idle mode on any key press
-        if self.idle_mode_active {
-            self.idle_mode_active = false;
-            if !self.idle_report.is_empty() {
-                let report = self.idle_report.join("; ");
-                self.status_msg = format!("Idle report: {report}");
-                self.idle_report.clear();
-            }
-            self.idle_tasks_launched.clear();
-        }
-
         // Help overlay: any key dismisses
         if self.show_help {
             self.show_help = false;
@@ -1902,13 +1613,7 @@ impl App {
             return true;
         }
 
-        // Role-bind mode: capture role name for the selected session (#307)
-        if self.role_bind_mode {
-            self.handle_role_bind_key(key);
-            return true;
-        }
-
-        // Skills overlay: dedicated keymap (j/k navigate, s share, h serve, r rescan, Esc/K close)
+        // Skills overlay: dedicated keymap (j/k navigate, r rescan, Esc/K close)
         if self.show_skills {
             self.handle_skills_key(key);
             return true;
@@ -2014,27 +1719,17 @@ impl App {
 
     pub fn open_skills_overlay(&mut self) {
         self.refresh_skills();
-        self.refresh_hive_view();
         self.skills_selected = 0;
         self.skills_status_msg = None;
-        self.hive_join_input_mode = false;
-        self.hive_join_buffer.clear();
         self.show_skills = true;
     }
 
     pub fn refresh_skills(&mut self) {
         let cwd = std::env::current_dir().ok();
         self.skills = codexctl_core::skills::discover(cwd.as_deref());
-        self.shared_skill_keys = self.runtime.hive.shared_skill_keys();
         if self.skills_selected >= self.skills.len() {
             self.skills_selected = self.skills.len().saturating_sub(1);
         }
-    }
-
-    pub fn refresh_hive_view(&mut self) {
-        let snapshot = self.runtime.hive.hive_view_snapshot();
-        self.hive_identity = snapshot.identity;
-        self.hive_known_peers = snapshot.peers;
     }
 
     // ── Brain review overlay ──────────────────────────────────────────────
@@ -2178,29 +1873,15 @@ impl App {
     }
 
     fn handle_skills_key(&mut self, key: KeyEvent) {
-        if self.hive_join_input_mode {
-            self.handle_hive_join_input(key);
-            return;
-        }
-
         match (key.code, key.modifiers) {
             (KeyCode::Esc, _) | (KeyCode::Char('K'), _) | (KeyCode::Char('q'), _) => {
                 self.show_skills = false;
                 self.skills_status_msg = None;
                 return;
             }
-            (KeyCode::Tab, _) | (KeyCode::BackTab, _) => {
-                self.skills_tab = self.skills_tab.toggle();
-                self.skills_status_msg = None;
-                return;
-            }
             _ => {}
         }
-
-        match self.skills_tab {
-            SkillsTab::Skills => self.handle_skills_tab_key(key),
-            SkillsTab::Hive => self.handle_hive_tab_key(key),
-        }
+        self.handle_skills_tab_key(key);
     }
 
     fn handle_skills_tab_key(&mut self, key: KeyEvent) {
@@ -2217,137 +1898,7 @@ impl App {
                 self.refresh_skills();
                 self.skills_status_msg = Some(format!("Rescanned: {} skills", self.skills.len()));
             }
-            (KeyCode::Char('s'), _) => {
-                self.share_selected_skill();
-            }
             _ => {}
-        }
-    }
-
-    fn handle_hive_tab_key(&mut self, key: KeyEvent) {
-        match (key.code, key.modifiers) {
-            (KeyCode::Char('h'), _) => {
-                self.start_hive_listener();
-                self.refresh_hive_view();
-            }
-            (KeyCode::Char('i'), _) => {
-                self.generate_hive_invite();
-            }
-            (KeyCode::Char('J'), _) => {
-                self.hive_join_input_mode = true;
-                self.hive_join_buffer.clear();
-                self.skills_status_msg =
-                    Some("Paste invite (relay code, link, or word phrase); Enter to join".into());
-            }
-            (KeyCode::Char('r'), _) => {
-                self.refresh_hive_view();
-                self.skills_status_msg =
-                    Some(format!("Known peers: {}", self.hive_known_peers.len()));
-            }
-            _ => {}
-        }
-    }
-
-    fn handle_hive_join_input(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Enter => {
-                let code = self.hive_join_buffer.trim().to_string();
-                self.hive_join_input_mode = false;
-                if code.is_empty() {
-                    self.skills_status_msg = Some("Join cancelled (empty)".into());
-                    return;
-                }
-                match spawn_relay_join(&code) {
-                    Ok(()) => {
-                        self.skills_status_msg = Some(format!(
-                            "Join started (codexctl relay join {} detached)",
-                            short_id(&code)
-                        ));
-                    }
-                    Err(e) => {
-                        self.skills_status_msg = Some(format!("Join failed: {e}"));
-                    }
-                }
-                self.hive_join_buffer.clear();
-            }
-            KeyCode::Esc => {
-                self.hive_join_input_mode = false;
-                self.hive_join_buffer.clear();
-                self.skills_status_msg = Some("Join cancelled".into());
-            }
-            KeyCode::Backspace => {
-                self.hive_join_buffer.pop();
-            }
-            KeyCode::Char(c) if self.hive_join_buffer.len() < 256 => {
-                self.hive_join_buffer.push(c);
-            }
-            _ => {}
-        }
-    }
-
-    fn generate_hive_invite(&mut self) {
-        match generate_invite_via_cli() {
-            Ok(invite) => {
-                self.skills_status_msg = Some(format!("Invite: {}", invite.relay_code));
-                self.hive_last_invite = Some(invite);
-            }
-            Err(e) => {
-                self.skills_status_msg = Some(format!("Invite failed: {e}"));
-            }
-        }
-    }
-
-    fn share_selected_skill(&mut self) {
-        let Some(skill) = self.skills.get(self.skills_selected).cloned() else {
-            self.skills_status_msg = Some("No skill selected".into());
-            return;
-        };
-        if !cfg!(feature = "hive") {
-            self.skills_status_msg = Some("hive feature disabled in this build".into());
-            return;
-        }
-        if !skill.within_share_limit() {
-            self.skills_status_msg = Some("Skill exceeds 32kb share limit".into());
-            return;
-        }
-        if self.shared_skill_keys.contains(&skill.semantic_key()) {
-            self.skills_status_msg = Some("Already shared".into());
-            return;
-        }
-        match self.runtime.hive.share_skill(&skill) {
-            Ok(unit_id) => {
-                self.shared_skill_keys.insert(skill.semantic_key());
-                self.skills_status_msg = Some(format!(
-                    "Shared '{}' → unit {}",
-                    skill.name,
-                    short_id(&unit_id)
-                ));
-            }
-            Err(e) => {
-                self.skills_status_msg = Some(format!("Share failed: {e}"));
-            }
-        }
-    }
-
-    fn start_hive_listener(&mut self) {
-        if !cfg!(feature = "relay") {
-            self.skills_status_msg =
-                Some("relay feature not built — rebuild with --features relay,hive".into());
-            return;
-        }
-        if self.hive_listener_running {
-            self.skills_status_msg = Some("Hive listener already running".into());
-            return;
-        }
-        match spawn_relay_serve() {
-            Ok(()) => {
-                self.hive_listener_running = true;
-                self.skills_status_msg =
-                    Some("Hive listener started (codexctl relay serve detached)".into());
-            }
-            Err(e) => {
-                self.skills_status_msg = Some(format!("Start failed: {e}"));
-            }
         }
     }
 
@@ -2368,14 +1919,6 @@ impl App {
                 self.cancel_pending_kill();
                 self.cancel_pending_auto_approve();
                 self.previous();
-            }
-            (KeyCode::Char('r'), KeyModifiers::CONTROL) => {
-                // Bus role bind (#307). Ctrl+R because plain `r` is refresh.
-                // Match before the unconditional `r` arm below, otherwise
-                // the wildcard modifier swallows the Control modifier.
-                self.cancel_pending_kill();
-                self.cancel_pending_auto_approve();
-                self.enter_role_bind_mode();
             }
             (KeyCode::Char('r'), _) => {
                 self.cancel_pending_kill();
@@ -2489,17 +2032,6 @@ impl App {
                 self.cancel_pending_kill();
                 self.cancel_pending_auto_approve();
                 self.handle_switch_terminal();
-            }
-            #[cfg(feature = "relay")]
-            (KeyCode::Char('p'), KeyModifiers::NONE) => {
-                self.cancel_pending_kill();
-                self.cancel_pending_auto_approve();
-                self.show_peers_panel = !self.show_peers_panel;
-                self.status_msg = if self.show_peers_panel {
-                    "Peers panel enabled".into()
-                } else {
-                    "Peers panel disabled".into()
-                };
             }
             _ => {
                 self.cancel_pending_kill();
@@ -2934,78 +2466,6 @@ impl App {
         }
     }
 
-    /// Open the role-bind prompt for the selected session (#307). Captures
-    /// the session's pid and cwd at entry time so a refresh tick or row
-    /// move during typing can't change the target.
-    fn enter_role_bind_mode(&mut self) {
-        let Some(session) = self.selected_session() else {
-            self.status_msg = "No session selected".into();
-            return;
-        };
-        if session.is_remote() {
-            self.status_msg = "Remote session \u{2014} bind locally instead".into();
-            return;
-        }
-        let pid = session.pid;
-        let cwd = session.cwd.clone();
-        let name = session.display_name().to_string();
-        self.role_bind_mode = true;
-        self.role_bind_buffer.clear();
-        self.role_bind_target_pid = Some(pid);
-        self.role_bind_target_cwd = Some(cwd);
-        self.status_msg =
-            format!("Bind role for {name} (pid={pid}, Enter to bind, Esc to cancel): ");
-    }
-
-    fn handle_role_bind_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Enter => {
-                let role = self.role_bind_buffer.trim().to_string();
-                let pid = self.role_bind_target_pid;
-                let cwd = self.role_bind_target_cwd.clone();
-                self.role_bind_mode = false;
-                self.role_bind_buffer.clear();
-                self.role_bind_target_pid = None;
-                self.role_bind_target_cwd = None;
-                if role.is_empty() {
-                    self.status_msg = "Role name required".into();
-                    return;
-                }
-                let (Some(pid), Some(cwd)) = (pid, cwd) else {
-                    self.status_msg = "Lost bind target — re-select the session".into();
-                    return;
-                };
-                match self.runtime.actions.bind_bus_role(&role, &cwd, pid) {
-                    Ok(()) => {
-                        self.status_msg = format!("Bound role {role} -> pid={pid} cwd={cwd}");
-                    }
-                    Err(e) => {
-                        self.status_msg = format!("Bind failed: {e}");
-                    }
-                }
-            }
-            KeyCode::Esc => {
-                self.role_bind_mode = false;
-                self.role_bind_buffer.clear();
-                self.role_bind_target_pid = None;
-                self.role_bind_target_cwd = None;
-                self.status_msg = "Role bind cancelled".into();
-            }
-            KeyCode::Backspace => {
-                self.role_bind_buffer.pop();
-            }
-            // Role names are short, alpha-numeric with - and _. Cap at 64
-            // so a runaway paste can't take the prompt hostage.
-            KeyCode::Char(c)
-                if self.role_bind_buffer.len() < 64
-                    && (c.is_ascii_alphanumeric() || c == '-' || c == '_') =>
-            {
-                self.role_bind_buffer.push(c);
-            }
-            _ => {}
-        }
-    }
-
     fn handle_switch_terminal(&mut self) {
         if let Some(session) = self.selected_session() {
             if session.is_remote() {
@@ -3077,106 +2537,6 @@ impl App {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
         result
-    }
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Hive/relay shell-out helpers — kept at module scope so the App methods stay
-// short. The read-side helpers (skill-key collection, hive snapshot) and the
-// write-side helper (share skill) moved into `runtime::hive::LiveHiveActions`
-// so the future TUI crate (#275) can hold them through the trait surface.
-// ────────────────────────────────────────────────────────────────────────────
-
-/// Detach a `codexctl relay serve` child so the TUI keeps running.
-#[cfg(feature = "relay")]
-fn spawn_relay_serve() -> Result<(), String> {
-    use std::process::{Command, Stdio};
-    Command::new(std::env::current_exe().unwrap_or_else(|_| "codexctl".into()))
-        .args(["relay", "serve"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
-}
-
-#[cfg(not(feature = "relay"))]
-fn spawn_relay_serve() -> Result<(), String> {
-    Err("relay feature not built".into())
-}
-
-/// Detach a `codexctl relay join <code>` child so the TUI keeps running.
-#[cfg(feature = "relay")]
-fn spawn_relay_join(code: &str) -> Result<(), String> {
-    use std::process::{Command, Stdio};
-    Command::new(std::env::current_exe().unwrap_or_else(|_| "codexctl".into()))
-        .args(["relay", "join", code])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
-}
-
-#[cfg(not(feature = "relay"))]
-fn spawn_relay_join(_code: &str) -> Result<(), String> {
-    Err("relay feature not built".into())
-}
-
-/// Shell out to `codexctl relay invite --json` and parse the result. We use
-/// the existing CLI path rather than re-implementing because invite generation
-/// has multiple components (crypto, LAN-IP detection, encoding) that already
-/// live there.
-#[cfg(feature = "relay")]
-fn generate_invite_via_cli() -> Result<HiveInvite, String> {
-    use std::process::Command;
-    let bin = std::env::current_exe().map_err(|e| e.to_string())?;
-    let output = Command::new(bin)
-        .args(["--json", "relay", "invite", "--words"])
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let parsed: serde_json::Value = serde_json::from_str(&stdout).map_err(|e| e.to_string())?;
-    let relay_code = parsed
-        .get("relay_code")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let invite_link = parsed
-        .get("invite_link")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let word_phrase = parsed
-        .get("word_phrase")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    if relay_code.is_empty() {
-        return Err("invite payload missing relay_code".into());
-    }
-    Ok(HiveInvite {
-        relay_code,
-        invite_link,
-        word_phrase,
-    })
-}
-
-#[cfg(not(feature = "relay"))]
-fn generate_invite_via_cli() -> Result<HiveInvite, String> {
-    Err("relay feature not built".into())
-}
-
-fn short_id(id: &str) -> String {
-    if id.len() <= 12 {
-        id.to_string()
-    } else {
-        format!("{}…", &id[..11])
     }
 }
 
@@ -3261,6 +2621,21 @@ mod tests {
         app.conflict_pids.insert(13);
         app.normalize_selection();
         app
+    }
+
+    #[test]
+    fn brain_delivery_reaches_tui_status_path() {
+        let mut app = make_test_app();
+        app.runtime = codexctl_core::runtime::MockRuntime {
+            mailbox_deliveries: vec![(13, "Delivered 1 message to high-context".into())],
+            ..Default::default()
+        }
+        .into_runtime();
+        let snapshots = app.sessions.iter().map(snapshot_from).collect::<Vec<_>>();
+
+        app.deliver_brain_mailbox(&snapshots);
+
+        assert_eq!(app.status_msg, "Delivered 1 message to high-context");
     }
 
     #[test]

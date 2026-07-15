@@ -1151,7 +1151,7 @@ fn run_tui<W: io::Write>(
 ) -> io::Result<()> {
     let mut app = App::new();
     // Replace the App's default in-memory MockRuntime with a real one wired
-    // to the live brain / coord / bus / discovery subsystems. App::new
+    // to the live brain and discovery subsystems. App::new
     // intentionally uses a mock so its many test call sites stay parameter-
     // free; the production wiring happens here, in main.
     app.runtime = runtime::build_runtime();
@@ -1171,7 +1171,6 @@ fn run_tui<W: io::Write>(
     app.health_thresholds = cfg.health.clone();
     app.file_conflicts_enabled = cfg.file_conflicts;
     app.auto_deny_file_conflicts = cfg.auto_deny_file_conflicts;
-    app.idle_config = cfg.idle.clone();
     app.brain_config = cfg.brain.clone();
     if let Some(ref brain_cfg) = cfg.brain {
         if brain_cfg.enabled {
@@ -1207,22 +1206,10 @@ fn run_tui<W: io::Write>(
         // Re-refresh to replace real sessions discovered during App::new()
         app.refresh();
 
-        // Optional: auto-open the Skills & Hive view for recording demo GIFs.
+        // Optional: auto-open the Skills view for recording demo GIFs.
         // `CODEXCTL_DEMO_SKILLS=1 codexctl --demo --record demo-skills.cast`.
         if std::env::var("CODEXCTL_DEMO_SKILLS").as_deref() == Ok("1") {
             app.open_skills_overlay();
-            // Seed a fake invite so the Hive tab has something to show when
-            // we flip to it (don't actually shell out to relay invite).
-            app.hive_last_invite = Some(app::HiveInvite {
-                relay_code: "MUR7-K2F9-XQ3T".into(),
-                word_phrase: "swift-otter-storm-glass-meadow".into(),
-                invite_link: "cctl://share?id=demo-mbp-a1b2&addr=192.168.1.42:9847&psk=...".into(),
-            });
-            app.hive_identity = Some("demo-mbp-a1b2".into());
-            app.hive_known_peers = vec![
-                ("alice-mbp-f3a1".into(), Some("192.168.1.17:9847".into())),
-                ("ci-runner-9d1e".into(), Some("10.4.0.23:9847".into())),
-            ];
         }
     }
 
@@ -1248,7 +1235,7 @@ fn run_tui<W: io::Write>(
         terminal.draw(|frame| {
             let area = frame.area();
 
-            // Full-screen mode: Skills & Hive takes over the entire frame.
+            // Full-screen mode: Skills takes over the entire frame.
             if app.show_skills {
                 ui::skills::render_skills_screen(frame, area, &app);
                 return;
@@ -1260,27 +1247,7 @@ fn run_tui<W: io::Write>(
                 return;
             }
 
-            #[cfg(feature = "relay")]
-            let main_area = if app.show_peers_panel {
-                let chunks = ratatui::layout::Layout::default()
-                    .direction(ratatui::layout::Direction::Vertical)
-                    .constraints([
-                        ratatui::layout::Constraint::Min(5),
-                        ratatui::layout::Constraint::Length(
-                            (app.relay_peers.len() as u16 + 2).min(8),
-                        ),
-                    ])
-                    .split(area);
-                ui::peers::render_peers_panel(frame, chunks[1], &app.relay_peers, &app.theme);
-                chunks[0]
-            } else {
-                area
-            };
-
-            #[cfg(not(feature = "relay"))]
-            let main_area = area;
-
-            ui::table::render(frame, main_area, &app);
+            ui::table::render(frame, area, &app);
         })?;
 
         let timeout = tick_rate

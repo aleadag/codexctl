@@ -5,16 +5,13 @@
 //!
 //! * `app` — the main `App` state struct and refresh / input-handling
 //!   methods (3k+ lines)
-//! * `ui` — render modules (table, detail, help, status_bar, peers,
-//!   skills, mod). The binary keeps `brain_screen` because it depends
+//! * `ui` — render modules (table, detail, help, status_bar, skills,
+//!   mod). The binary keeps `brain_screen` because it depends
 //!   on `brain::metrics` and `brain::risk` (binary-only modules).
 //! * `recorder`, `session_recorder`, `demo` — peripherals
 //!
 //! Depends on `codexctl-core` for foundational types and the runtime
-//! trait contract; does not depend on the binary crate. Feature flags
-//! (`coord`, `relay`, `hive`) are propagated from the binary so the
-//! same `#[cfg(feature = "...")]` gates resolve consistently across
-//! both crates.
+//! trait contract and does not depend on the binary crate.
 
 #![allow(unknown_lints)]
 #![allow(

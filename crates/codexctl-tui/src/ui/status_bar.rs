@@ -55,33 +55,6 @@ pub fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled("_", Style::default().fg(t.text_muted)),
         ]));
         frame.render_widget(msg, area);
-    } else if app.role_bind_mode {
-        // #307 role-bind prompt — same shape as the input prompt but with a
-        // distinct prefix so the operator sees they're naming a role, not
-        // sending text to the session.
-        let msg = Paragraph::new(Line::from(vec![
-            Span::styled(
-                " role> ",
-                Style::default()
-                    .fg(t.input_accent)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(&*app.role_bind_buffer, Style::default().fg(t.text_primary)),
-            Span::styled("_", Style::default().fg(t.text_muted)),
-        ]));
-        frame.render_widget(msg, area);
-    } else if app.idle_mode_active {
-        let idle_mins = app.last_user_interaction.elapsed().as_secs() / 60;
-        let tasks = if app.idle_tasks_launched.is_empty() {
-            "no tasks running".to_string()
-        } else {
-            format!("{} task(s) running", app.idle_tasks_launched.len())
-        };
-        let msg = Paragraph::new(Span::styled(
-            format!(" Idle ({idle_mins}m) | {tasks}"),
-            Style::default().fg(t.text_muted),
-        ));
-        frame.render_widget(msg, area);
     } else if !app.status_msg.is_empty() {
         let color = if app.status_msg.starts_with("Error") {
             t.error
