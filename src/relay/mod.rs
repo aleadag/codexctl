@@ -18,6 +18,29 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone)]
+pub struct RelayConfig {
+    pub listen_port: u16,
+    pub listen_addr: String,
+    pub max_peers: u8,
+    pub heartbeat_interval_secs: u64,
+    pub http_port: Option<u16>,
+    pub auth_token: Option<String>,
+}
+
+impl Default for RelayConfig {
+    fn default() -> Self {
+        Self {
+            listen_port: 9847,
+            listen_addr: "0.0.0.0".into(),
+            max_peers: 8,
+            heartbeat_interval_secs: 30,
+            http_port: None,
+            auth_token: None,
+        }
+    }
+}
+
 /// Unique identity for a codexctl instance in the relay network.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PeerId(pub String);

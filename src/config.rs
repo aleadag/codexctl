@@ -1,7 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
 
-use crate::brain::agents::AgentConfig;
 use crate::models::{ModelOverride, ModelProfile};
 use crate::rules::{AutoRule, RuleAction};
 
@@ -27,11 +26,7 @@ pub struct Config {
     pub file_conflicts: bool, // Detect file-level conflicts across sessions
     pub auto_deny_file_conflicts: bool, // Auto-deny writes to conflicting files
     pub brain: Option<BrainConfig>,
-    pub relay: Option<RelayConfig>,
-    pub hive: Option<HiveConfig>,
     pub lifecycle: LifecycleConfig,
-    pub idle: IdleConfig,
-    pub agents: Vec<AgentConfig>,
 }
 
 /// Configurable thresholds for session health checks.
@@ -71,8 +66,6 @@ pub struct LifecycleConfig {
     pub auto_restart: bool,
     pub restart_threshold_pct: f64,
     pub restart_only_when_idle: bool,
-    /// Retention period for coordination event logs (days). Used by auto-prune.
-    pub retention_days: u64,
 }
 
 impl Default for LifecycleConfig {
@@ -81,97 +74,6 @@ impl Default for LifecycleConfig {
             auto_restart: false,
             restart_threshold_pct: 90.0,
             restart_only_when_idle: true,
-            retention_days: 30,
-        }
-    }
-}
-
-/// `IdleConfig` and `IdleTask` live in `codexctl_core::config` so the future
-/// TUI crate (#275) can hold them without depending on the binary.
-#[allow(unused_imports)]
-pub use codexctl_core::config::{IdleConfig, IdleTask};
-
-/// Configuration for relay transport (cross-machine collaboration).
-#[derive(Debug, Clone)]
-pub struct RelayConfig {
-    pub enabled: bool,
-    pub listen_port: u16,
-    pub listen_addr: String,
-    pub max_peers: u8,
-    pub heartbeat_interval_secs: u64,
-    pub reconnect_max_secs: u64,
-    pub auto_connect: Vec<String>,
-    pub http_port: Option<u16>,
-    pub auth_token: Option<String>,
-}
-
-impl Default for RelayConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            listen_port: 9847,
-            listen_addr: "0.0.0.0".into(),
-            max_peers: 8,
-            heartbeat_interval_secs: 30,
-            reconnect_max_secs: 60,
-            auto_connect: Vec::new(),
-            http_port: None,
-            auth_token: None,
-        }
-    }
-}
-
-/// Configuration for hive mind knowledge sharing.
-#[derive(Debug, Clone)]
-pub struct HiveConfig {
-    pub enabled: bool,
-    pub default_trust: f64,
-    pub auto_trust_drift: bool,
-    pub max_propagation: u32,
-    pub export_min_evidence: u32,
-    pub export_min_tool_decisions: u32,
-    pub knowledge_ttl_days: u32,
-    pub inject_unverified: bool,
-    /// Which knowledge categories to share. Empty = share all shareable categories.
-    /// Valid values: "best_practice", "technique", "workflow"
-    pub share_categories: Vec<String>,
-    /// Tools to exclude from sharing (e.g., ["Write"] to keep file-write patterns private).
-    pub exclude_tools: Vec<String>,
-    /// Command patterns to exclude from sharing (substring match).
-    pub exclude_commands: Vec<String>,
-    /// Content types to exclude from sharing (e.g., "skill", "command", "hook").
-    pub exclude_content_types: Vec<String>,
-    /// Maximum knowledge units to keep in the store. Oldest/lowest-confidence evicted.
-    pub max_units: usize,
-    /// Maximum knowledge units to inject into the brain prompt per evaluation.
-    pub max_prompt_units: usize,
-    /// Days after which a peer's knowledge is pruned if the peer hasn't been seen.
-    pub stale_peer_days: u32,
-    /// Outbound exposure mode: "auto" gossips everything that passes filters;
-    /// "manual" keeps new units hidden until the user runs `codexctl hive expose`.
-    #[cfg_attr(not(feature = "hive"), allow(dead_code))]
-    pub share_mode: String,
-}
-
-impl Default for HiveConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            default_trust: 0.5,
-            auto_trust_drift: true,
-            max_propagation: 5,
-            export_min_evidence: 5,
-            export_min_tool_decisions: 10,
-            knowledge_ttl_days: 30,
-            inject_unverified: true,
-            share_categories: Vec::new(),
-            exclude_tools: Vec::new(),
-            exclude_commands: Vec::new(),
-            exclude_content_types: Vec::new(),
-            max_units: 500,
-            max_prompt_units: 20,
-            stale_peer_days: 90,
-            share_mode: "auto".into(),
         }
     }
 }
@@ -197,11 +99,7 @@ impl Default for Config {
             file_conflicts: true,
             auto_deny_file_conflicts: false,
             brain: None,
-            relay: None,
-            hive: None,
             lifecycle: LifecycleConfig::default(),
-            idle: IdleConfig::default(),
-            agents: Vec::new(),
         }
     }
 }
@@ -227,44 +125,7 @@ struct RawConfig {
     file_conflicts: Option<bool>,
     auto_deny_file_conflicts: Option<bool>,
     brain: Option<BrainConfig>,
-    relay: Option<RawRelayConfig>,
-    hive: Option<RawHiveConfig>,
     lifecycle: Option<RawLifecycleConfig>,
-    idle: Option<RawIdleConfig>,
-    agents: Vec<AgentConfig>,
-}
-
-#[derive(Debug, Default)]
-struct RawRelayConfig {
-    enabled: Option<bool>,
-    listen_port: Option<u16>,
-    listen_addr: Option<String>,
-    max_peers: Option<u8>,
-    heartbeat_interval_secs: Option<u64>,
-    reconnect_max_secs: Option<u64>,
-    auto_connect: Option<Vec<String>>,
-    http_port: Option<u16>,
-    auth_token: Option<String>,
-}
-
-#[derive(Debug, Default)]
-struct RawHiveConfig {
-    enabled: Option<bool>,
-    default_trust: Option<f64>,
-    auto_trust_drift: Option<bool>,
-    max_propagation: Option<u32>,
-    export_min_evidence: Option<u32>,
-    export_min_tool_decisions: Option<u32>,
-    knowledge_ttl_days: Option<u32>,
-    inject_unverified: Option<bool>,
-    share_categories: Vec<String>,
-    exclude_tools: Vec<String>,
-    exclude_commands: Vec<String>,
-    exclude_content_types: Vec<String>,
-    max_units: Option<usize>,
-    max_prompt_units: Option<usize>,
-    stale_peer_days: Option<u32>,
-    share_mode: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -272,15 +133,6 @@ struct RawLifecycleConfig {
     auto_restart: Option<bool>,
     restart_threshold_pct: Option<f64>,
     restart_only_when_idle: Option<bool>,
-    retention_days: Option<u64>,
-}
-
-#[derive(Debug, Default)]
-struct RawIdleConfig {
-    enabled: Option<bool>,
-    after_idle_mins: Option<u64>,
-    max_concurrent: Option<usize>,
-    max_cost_usd: Option<f64>,
 }
 
 impl Config {
@@ -405,90 +257,6 @@ impl Config {
         if let Some(brain) = raw.brain {
             self.brain = Some(brain);
         }
-        if let Some(raw_relay) = raw.relay {
-            let relay = self.relay.get_or_insert_with(RelayConfig::default);
-            if let Some(v) = raw_relay.enabled {
-                relay.enabled = v;
-            }
-            if let Some(v) = raw_relay.listen_port {
-                relay.listen_port = v;
-            }
-            if let Some(v) = raw_relay.listen_addr {
-                relay.listen_addr = v;
-            }
-            if let Some(v) = raw_relay.max_peers {
-                relay.max_peers = v;
-            }
-            if let Some(v) = raw_relay.heartbeat_interval_secs {
-                relay.heartbeat_interval_secs = v;
-            }
-            if let Some(v) = raw_relay.reconnect_max_secs {
-                relay.reconnect_max_secs = v;
-            }
-            if let Some(v) = raw_relay.auto_connect {
-                relay.auto_connect = v;
-            }
-            if let Some(v) = raw_relay.http_port {
-                relay.http_port = Some(v);
-            }
-            if let Some(v) = raw_relay.auth_token {
-                relay.auth_token = Some(v);
-            }
-        }
-        if let Some(raw_hive) = raw.hive {
-            let hive = self.hive.get_or_insert_with(HiveConfig::default);
-            if let Some(v) = raw_hive.enabled {
-                hive.enabled = v;
-            }
-            if let Some(v) = raw_hive.default_trust {
-                hive.default_trust = v.clamp(0.0, 1.0);
-            }
-            if let Some(v) = raw_hive.auto_trust_drift {
-                hive.auto_trust_drift = v;
-            }
-            if let Some(v) = raw_hive.max_propagation {
-                hive.max_propagation = v;
-            }
-            if let Some(v) = raw_hive.export_min_evidence {
-                hive.export_min_evidence = v;
-            }
-            if let Some(v) = raw_hive.export_min_tool_decisions {
-                hive.export_min_tool_decisions = v;
-            }
-            if let Some(v) = raw_hive.knowledge_ttl_days {
-                hive.knowledge_ttl_days = v;
-            }
-            if let Some(v) = raw_hive.inject_unverified {
-                hive.inject_unverified = v;
-            }
-            if !raw_hive.share_categories.is_empty() {
-                hive.share_categories = raw_hive.share_categories;
-            }
-            if !raw_hive.exclude_tools.is_empty() {
-                hive.exclude_tools = raw_hive.exclude_tools;
-            }
-            if !raw_hive.exclude_commands.is_empty() {
-                hive.exclude_commands = raw_hive.exclude_commands;
-            }
-            if !raw_hive.exclude_content_types.is_empty() {
-                hive.exclude_content_types = raw_hive.exclude_content_types;
-            }
-            if let Some(v) = raw_hive.max_units {
-                hive.max_units = v;
-            }
-            if let Some(v) = raw_hive.max_prompt_units {
-                hive.max_prompt_units = v;
-            }
-            if let Some(v) = raw_hive.stale_peer_days {
-                hive.stale_peer_days = v;
-            }
-            #[cfg(feature = "hive")]
-            if let Some(v) = raw_hive.share_mode {
-                if crate::hive::exposure::ShareMode::parse(&v).is_some() {
-                    hive.share_mode = v.trim().to_lowercase();
-                }
-            }
-        }
         if let Some(lc) = raw.lifecycle {
             if let Some(v) = lc.auto_restart {
                 self.lifecycle.auto_restart = v;
@@ -498,30 +266,6 @@ impl Config {
             }
             if let Some(v) = lc.restart_only_when_idle {
                 self.lifecycle.restart_only_when_idle = v;
-            }
-            if let Some(v) = lc.retention_days {
-                self.lifecycle.retention_days = v;
-            }
-        }
-        if let Some(idle) = raw.idle {
-            if let Some(v) = idle.enabled {
-                self.idle.enabled = v;
-            }
-            if let Some(v) = idle.after_idle_mins {
-                self.idle.after_idle_mins = v;
-            }
-            if let Some(v) = idle.max_concurrent {
-                self.idle.max_concurrent = v;
-            }
-            if let Some(v) = idle.max_cost_usd {
-                self.idle.max_cost_usd = v;
-            }
-        }
-        for agent in raw.agents {
-            if let Some(pos) = self.agents.iter().position(|a| a.name == agent.name) {
-                self.agents[pos] = agent;
-            } else {
-                self.agents.push(agent);
             }
         }
     }
@@ -632,7 +376,6 @@ impl Config {
             "  restart_idle_only: {}",
             self.lifecycle.restart_only_when_idle
         );
-        println!("  retention_days:   {}", self.lifecycle.retention_days);
         if self.model_overrides.is_empty() {
             println!("  model_overrides: none");
         } else {
@@ -801,7 +544,6 @@ impl Config {
 # auto_restart = false
 # restart_threshold_pct = 90.0
 # restart_only_when_idle = true
-# retention_days = 30           # Coordination event log retention (days)
 
 # ── Brain (Local LLM) ──────────────────────────────────────────────
 
@@ -817,36 +559,6 @@ impl Config {
 # orchestrate = false
 # orchestrate_interval = 30
 # test_runners = ["cargo test", "npm test", "pytest", "go test", "bun test"]
-
-# ── Relay / Hive (feature: relay) ─────────────────────────────────────
-#
-# [relay]
-# enabled = false
-# listen_addr = "0.0.0.0"
-# listen_port = 9847
-# max_peers = 8
-# heartbeat_interval_secs = 30
-# reconnect_max_secs = 60
-# auto_connect = []
-#
-# [hive]
-# enabled = false
-# default_trust = 0.5
-# auto_trust_drift = true
-# max_propagation = 5
-# export_min_evidence = 5
-# export_min_tool_decisions = 10
-# knowledge_ttl_days = 30
-# inject_unverified = true
-# share_mode = "auto"           # "auto" = expose by default, "manual" = pre-flight curation
-
-# ── External Agents ─────────────────────────────────────────────────
-#
-# [agents.codex]
-# type = "codex"
-# command = "codex --quiet"
-# capabilities = ["code-review", "refactoring"]
-# cwd = "/path/to/project"
 "#
     }
 }
@@ -1019,17 +731,6 @@ fn parse_config_file(path: &PathBuf) -> Option<RawConfig> {
                     "auto_restart" => lc.auto_restart = parse_bool(value),
                     "restart_threshold_pct" => lc.restart_threshold_pct = value.parse().ok(),
                     "restart_only_when_idle" => lc.restart_only_when_idle = parse_bool(value),
-                    "retention_days" => lc.retention_days = value.parse().ok(),
-                    _ => {}
-                }
-            }
-            ("idle", key) => {
-                let idle = raw.idle.get_or_insert_with(RawIdleConfig::default);
-                match key {
-                    "enabled" => idle.enabled = parse_bool(value),
-                    "after_idle_mins" => idle.after_idle_mins = value.parse().ok(),
-                    "max_concurrent" => idle.max_concurrent = value.parse().ok(),
-                    "max_cost_usd" => idle.max_cost_usd = value.parse().ok(),
                     _ => {}
                 }
             }
@@ -1084,104 +785,6 @@ fn parse_config_file(path: &PathBuf) -> Option<RawConfig> {
                             brain.test_runners = parsed;
                         }
                     }
-                    _ => {}
-                }
-            }
-            ("relay", _) => {
-                let relay = raw.relay.get_or_insert_with(RawRelayConfig::default);
-                match key {
-                    "enabled" => {
-                        relay.enabled = parse_bool(value);
-                    }
-                    "listen_port" | "port" => {
-                        relay.listen_port = value.parse().ok();
-                    }
-                    "listen_addr" | "addr" => relay.listen_addr = Some(unquote(value)),
-                    "max_peers" => {
-                        relay.max_peers = value.parse().ok();
-                    }
-                    "heartbeat_interval" | "heartbeat_interval_secs" => {
-                        relay.heartbeat_interval_secs = value.parse().ok();
-                    }
-                    "reconnect_max" | "reconnect_max_secs" => {
-                        relay.reconnect_max_secs = value.parse().ok();
-                    }
-                    "auto_connect" => {
-                        relay.auto_connect = Some(parse_string_array(value));
-                    }
-                    "http_port" => {
-                        relay.http_port = value.parse().ok();
-                    }
-                    "auth_token" => {
-                        relay.auth_token = Some(unquote(value));
-                    }
-                    _ => {}
-                }
-            }
-            ("hive", _) => {
-                let hive = raw.hive.get_or_insert_with(RawHiveConfig::default);
-                match key {
-                    "enabled" => {
-                        hive.enabled = parse_bool(value);
-                    }
-                    "default_trust" => {
-                        hive.default_trust = value.parse().ok();
-                    }
-                    "auto_trust_drift" => {
-                        hive.auto_trust_drift = parse_bool(value);
-                    }
-                    "max_propagation" => {
-                        hive.max_propagation = value.parse().ok();
-                    }
-                    "export_min_evidence" => {
-                        hive.export_min_evidence = value.parse().ok();
-                    }
-                    "export_min_tool_decisions" => {
-                        hive.export_min_tool_decisions = value.parse().ok();
-                    }
-                    "knowledge_ttl_days" => {
-                        hive.knowledge_ttl_days = value.parse().ok();
-                    }
-                    "inject_unverified" => {
-                        hive.inject_unverified = parse_bool(value);
-                    }
-                    "share_categories" => {
-                        hive.share_categories = parse_string_array(value);
-                    }
-                    "exclude_tools" => {
-                        hive.exclude_tools = parse_string_array(value);
-                    }
-                    "exclude_commands" => {
-                        hive.exclude_commands = parse_string_array(value);
-                    }
-                    "exclude_content_types" => {
-                        hive.exclude_content_types = parse_string_array(value);
-                    }
-                    "max_units" => {
-                        hive.max_units = value.parse().ok();
-                    }
-                    "max_prompt_units" => {
-                        hive.max_prompt_units = value.parse().ok();
-                    }
-                    "stale_peer_days" => {
-                        hive.stale_peer_days = value.parse().ok();
-                    }
-                    "share_mode" => {
-                        hive.share_mode = Some(unquote(value));
-                    }
-                    _ => {}
-                }
-            }
-            _ if parse_agent_section(&section).is_some() => {
-                let Some(agent_name) = parse_agent_section(&section) else {
-                    continue;
-                };
-                let agent = ensure_agent(&mut raw.agents, &agent_name);
-                match key {
-                    "type" => agent.agent_type = unquote(value),
-                    "command" => agent.command = unquote(value),
-                    "capabilities" => agent.capabilities = parse_string_array(value),
-                    "cwd" => agent.cwd = unquote(value),
                     _ => {}
                 }
             }
@@ -1242,13 +845,6 @@ fn known_keys(section: &str) -> Option<&'static [&'static str]> {
             "auto_restart",
             "restart_threshold_pct",
             "restart_only_when_idle",
-            "retention_days",
-        ]),
-        "idle" => Some(&[
-            "enabled",
-            "after_idle_mins",
-            "max_concurrent",
-            "max_cost_usd",
         ]),
         "brain" => Some(&[
             "enabled",
@@ -1264,38 +860,24 @@ fn known_keys(section: &str) -> Option<&'static [&'static str]> {
             "orchestrate_interval_secs",
             "test_runners",
         ]),
-        "relay" => Some(&[
-            "enabled",
-            "listen_port",
-            "port",
-            "listen_addr",
-            "addr",
-            "max_peers",
-            "heartbeat_interval",
-            "heartbeat_interval_secs",
-            "reconnect_max",
-            "reconnect_max_secs",
-            "auto_connect",
-            "http_port",
-            "auth_token",
-        ]),
-        "hive" => Some(&[
-            "enabled",
-            "default_trust",
-            "auto_trust_drift",
-            "max_propagation",
-            "export_min_evidence",
-            "export_min_tool_decisions",
-            "knowledge_ttl_days",
-            "inject_unverified",
-            "share_categories",
-            "exclude_tools",
-            "exclude_content_types",
-            "max_units",
-            "max_prompt_units",
-            "stale_peer_days",
-            "share_mode",
-        ]),
+        _ => None,
+    }
+}
+
+fn removed_section_message(section: &str) -> Option<&'static str> {
+    match section.split('.').next().unwrap_or(section) {
+        "relay" | "hive" | "idle" | "agents" => Some(
+            "is no longer supported by brain-only codexctl; use Beads or an external worker for durable coordination",
+        ),
+        _ => None,
+    }
+}
+
+fn removed_key_message(section: &str, key: &str) -> Option<&'static str> {
+    match (section, key) {
+        ("lifecycle", "retention_days") => Some(
+            "lifecycle.retention_days is no longer supported; codexctl no longer prunes coordination state",
+        ),
         _ => None,
     }
 }
@@ -1330,10 +912,18 @@ pub fn validate_config_file(path: &PathBuf) -> (Vec<ConfigWarning>, bool) {
         // Section header
         if line.starts_with('[') && line.ends_with(']') {
             section = line[1..line.len() - 1].trim().to_string();
-            // Check if section is known (accounting for dynamic sections like models.*, rules.*, agents.*, hooks.*, idle.tasks.*)
+            if let Some(message) = removed_section_message(&section) {
+                warnings.push(ConfigWarning {
+                    line: line_1,
+                    message: format!("[{section}] {message}"),
+                });
+                continue;
+            }
+
+            // Check if section is known (accounting for dynamic sections like models.*, rules.*, hooks.*)
             let base = section.split('.').next().unwrap_or(&section);
-            let is_known = known_keys(&section).is_some()
-                || matches!(base, "models" | "rules" | "agents" | "hooks" | "idle");
+            let is_known =
+                known_keys(&section).is_some() || matches!(base, "models" | "rules" | "hooks");
             if !is_known {
                 warnings.push(ConfigWarning {
                     line: line_1,
@@ -1354,9 +944,21 @@ pub fn validate_config_file(path: &PathBuf) -> (Vec<ConfigWarning>, bool) {
         };
         let key = key.trim();
 
-        // Skip dynamic sections (models.*, rules.*, agents.*, hooks.*)
+        if removed_section_message(&section).is_some() {
+            continue;
+        }
+
+        if let Some(message) = removed_key_message(&section, key) {
+            warnings.push(ConfigWarning {
+                line: line_1,
+                message: message.into(),
+            });
+            continue;
+        }
+
+        // Skip dynamic sections (models.*, rules.*, hooks.*)
         let base = section.split('.').next().unwrap_or(&section);
-        if matches!(base, "models" | "rules" | "agents" | "hooks" | "idle") {
+        if matches!(base, "models" | "rules" | "hooks") {
             continue;
         }
 
@@ -1372,6 +974,30 @@ pub fn validate_config_file(path: &PathBuf) -> (Vec<ConfigWarning>, bool) {
     }
 
     (warnings, has_errors)
+}
+
+fn legacy_config_warnings_for_paths(paths: &[PathBuf]) -> Vec<(PathBuf, ConfigWarning)> {
+    paths
+        .iter()
+        .filter(|path| path.exists())
+        .flat_map(|path| {
+            let (warnings, _) = validate_config_file(path);
+            warnings
+                .into_iter()
+                .filter(|warning| warning.message.contains("no longer supported"))
+                .map(|warning| (path.clone(), warning))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+pub fn legacy_config_warnings() -> Vec<(PathBuf, ConfigWarning)> {
+    let mut paths = Vec::new();
+    if let Some(global) = global_config_path() {
+        paths.push(global);
+    }
+    paths.push(PathBuf::from(".codexctl.toml"));
+    legacy_config_warnings_for_paths(&paths)
 }
 
 /// Load hooks from global and project config files.
@@ -1494,18 +1120,6 @@ fn ensure_rule<'a>(rules: &'a mut Vec<AutoRule>, name: &str) -> &'a mut AutoRule
     rules.last_mut().expect("rule was just pushed")
 }
 
-fn parse_agent_section(section: &str) -> Option<String> {
-    section.strip_prefix("agents.").map(unquote)
-}
-
-fn ensure_agent<'a>(agents: &'a mut Vec<AgentConfig>, name: &str) -> &'a mut AgentConfig {
-    if let Some(index) = agents.iter().position(|a| a.name == name) {
-        return &mut agents[index];
-    }
-    agents.push(AgentConfig::new(name.to_string()));
-    agents.last_mut().expect("agent was just pushed")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1605,40 +1219,6 @@ context_max = 258400
         assert!(config.notify); // Unchanged
         assert_eq!(config.budget, Some(10.0)); // Overridden
         assert!(config.grouped); // New
-
-        // Partial relay/hive sections layer without resetting omitted fields.
-        config.apply(RawConfig {
-            relay: Some(RawRelayConfig {
-                enabled: Some(true),
-                listen_port: Some(9000),
-                ..RawRelayConfig::default()
-            }),
-            hive: Some(RawHiveConfig {
-                enabled: Some(true),
-                default_trust: Some(0.7),
-                ..RawHiveConfig::default()
-            }),
-            ..RawConfig::default()
-        });
-        config.apply(RawConfig {
-            relay: Some(RawRelayConfig {
-                max_peers: Some(4),
-                ..RawRelayConfig::default()
-            }),
-            hive: Some(RawHiveConfig {
-                knowledge_ttl_days: Some(14),
-                ..RawHiveConfig::default()
-            }),
-            ..RawConfig::default()
-        });
-        let relay = config.relay.as_ref().unwrap();
-        assert!(relay.enabled);
-        assert_eq!(relay.listen_port, 9000);
-        assert_eq!(relay.max_peers, 4);
-        let hive = config.hive.as_ref().unwrap();
-        assert!(hive.enabled);
-        assert_eq!(hive.default_trust, 0.7);
-        assert_eq!(hive.knowledge_ttl_days, 14);
     }
 
     #[test]
@@ -1737,84 +1317,6 @@ max_context_tokens = 8000
     }
 
     #[test]
-    fn test_parse_relay_hive_config() {
-        use std::io::Write;
-        let mut file = tempfile::NamedTempFile::new().unwrap();
-        writeln!(
-            file,
-            r#"
-[relay]
-enabled = true
-listen_port = 9999
-listen_addr = "127.0.0.1"
-max_peers = 3
-auto_connect = ["peer-a:9847"]
-
-[hive]
-enabled = true
-default_trust = 0.65
-max_propagation = 2
-knowledge_ttl_days = 7
-inject_unverified = false
-"#
-        )
-        .unwrap();
-        file.flush().unwrap();
-
-        let raw = parse_config_file(&file.path().to_path_buf()).unwrap();
-        let relay = raw.relay.expect("relay config should be parsed");
-        assert_eq!(relay.enabled, Some(true));
-        assert_eq!(relay.listen_port, Some(9999));
-        assert_eq!(relay.listen_addr.as_deref(), Some("127.0.0.1"));
-        assert_eq!(relay.max_peers, Some(3));
-        assert_eq!(relay.auto_connect, Some(vec!["peer-a:9847".into()]));
-
-        let hive = raw.hive.expect("hive config should be parsed");
-        assert_eq!(hive.enabled, Some(true));
-        assert_eq!(hive.default_trust, Some(0.65));
-        assert_eq!(hive.max_propagation, Some(2));
-        assert_eq!(hive.knowledge_ttl_days, Some(7));
-        assert_eq!(hive.inject_unverified, Some(false));
-    }
-
-    #[test]
-    fn test_parse_agents_from_config() {
-        use std::io::Write;
-        let mut file = tempfile::NamedTempFile::new().unwrap();
-        writeln!(
-            file,
-            r#"
-[agents.codex]
-type = "codex"
-command = "codex --quiet"
-capabilities = ["code-review", "refactoring"]
-cwd = "/tmp/project"
-
-[agents.aider]
-type = "aider"
-command = "aider --yes"
-capabilities = ["implementation", "debugging"]
-"#
-        )
-        .unwrap();
-        file.flush().unwrap();
-
-        let raw = parse_config_file(&file.path().to_path_buf()).unwrap();
-        assert_eq!(raw.agents.len(), 2);
-
-        let codex = &raw.agents[0];
-        assert_eq!(codex.name, "codex");
-        assert_eq!(codex.agent_type, "codex");
-        assert_eq!(codex.command, "codex --quiet");
-        assert_eq!(codex.capabilities, vec!["code-review", "refactoring"]);
-        assert_eq!(codex.cwd, "/tmp/project");
-
-        let aider = &raw.agents[1];
-        assert_eq!(aider.name, "aider");
-        assert_eq!(aider.command, "aider --yes");
-    }
-
-    #[test]
     fn test_parse_health_thresholds() {
         use std::io::Write;
         let mut file = tempfile::NamedTempFile::new().unwrap();
@@ -1892,5 +1394,77 @@ auto_deny_file_conflicts = true
         let config = Config::default();
         assert!(config.file_conflicts); // on by default
         assert!(!config.auto_deny_file_conflicts); // off by default
+    }
+
+    #[test]
+    fn removed_sections_warn_but_brain_orchestration_still_parses() {
+        use std::io::Write;
+
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        write!(
+            file,
+            r#"
+[brain]
+orchestrate = true
+orchestrate_interval = 45
+max_sessions = 6
+
+[lifecycle]
+auto_restart = true
+retention_days = 30
+
+[relay]
+enabled = true
+
+[hive]
+enabled = true
+
+[idle]
+enabled = true
+
+[agents.reviewer]
+model = "gpt-5"
+"#,
+        )
+        .unwrap();
+        file.flush().unwrap();
+        let path = file.path().to_path_buf();
+
+        let (warnings, has_errors) = validate_config_file(&path);
+        assert!(!has_errors);
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.message.contains("[relay] is no longer supported"))
+        );
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.message.contains("[hive] is no longer supported"))
+        );
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.message.contains("[idle] is no longer supported"))
+        );
+        assert!(warnings.iter().any(|w| {
+            w.message
+                .contains("[agents.reviewer] is no longer supported")
+        }));
+        assert!(warnings.iter().any(|w| {
+            w.message
+                .contains("lifecycle.retention_days is no longer supported")
+        }));
+        let startup_warnings = legacy_config_warnings_for_paths(std::slice::from_ref(&path));
+        assert_eq!(startup_warnings.len(), 5);
+
+        let raw = parse_config_file(&path).unwrap();
+        let mut config = Config::default();
+        config.apply(raw);
+        let brain = config.brain.unwrap();
+        assert!(brain.orchestrate);
+        assert_eq!(brain.orchestrate_interval_secs, 45);
+        assert_eq!(brain.max_sessions, 6);
+        assert!(config.lifecycle.auto_restart);
     }
 }

@@ -1236,14 +1236,13 @@ fn truncate_col_cli(s: &str, width: usize) -> String {
 /// `codexctl hive on|off`
 fn cmd_set_mode(mode: &str, json_mode: bool) -> io::Result<()> {
     super::write_mode_override(mode)?;
-    let cfg = crate::config::Config::load();
-    let active = super::is_active(cfg.hive.as_ref());
+    let active = super::is_active(None);
 
     if json_mode {
         let output = serde_json::json!({
             "mode_override": mode,
             "active": active,
-            "config_enabled": cfg.hive.as_ref().map(|h| h.enabled).unwrap_or(false),
+            "config_enabled": false,
         });
         println!("{}", serde_json::to_string_pretty(&output).unwrap());
     } else {
@@ -1266,9 +1265,8 @@ fn cmd_set_mode(mode: &str, json_mode: bool) -> io::Result<()> {
 /// `codexctl hive preview` — what would broadcast on the next gossip tick.
 fn cmd_preview(json_mode: bool) -> io::Result<()> {
     let store = HiveStore::load();
-    let cfg = crate::config::Config::load();
-    let hive_cfg = cfg.hive.clone().unwrap_or_default();
-    let active = super::is_active(cfg.hive.as_ref());
+    let hive_cfg = super::HiveConfig::default();
+    let active = super::is_active(None);
 
     let mode = super::exposure::ShareMode::parse(&hive_cfg.share_mode)
         .unwrap_or(super::exposure::ShareMode::Auto);
@@ -1487,9 +1485,8 @@ fn apply_exposure(
 fn cmd_status(json_mode: bool) -> io::Result<()> {
     let store = HiveStore::load();
     let all = store.all_units();
-    let cfg = crate::config::Config::load();
-    let hive_cfg = cfg.hive.clone().unwrap_or_default();
-    let active = super::is_active(cfg.hive.as_ref());
+    let hive_cfg = super::HiveConfig::default();
+    let active = super::is_active(None);
     let mode_override = super::read_mode_override();
 
     // Count by source
@@ -1517,7 +1514,7 @@ fn cmd_status(json_mode: bool) -> io::Result<()> {
             "active": active,
             "mode_override": mode_override,
             "share_mode": hive_cfg.share_mode,
-            "config_enabled": cfg.hive.as_ref().map(|h| h.enabled).unwrap_or(false),
+            "config_enabled": false,
             "total_units": all.len(),
             "max_units": hive_cfg.max_units,
             "sources": sources,
@@ -1535,14 +1532,7 @@ fn cmd_status(json_mode: bool) -> io::Result<()> {
         let state_label = if active { "ON" } else { "OFF" };
         let source_label = match mode_override.as_deref() {
             Some(s) => format!("override: {s}"),
-            None => format!(
-                "config: {}",
-                if cfg.hive.as_ref().map(|h| h.enabled).unwrap_or(false) {
-                    "enabled"
-                } else {
-                    "disabled"
-                }
-            ),
+            None => "config: disabled".into(),
         };
         println!("Hive Knowledge Store [{state_label}]  ({source_label})");
         println!();

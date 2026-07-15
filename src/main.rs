@@ -117,7 +117,7 @@ pub(crate) enum Command {
         command: r#loop::cli::LoopCommand,
     },
 
-    /// Onboarding wizard (budget, brain, hooks, bus, skills). See issue #257.
+    /// Onboarding wizard (budget, brain, hooks, skills). See issue #257.
     Init {
         /// Drift report comparing recorded onboarding against current state.
         #[arg(long, conflicts_with_all = ["reset", "remove", "non_interactive"])]
@@ -126,15 +126,14 @@ pub(crate) enum Command {
         #[arg(long, conflicts_with_all = ["check", "remove", "non_interactive"])]
         reset: bool,
         /// Uninstall every codexctl-managed artifact (hooks, marker).
-        /// Preserves user data: bus DB roles, brain decision logs, hive
-        /// knowledge, relay identity, config file. Pair with `--purge` to
-        /// wipe everything.
+        /// Preserves brain decision logs, legacy codexctl state, and the config
+        /// file. Pair with `--purge` to wipe everything.
         #[arg(long, conflicts_with_all = ["check", "reset", "non_interactive", "purge"])]
         remove: bool,
         /// Hard uninstall: `--remove` PLUS delete `~/.codexctl/` entirely
-        /// (bus DB, brain decisions, hive knowledge, relay identity, coord
-        /// state) and `~/.config/codexctl/config.toml`. Use to start over
-        /// from a clean slate. Requires `--yes` to proceed without prompt.
+        /// (brain data and legacy codexctl state) and
+        /// `~/.config/codexctl/config.toml`. Use to start over from a clean
+        /// slate. Requires `--yes` to proceed without prompt.
         #[arg(long, conflicts_with_all = ["check", "reset", "non_interactive", "remove"])]
         purge: bool,
         /// Skip the confirmation prompt for `--purge`.
@@ -142,7 +141,7 @@ pub(crate) enum Command {
         yes: bool,
         /// Install (or re-install) just Codex hooks (#325).
         /// Skip every other phase. Useful for users who already configured
-        /// budget / brain / bus and just want to refresh hook entries
+        /// budget / brain and just want to refresh hook entries
         /// after `brew upgrade codexctl`.
         #[arg(
             long,
@@ -150,8 +149,7 @@ pub(crate) enum Command {
         )]
         plugin_only: bool,
         /// Re-sync everything the previous `init` wrote to match the
-        /// running binary (#327): hook entries,
-        /// DB schema migrations, and the onboarding marker version. Use
+        /// running binary (#327): hook entries and the onboarding marker version. Use
         /// after `brew upgrade codexctl` / `cargo install ... --force`.
         #[arg(
             long,
@@ -159,7 +157,7 @@ pub(crate) enum Command {
         )]
         upgrade: bool,
         /// Run every phase without prompting. Combine with the per-phase
-        /// flags below (`--budget`, `--brain-url`, `--bus-role`, etc.).
+        /// flags below (`--budget`, `--brain-url`, etc.).
         #[arg(long)]
         non_interactive: bool,
 
@@ -184,16 +182,6 @@ pub(crate) enum Command {
         #[arg(long)]
         skip_plugin: bool,
 
-        /// Bind this role for the bus phase (used with --non-interactive).
-        #[arg(long)]
-        bus_role: Option<String>,
-        /// cwd to bind the bus role to. Defaults to the process cwd.
-        #[arg(long)]
-        bus_cwd: Option<String>,
-        /// Skip the bus phase.
-        #[arg(long)]
-        skip_bus: bool,
-
         /// Skip the skills phase.
         #[arg(long)]
         skip_skills: bool,
@@ -210,8 +198,8 @@ pub(crate) enum Command {
     Man,
 
     /// Install + runtime health check. Answers "is everything wired up?"
-    /// in one command — PATH, hooks, brain endpoint, bus
-    /// feature, bus DB, session discovery, terminal integration.
+    /// in one command — PATH, hooks, brain endpoint, session discovery,
+    /// and terminal integration.
     /// Exits non-zero on any failure; advisories don't affect exit code.
     Doctor {
         /// Emit JSON instead of human-readable output.
@@ -626,7 +614,7 @@ fn print_first_run_banner() {
     eprintln!("│  You haven't onboarded yet — the dashboard will be empty until  │");
     eprintln!("│  Codex hooks are installed. Quit and run one of:                │");
     eprintln!("│                                                                 │");
-    eprintln!("│    codexctl init        Interactive 5-phase wizard (preferred)  │");
+    eprintln!("│    codexctl init        Interactive 4-phase wizard (preferred)  │");
     eprintln!("│    codexctl --demo      Explore with fake sessions              │");
     eprintln!("│                                                                 │");
     eprintln!("│  Silence this with CODEXCTL_SKIP_FIRST_RUN=1.                  │");
@@ -647,6 +635,14 @@ fn run_main(cli: Cli) -> io::Result<()> {
 
     // Load config from files, then let CLI flags override
     let mut cfg = config::Config::load();
+    for (path, warning) in config::legacy_config_warnings() {
+        eprintln!(
+            "Warning: {}:{}: {}",
+            path.display(),
+            warning.line,
+            warning.message
+        );
+    }
 
     // CLI flags override config file values (only override if explicitly set)
     if cli.interval != 2000 {
@@ -689,6 +685,14 @@ fn run_main(cli: Cli) -> io::Result<()> {
             brain.model = model.clone();
         }
     }
+    if let Some(brain) = cfg.brain.as_ref().filter(|brain| brain.enabled) {
+        if !doctor::is_loopback_endpoint(&brain.endpoint) {
+            eprintln!(
+                "Warning: brain endpoint {} is not loopback; transcript context may leave this machine",
+                brain.endpoint
+            );
+        }
+    }
 
     models::set_overrides(cfg.model_overrides.clone());
     let filters = ViewFilters {
@@ -726,7 +730,7 @@ fn run_main(cli: Cli) -> io::Result<()> {
     if cli.doctor {
         eprintln!(
             "note: `--doctor` is deprecated. Use `codexctl doctor` for the new \
-             structured checklist (PATH + hooks + brain + bus + sessions + \
+             structured checklist (PATH + hooks + brain + sessions + \
              terminal). The legacy report follows below."
         );
         return commands::print_doctor();
@@ -848,9 +852,6 @@ fn run_main(cli: Cli) -> io::Result<()> {
                 skip_brain,
                 install_plugin,
                 skip_plugin,
-                bus_role,
-                bus_cwd,
-                skip_bus,
                 skip_skills,
             } => {
                 if *check {
@@ -866,14 +867,13 @@ fn run_main(cli: Cli) -> io::Result<()> {
                     return init::run_purge(*yes);
                 }
                 if *upgrade {
-                    // #327 — re-sync after `brew upgrade`. Hooks +
-                    // hooks + DB migrations + marker version, with a
+                    // #327 — re-sync after `brew upgrade`. Hooks + marker version, with a
                     // per-step report.
                     return init::run_upgrade();
                 }
                 if *plugin_only {
                     // #325 — install just the hook
-                    // entries. The other four wizard phases stay where
+                    // entries. The other three wizard phases stay where
                     // the previous run left them (no marker rewrite).
                     return init::phases::install_plugin_now();
                 }
@@ -891,9 +891,6 @@ fn run_main(cli: Cli) -> io::Result<()> {
                         brain_url: brain_url.clone(),
                         skip_brain: *skip_brain,
                         install_plugin: install_plugin_opt,
-                        bus_role: bus_role.clone(),
-                        bus_cwd: bus_cwd.as_ref().map(std::path::PathBuf::from),
-                        skip_bus: *skip_bus,
                         skip_skills: *skip_skills,
                     };
                     return init::run_non_interactive(&answers);

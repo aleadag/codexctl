@@ -1,7 +1,7 @@
 //! Configuration data types shared between the binary and (future) TUI crate.
 //!
 //! The binary still owns *parsing* (TOML, CLI flags, layering) — but the
-//! resulting `BrainConfig` / `IdleConfig` structs live here so downstream
+//! resulting `BrainConfig` struct lives here so downstream
 //! crates (notably the TUI extracted under #275) can hold them without
 //! depending back on the binary's `crate::config` module.
 
@@ -64,37 +64,6 @@ impl Default for BrainConfig {
             orchestrate: false,
             orchestrate_interval_secs: 30,
             test_runners: default_test_runners(),
-        }
-    }
-}
-
-/// Configuration for idle mode and unattended work queue.
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub struct IdleConfig {
-    pub enabled: bool,
-    pub after_idle_mins: u64,
-    pub max_concurrent: usize,
-    pub max_cost_usd: f64,
-    pub tasks: Vec<IdleTask>,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub struct IdleTask {
-    pub prompt: String,
-    pub cwd: Option<String>,
-    pub priority: u32,
-}
-
-impl Default for IdleConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            after_idle_mins: 15,
-            max_concurrent: 2,
-            max_cost_usd: 5.0,
-            tasks: Vec::new(),
         }
     }
 }

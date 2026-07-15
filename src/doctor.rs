@@ -9,8 +9,7 @@
 //!
 //! Each check returns a `Check` with status + a fix hint. The renderer
 //! shows ✓ / ⚠ / ✗ icons and a one-line message; advisories are
-//! non-fatal so a Homebrew-build user with no bus feature compiled in
-//! still exits 0.
+//! non-fatal so optional brain configuration does not make doctor fail.
 
 use std::io;
 use std::path::PathBuf;
@@ -62,12 +61,6 @@ pub fn run_all_checks() -> Vec<Check> {
         check_binary_on_path(),
         check_codex_hooks(),
         check_brain_endpoint(),
-        check_bus_feature(),
-        check_bus_db(),
-        check_bus_retention(),
-        check_coord_schema(),
-        check_coord_session_policy_dir(),
-        check_supervisor_drain_state(),
         check_session_discovery(),
         check_terminal_integration(),
     ]
@@ -223,24 +216,28 @@ fn check_codex_hooks() -> Check {
 }
 
 fn check_brain_endpoint() -> Check {
-    // Match the existing brain probe (curl + 1s timeout, common ollama
-    // port). When unreachable, advise — most users running the TUI
-    // without the brain enabled don't care.
-    let url = "http://localhost:11434/api/tags";
+    let endpoint = crate::config::Config::load()
+        .brain
+        .map(|brain| brain.endpoint)
+        .unwrap_or_else(|| "http://localhost:11434/api/generate".into());
+    if !is_loopback_endpoint(&endpoint) {
+        return check_brain_endpoint_url(&endpoint);
+    }
+
     let curl = std::process::Command::new("curl")
-        .args(["-sS", "--max-time", "1", url])
+        .args(["-sS", "--max-time", "1", &endpoint])
         .output();
     match curl {
         Ok(o) if o.status.success() && !o.stdout.is_empty() => Check {
             name: "brain endpoint".into(),
             status: CheckStatus::Pass,
-            message: format!("ollama reachable at {url}"),
+            message: format!("local brain reachable at {endpoint}"),
             fix_hint: None,
         },
         _ => Check {
             name: "brain endpoint".into(),
             status: CheckStatus::Advisory,
-            message: "no local-LLM endpoint reachable on localhost:11434".into(),
+            message: format!("local brain endpoint is not reachable at {endpoint}"),
             fix_hint: Some(
                 "Brain is optional. To enable: `brew install ollama && ollama serve &` + `ollama pull gemma4:e4b`."
                     .into(),
@@ -249,267 +246,41 @@ fn check_brain_endpoint() -> Check {
     }
 }
 
-fn check_bus_feature() -> Check {
-    #[cfg(feature = "bus")]
-    {
+fn endpoint_host(endpoint: &str) -> Option<&str> {
+    let authority = endpoint.split_once("://")?.1.split('/').next()?;
+    let authority = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    if let Some(bracketed) = authority.strip_prefix('[') {
+        return bracketed.split_once(']').map(|(host, _)| host);
+    }
+    Some(authority.split(':').next().unwrap_or(authority))
+}
+
+pub(crate) fn is_loopback_endpoint(endpoint: &str) -> bool {
+    endpoint_host(endpoint).is_some_and(|host| {
+        host.eq_ignore_ascii_case("localhost") || matches!(host, "127.0.0.1" | "::1")
+    })
+}
+
+fn check_brain_endpoint_url(endpoint: &str) -> Check {
+    if is_loopback_endpoint(endpoint) {
         Check {
-            name: "bus feature".into(),
+            name: "brain endpoint privacy".into(),
             status: CheckStatus::Pass,
-            message: "compiled in".into(),
+            message: format!("{endpoint} is loopback-only"),
             fix_hint: None,
         }
-    }
-    #[cfg(not(feature = "bus"))]
-    {
+    } else {
         Check {
-            name: "bus feature".into(),
-            status: CheckStatus::Advisory,
-            message: "not compiled — multi-session coordination unavailable".into(),
-            fix_hint: Some(
-                "Reinstall with `cargo install codexctl --features bus,coord,relay,hive` or the matching package manager install."
-                    .into(),
-            ),
-        }
-    }
-}
-
-fn check_bus_db() -> Check {
-    #[cfg(not(feature = "bus"))]
-    {
-        Check {
-            name: "bus DB".into(),
-            status: CheckStatus::Skipped,
-            message: "bus feature not compiled in".into(),
-            fix_hint: None,
-        }
-    }
-    #[cfg(feature = "bus")]
-    {
-        // Lazy creation — opening the store creates the dir + DB if
-        // they don't exist, so this also acts as a writability probe.
-        match crate::bus::store::open() {
-            Ok(_conn) => {
-                let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
-                    return Check {
-                        name: "bus DB".into(),
-                        status: CheckStatus::Pass,
-                        message: "opened (no HOME path to display)".into(),
-                        fix_hint: None,
-                    };
-                };
-                let db = home.join(".codexctl").join("bus").join("bus.db");
-                let size = std::fs::metadata(&db).map(|m| m.len()).unwrap_or(0);
-                Check {
-                    name: "bus DB".into(),
-                    status: CheckStatus::Pass,
-                    message: format!("{} ({} bytes)", db.display(), size),
-                    fix_hint: None,
-                }
-            }
-            Err(e) => Check {
-                name: "bus DB".into(),
-                status: CheckStatus::Fail,
-                message: format!("cannot open ~/.codexctl/bus/bus.db: {e}"),
-                fix_hint: Some(
-                    "Check that ~/.codexctl/bus/ is writable. `codexctl init --purge --yes` resets everything.".into(),
-                ),
-            },
-        }
-    }
-}
-
-/// Surface a growing mailbox before it becomes a problem (#337). Pass
-/// while total rows are reasonable; Advisory once the table is in the
-/// thousands AND a meaningful chunk is older than the default 30-day
-/// retention window. The fix hint always points at `bus prune`.
-fn check_bus_retention() -> Check {
-    #[cfg(not(feature = "bus"))]
-    {
-        Check {
-            name: "bus retention".into(),
-            status: CheckStatus::Skipped,
-            message: "bus feature not compiled in".into(),
-            fix_hint: None,
-        }
-    }
-    #[cfg(feature = "bus")]
-    {
-        let Ok(conn) = crate::bus::store::open() else {
-            // bus DB check already reports the open error; don't duplicate.
-            return Check {
-                name: "bus retention".into(),
-                status: CheckStatus::Skipped,
-                message: "bus DB not open".into(),
-                fix_hint: None,
-            };
-        };
-        let total = crate::bus::store::message_count(&conn).unwrap_or(0);
-        let stale = crate::bus::store::prune_dry_run(&conn, None).unwrap_or(0);
-        // Threshold matches the issue spec: < 5000 rows total is fine.
-        if total < 5_000 {
-            return Check {
-                name: "bus retention".into(),
-                status: CheckStatus::Pass,
-                message: format!("{total} messages in table"),
-                fix_hint: None,
-            };
-        }
-        Check {
-            name: "bus retention".into(),
+            name: "brain endpoint privacy".into(),
             status: CheckStatus::Advisory,
             message: format!(
-                "{total} messages in table ({stale} older than 30 days, prunable)"
+                "{endpoint} is not loopback; transcript context may leave this machine"
             ),
             fix_hint: Some(
-                "Run `codexctl bus prune` to delete delivered messages older than 30 days. Add `--days N` to override.".into(),
+                "Use a loopback endpoint or confirm the remote endpoint's privacy policy.".into(),
             ),
-        }
-    }
-}
-
-/// Supervisor schema row (#345). Opens the coord DB and verifies the
-/// `PRAGMA user_version` matches what this binary expects. Drift here is
-/// the manual-upgrade gap RFC v2 §12 calls out — a `brew upgrade
-/// codexctl` without a follow-up `codexctl init --upgrade` lands the
-/// new binary on disk but leaves the schema at the old version. The
-/// store's `open()` would refuse loudly in that case; doctor surfaces it
-/// up-front so the user sees the fix in their checklist instead of in a
-/// runtime error.
-fn check_coord_schema() -> Check {
-    #[cfg(not(feature = "coord"))]
-    {
-        Check {
-            name: "coord schema".into(),
-            status: CheckStatus::Skipped,
-            message: "coord feature not compiled in".into(),
-            fix_hint: None,
-        }
-    }
-    #[cfg(feature = "coord")]
-    {
-        match crate::coord::store::open() {
-            Ok(_) => Check {
-                name: "coord schema".into(),
-                status: CheckStatus::Pass,
-                message: format!(
-                    "v{} (binary expects v{})",
-                    crate::coord::store::EXPECTED_COORD_SCHEMA_VERSION,
-                    crate::coord::store::EXPECTED_COORD_SCHEMA_VERSION
-                ),
-                fix_hint: None,
-            },
-            Err(e) if e.contains("schema") => Check {
-                name: "coord schema".into(),
-                status: CheckStatus::Fail,
-                message: e,
-                fix_hint: Some(
-                    "Run `codexctl init --upgrade` to migrate the coord DB.".into(),
-                ),
-            },
-            Err(e) => Check {
-                name: "coord schema".into(),
-                status: CheckStatus::Fail,
-                message: format!("cannot open coord DB: {e}"),
-                fix_hint: Some(
-                    "Check that ~/.codexctl/coord/ is writable. `codexctl init --purge --yes` resets everything.".into(),
-                ),
-            },
-        }
-    }
-}
-
-/// Per-session policy directory row (#345). The supervisor writes
-/// `~/.codexctl/coord/session-policy/<session>.json` at task assignment
-/// so the brain-gate hook can do a single `fs::read_to_string` per tool
-/// call. Pass when the dir exists and is writable; Advisory when the
-/// supervisor hasn't run yet (no dir created) — that's expected on a
-/// fresh install.
-fn check_coord_session_policy_dir() -> Check {
-    #[cfg(not(feature = "coord"))]
-    {
-        Check {
-            name: "session-policy dir".into(),
-            status: CheckStatus::Skipped,
-            message: "coord feature not compiled in".into(),
-            fix_hint: None,
-        }
-    }
-    #[cfg(feature = "coord")]
-    {
-        let dir = crate::coord::session_policy::dir();
-        if !dir.exists() {
-            return Check {
-                name: "session-policy dir".into(),
-                status: CheckStatus::Advisory,
-                message: format!(
-                    "{} not present (supervisor hasn't assigned any tasks yet)",
-                    dir.display()
-                ),
-                fix_hint: None,
-            };
-        }
-        // Writability probe: try to create a sentinel file and remove it.
-        // `tempfile` would pull a dep just for this one check; the
-        // hand-rolled probe is plenty.
-        let sentinel = dir.join(".doctor-probe");
-        match std::fs::write(&sentinel, b"") {
-            Ok(()) => {
-                let _ = std::fs::remove_file(&sentinel);
-                Check {
-                    name: "session-policy dir".into(),
-                    status: CheckStatus::Pass,
-                    message: format!("{} writable", dir.display()),
-                    fix_hint: None,
-                }
-            }
-            Err(e) => Check {
-                name: "session-policy dir".into(),
-                status: CheckStatus::Fail,
-                message: format!("{} not writable: {e}", dir.display()),
-                fix_hint: Some(
-                    "Check ownership/permissions on ~/.codexctl/coord/session-policy/. The brain-gate hook reads files here on every tool call.".into(),
-                ),
-            },
-        }
-    }
-}
-
-/// Supervisor drain marker row (#349). Pass when no drain marker exists
-/// (the supervisor will issue new assignments). Advisory when the
-/// marker is set — the operator drained intentionally; the doctor's
-/// job here is to surface that state so it doesn't get forgotten in a
-/// terminal.
-fn check_supervisor_drain_state() -> Check {
-    #[cfg(not(feature = "coord"))]
-    {
-        Check {
-            name: "supervisor drain".into(),
-            status: CheckStatus::Skipped,
-            message: "coord feature not compiled in".into(),
-            fix_hint: None,
-        }
-    }
-    #[cfg(feature = "coord")]
-    {
-        if crate::coord::supervisor_cli::is_draining() {
-            Check {
-                name: "supervisor drain".into(),
-                status: CheckStatus::Advisory,
-                message: format!(
-                    "drain marker present at {}",
-                    crate::coord::supervisor_cli::drain_marker_path().display()
-                ),
-                fix_hint: Some(
-                    "Run `codexctl supervisor undrain` to resume issuing new assignments.".into(),
-                ),
-            }
-        } else {
-            Check {
-                name: "supervisor drain".into(),
-                status: CheckStatus::Pass,
-                message: "no drain marker (supervisor accepts new assignments)".into(),
-                fix_hint: None,
-            }
         }
     }
 }
@@ -694,5 +465,26 @@ mod tests {
         let parsed: Vec<Check> = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].status, CheckStatus::Pass);
+    }
+
+    #[test]
+    fn non_loopback_brain_endpoint_is_advisory() {
+        let check = check_brain_endpoint_url("https://brain.example.com/v1/chat/completions");
+        assert_eq!(check.status, CheckStatus::Advisory);
+        assert!(
+            check
+                .message
+                .contains("transcript context may leave this machine")
+        );
+    }
+
+    #[test]
+    fn loopback_endpoint_detection_is_exact_and_case_insensitive() {
+        assert!(is_loopback_endpoint("http://LOCALHOST:11434/api/generate"));
+        assert!(is_loopback_endpoint("http://127.0.0.1:8080/v1/chat"));
+        assert!(is_loopback_endpoint("http://[::1]:8080/v1/chat"));
+        assert!(!is_loopback_endpoint(
+            "http://localhost.example.com/v1/chat"
+        ));
     }
 }

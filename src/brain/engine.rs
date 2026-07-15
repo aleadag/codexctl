@@ -233,31 +233,6 @@ impl BrainEngine {
                                         }
                                     }
                                 }
-                                RuleAction::Delegate { agent, prompt } => {
-                                    super::decisions::log_decision(
-                                        result.pid,
-                                        session.display_name(),
-                                        session.pending_tool_name.as_deref(),
-                                        session.pending_tool_input.as_deref(),
-                                        &suggestion,
-                                        "auto",
-                                        Some(session),
-                                        DecisionType::Session,
-                                        None,
-                                    );
-                                    actions.push((
-                                        result.pid,
-                                        format!(
-                                            "Brain: delegated to agent '{}' — {}",
-                                            agent,
-                                            if prompt.is_empty() {
-                                                &suggestion.reasoning
-                                            } else {
-                                                prompt
-                                            }
-                                        ),
-                                    ));
-                                }
                                 _ => {
                                     let rule_match = suggestion_to_rule_match(&suggestion);
                                     match rules::execute(&rule_match, session) {
@@ -1058,7 +1033,6 @@ mod tests {
             auto_restart: true,
             restart_threshold_pct: 90.0,
             restart_only_when_idle: false,
-            retention_days: 30,
         };
         let mut engine = BrainEngine::new(make_config());
         let mut s = make_session(100, SessionStatus::Processing);
@@ -1075,7 +1049,6 @@ mod tests {
             auto_restart: true,
             restart_threshold_pct: 90.0,
             restart_only_when_idle: false,
-            retention_days: 30,
         };
         let mut engine = BrainEngine::new(make_config());
         let mut s = make_session(100, SessionStatus::Processing);
@@ -1093,7 +1066,6 @@ mod tests {
             auto_restart: true,
             restart_threshold_pct: 90.0,
             restart_only_when_idle: false,
-            retention_days: 30,
         };
         let mut engine = BrainEngine::new(make_config());
         engine.restarted_pids.insert(100);
@@ -1111,7 +1083,6 @@ mod tests {
             auto_restart: true,
             restart_threshold_pct: 90.0,
             restart_only_when_idle: true,
-            retention_days: 30,
         };
         let mut engine = BrainEngine::new(make_config());
         let mut s = make_session(100, SessionStatus::Processing);

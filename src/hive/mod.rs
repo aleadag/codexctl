@@ -20,6 +20,35 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone)]
+pub struct HiveConfig {
+    pub enabled: bool,
+    pub max_propagation: u32,
+    pub knowledge_ttl_days: u32,
+    pub share_categories: Vec<String>,
+    pub exclude_tools: Vec<String>,
+    pub exclude_commands: Vec<String>,
+    pub exclude_content_types: Vec<String>,
+    pub max_units: usize,
+    pub share_mode: String,
+}
+
+impl Default for HiveConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_propagation: 5,
+            knowledge_ttl_days: 30,
+            share_categories: Vec::new(),
+            exclude_tools: Vec::new(),
+            exclude_commands: Vec::new(),
+            exclude_content_types: Vec::new(),
+            max_units: 500,
+            share_mode: "auto".into(),
+        }
+    }
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Knowledge unit — the atom of shared learning
 // ────────────────────────────────────────────────────────────────────────────
@@ -603,7 +632,7 @@ pub struct SharingFilter {
 
 impl SharingFilter {
     /// Build from HiveConfig.
-    pub fn from_config(cfg: &crate::config::HiveConfig) -> Self {
+    pub fn from_config(cfg: &HiveConfig) -> Self {
         SharingFilter {
             allow_categories: cfg.share_categories.clone(),
             exclude_tools: cfg.exclude_tools.clone(),
@@ -741,7 +770,7 @@ pub fn write_mode_override(mode: &str) -> std::io::Result<()> {
 
 /// True if the hive should be active. The mode file (when present) overrides
 /// the config flag. When both are absent, hive is inactive.
-pub fn is_active(cfg: Option<&crate::config::HiveConfig>) -> bool {
+pub fn is_active(cfg: Option<&HiveConfig>) -> bool {
     match read_mode_override().as_deref() {
         Some("on") => true,
         Some("off") => false,

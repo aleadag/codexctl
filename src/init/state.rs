@@ -118,27 +118,6 @@ pub fn detect_plugin() -> PhaseStatus {
     }
 }
 
-// ---------------- Bus (agent bus role bindings) -----------------------------
-
-/// Detect a usable bus install. Returns NotInstalled when the `bus` feature
-/// is not compiled in (or no roles bound). On a `--features bus` build,
-/// reports the number of bound roles.
-pub fn detect_bus() -> PhaseStatus {
-    #[cfg(feature = "bus")]
-    {
-        match crate::bus::store::open().and_then(|c| crate::bus::store::list_roles(&c)) {
-            Ok(roles) if !roles.is_empty() => PhaseStatus::Installed {
-                details: format!("{} role(s) bound", roles.len()),
-            },
-            _ => PhaseStatus::NotInstalled,
-        }
-    }
-    #[cfg(not(feature = "bus"))]
-    {
-        PhaseStatus::Skipped
-    }
-}
-
 // ---------------- Skills (curated list) -------------------------------------
 
 /// Skills installation is owned by Codex itself (`/plugin install`),
@@ -158,7 +137,6 @@ pub struct EnvironmentReport {
     pub budget: PhaseStatus,
     pub brain: PhaseStatus,
     pub plugin: PhaseStatus,
-    pub bus: PhaseStatus,
     pub skills: PhaseStatus,
 }
 
@@ -168,7 +146,6 @@ impl EnvironmentReport {
             budget: detect_budget(),
             brain: detect_brain(),
             plugin: detect_plugin(),
-            bus: detect_bus(),
             skills: detect_skills(),
         }
     }
@@ -188,12 +165,11 @@ impl EnvironmentReport {
         out
     }
 
-    pub fn entries(&self) -> [(&'static str, &PhaseStatus); 5] {
+    pub fn entries(&self) -> [(&'static str, &PhaseStatus); 4] {
         [
             ("budget", &self.budget),
             ("brain", &self.brain),
             ("plugin", &self.plugin),
-            ("bus", &self.bus),
             ("skills", &self.skills),
         ]
     }
@@ -223,9 +199,9 @@ mod tests {
     }
 
     #[test]
-    fn environment_report_renders_five_lines() {
+    fn environment_report_renders_four_lines() {
         let r = EnvironmentReport::detect();
         let rendered = r.render_human();
-        assert_eq!(rendered.lines().count(), 5);
+        assert_eq!(rendered.lines().count(), 4);
     }
 }

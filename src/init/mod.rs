@@ -4,9 +4,7 @@
 //!
 //! This module owns the single canonical first-run flow for getting a
 //! codexctl install ready: weekly budget cap, local-LLM brain detection,
-//! Codex hook install, agent-bus role binding, and curated skill suggestions.
-//! The deferred `codexctl setup` wizard (AGENT_BUS.md §8) folds
-//! in here as the "bus" phase rather than existing as a parallel command.
+//! Codex hook install and curated skill suggestions.
 //!
 //! Public surface:
 //!
@@ -23,9 +21,8 @@
 //! * `hooks.rs` — the legacy `--init` / `--uninstall` hook writer.
 //! * `marker.rs` — `~/.codexctl/onboarding.json` read/write.
 //! * `prompt.rs` — minimal stdin/stdout prompt helpers.
-//! * `state.rs` — environment detection (probes ollama, hooks.json, bus
-//!   roles, etc.).
-//! * `phases.rs` — `Phase` trait + Budget/Brain/Plugin/Bus/Skills impls.
+//! * `state.rs` — environment detection (probes ollama and hooks.json).
+//! * `phases.rs` — `Phase` trait + Budget/Brain/Plugin/Skills impls.
 
 pub mod hooks;
 pub mod marker;
@@ -168,9 +165,9 @@ pub fn run_check() -> io::Result<()> {
     Ok(())
 }
 
-/// Remove every codexctl-managed artifact. Phases that own user state (the
-/// bus DB, the config file's `budget` line) decline to delete it — we don't
-/// erase a user's setup, only artifacts codexctl actively manages.
+/// Remove every codexctl-managed artifact. Phases that own user state (such as
+/// the config file's `budget` line) decline to delete it — we don't erase a
+/// user's setup, only artifacts codexctl actively manages.
 pub fn run_remove() -> io::Result<()> {
     let registry = phases::registry();
     let mut errors = Vec::new();
@@ -207,14 +204,12 @@ pub fn run_reset() -> io::Result<()> {
 /// have a fresher marker version, but the on-disk artifacts were written by
 /// the old binary.
 ///
-/// Three refresh paths, in order — failures don't abort the rest so a
+/// Two refresh paths, in order — failures don't abort the rest so a
 /// half-broken install can still partially recover:
 ///
 /// 1. Hook entries in `~/.codex/hooks.json` — re-runs `init::hooks::run_init`
 ///    which is idempotent.
-/// 2. DB migrations — opening the bus and coord stores runs any pending
-///    `ADD COLUMN` migrations as a side effect of `migrate(&conn)`.
-/// 3. Onboarding marker version bump — if the recorded version differs
+/// 2. Onboarding marker version bump — if the recorded version differs
 ///    from the running binary's `CARGO_PKG_VERSION`, rewrite the version
 ///    field (other phase records preserved).
 pub fn run_upgrade() -> io::Result<()> {
@@ -227,7 +222,7 @@ pub fn run_upgrade() -> io::Result<()> {
     // 1. Hook entries. `hooks::run_init` prints its own report; we follow
     // it with our progress line so the operator sees both the file path
     // touched and the per-step ✓ summary.
-    println!("  [1/3] Codex hook entries");
+    println!("  [1/2] Codex hook entries");
     match hooks::run_init(false, false) {
         Ok(()) => println!("        \u{2713} refreshed"),
         Err(e) => {
@@ -236,18 +231,8 @@ pub fn run_upgrade() -> io::Result<()> {
         }
     }
 
-    // 2. DB migrations (opening the stores triggers `migrate()`)
-    print!("  [2/3] DB schema migrations ...................... ");
-    match upgrade_db_migrations() {
-        Ok(()) => println!("\u{2713} schema current"),
-        Err(e) => {
-            println!("\u{2717} {e}");
-            had_error = true;
-        }
-    }
-
-    // 3. Onboarding marker version stamp
-    print!("  [3/3] Onboarding marker version ................. ");
+    // 2. Onboarding marker version stamp
+    print!("  [2/2] Onboarding marker version ................. ");
     match upgrade_marker_version() {
         Ok(Some((from, to))) => println!("\u{2713} {from} \u{2192} {to}"),
         Ok(None) => println!("\u{2014} already current"),
@@ -264,22 +249,6 @@ pub fn run_upgrade() -> io::Result<()> {
         ));
     }
     println!("Upgrade complete. Run `codexctl doctor` to verify.");
-    Ok(())
-}
-
-/// Touch the bus + coord stores so their `migrate(&conn)` calls run any
-/// pending schema changes. Each open is independent — a failure to open
-/// one (feature flag off, or file missing) is not an error for the
-/// other.
-fn upgrade_db_migrations() -> io::Result<()> {
-    #[cfg(feature = "bus")]
-    {
-        let _ = crate::bus::store::open().map_err(io::Error::other)?;
-    }
-    #[cfg(feature = "coord")]
-    {
-        let _ = crate::coord::store::open().map_err(io::Error::other)?;
-    }
     Ok(())
 }
 
@@ -317,7 +286,7 @@ pub fn run_purge(assume_yes: bool) -> io::Result<()> {
     println!("  • Codex hooks codexctl installed (`~/.codex/hooks.json` entries)");
     if let Some(dir) = codexctl_dir.as_ref() {
         println!(
-            "  • {} (bus DB, brain decisions, hive, relay, coord)",
+            "  • {} (brain data and legacy codexctl state)",
             dir.display()
         );
     }
@@ -509,6 +478,48 @@ mod drift_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static HOME_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn upgrade_preserves_legacy_state() {
+        use std::ffi::OsString;
+
+        let _guard = HOME_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let old_home: Option<OsString> = std::env::var_os("HOME");
+        let home = tempfile::tempdir().unwrap();
+        // SAFETY: HOME mutation is serialized by HOME_LOCK for this test module.
+        unsafe { std::env::set_var("HOME", home.path()) };
+
+        let sentinels = [
+            (".codexctl/coord/coord.db", b"coord".as_slice()),
+            (".codexctl/bus/bus.db", b"bus".as_slice()),
+            (".codexctl/hive/store.json", b"hive".as_slice()),
+            (".codexctl/relay/identity.json", b"relay".as_slice()),
+            (".codexctl/loop/loop.db", b"loop".as_slice()),
+        ];
+        for (relative, contents) in sentinels {
+            let path = home.path().join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, contents).unwrap();
+        }
+
+        crate::config::Config::load();
+        let _ = state::EnvironmentReport::detect();
+        run_upgrade().unwrap();
+
+        for (relative, contents) in sentinels {
+            assert_eq!(std::fs::read(home.path().join(relative)).unwrap(), contents);
+        }
+
+        match old_home {
+            Some(value) => unsafe { std::env::set_var("HOME", value) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
+    }
 
     #[test]
     fn upgrade_marker_helper_bumps_a_stale_version() {
@@ -581,7 +592,6 @@ mod tests {
             skip_budget: true,
             skip_brain: true,
             install_plugin: Some(false),
-            skip_bus: true,
             skip_skills: true,
             ..Answers::default()
         };
@@ -595,8 +605,8 @@ mod tests {
                 phases::record_from_status(&status, stamp),
             );
         }
-        // Five entries, one per phase, all skipped.
-        assert_eq!(records.len(), 5);
+        // Four entries, one per phase, all skipped.
+        assert_eq!(records.len(), 4);
         for record in records.values() {
             assert_eq!(record.status, "skipped");
         }

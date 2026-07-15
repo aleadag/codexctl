@@ -5,7 +5,6 @@
 //! `init --remove` all walk the same registry without per-phase branching.
 
 use std::io;
-use std::path::{Path, PathBuf};
 
 use super::hooks;
 use super::marker::PhaseRecord;
@@ -14,10 +13,6 @@ use super::state::{self, PhaseStatus};
 
 /// Pre-filled answers for the non-interactive path. The wizard either reads
 /// these or asks the user; both forms produce the same outcome.
-///
-/// Fields cross feature gates (`bus_role` / `bus_cwd` are only read on
-/// `--features bus` builds), so the struct allows dead-code in non-bus
-/// configurations rather than per-field cfg-gating.
 #[derive(Debug, Default, Clone)]
 #[allow(dead_code)]
 pub struct Answers {
@@ -28,10 +23,6 @@ pub struct Answers {
     pub skip_brain: bool,
 
     pub install_plugin: Option<bool>,
-
-    pub bus_role: Option<String>,
-    pub bus_cwd: Option<PathBuf>,
-    pub skip_bus: bool,
 
     pub skip_skills: bool,
 }
@@ -73,15 +64,13 @@ pub fn record_from_status(status: &PhaseStatus, applied_at: &str) -> PhaseRecord
 }
 
 /// The full ordered registry the wizard walks. The order matters: budget
-/// first because it's the most important guardrail, plugin before bus because
-/// the bus's MCP server needs the plugin path to be writeable, skills last
-/// because they're optional.
+/// first because it's the most important guardrail and skills last because
+/// they're optional.
 pub fn registry() -> Vec<Box<dyn Phase>> {
     vec![
         Box::new(BudgetPhase),
         Box::new(BrainPhase),
         Box::new(PluginPhase),
-        Box::new(BusPhase),
         Box::new(SkillsPhase),
     ]
 }
@@ -320,112 +309,6 @@ pub fn install_plugin_now() -> io::Result<()> {
     install_plugin_hooks()
 }
 
-// ===================== Bus (agent-bus role binding) =====================
-
-pub struct BusPhase;
-
-impl Phase for BusPhase {
-    fn id(&self) -> &'static str {
-        "bus"
-    }
-    fn label(&self) -> &'static str {
-        "Agent bus role binding"
-    }
-
-    fn detect(&self) -> PhaseStatus {
-        state::detect_bus()
-    }
-
-    fn run_interactive(&self) -> io::Result<PhaseStatus> {
-        #[cfg(not(feature = "bus"))]
-        {
-            println!("(bus feature not compiled in — rebuild with `--features bus` to enable)");
-            Ok(PhaseStatus::Skipped)
-        }
-        #[cfg(feature = "bus")]
-        {
-            println!("Bind a role to this cwd so other Codex sessions can address you.");
-            if !prompt::yes_no("Bind a role for the current directory?", true)? {
-                return Ok(PhaseStatus::Skipped);
-            }
-            let default_name = derive_role_from_cwd();
-            let role = prompt::line_or_default("  Role name", Some(&default_name))?
-                .unwrap_or(default_name);
-            let cwd = std::env::current_dir()?;
-            bind_bus_role(&role, &cwd)?;
-            Ok(PhaseStatus::Installed {
-                details: format!("role `{role}` -> {}", cwd.display()),
-            })
-        }
-    }
-
-    fn run_non_interactive(&self, answers: &Answers) -> io::Result<PhaseStatus> {
-        if answers.skip_bus {
-            return Ok(PhaseStatus::Skipped);
-        }
-        #[cfg(not(feature = "bus"))]
-        {
-            let _ = answers;
-            Ok(PhaseStatus::Skipped)
-        }
-        #[cfg(feature = "bus")]
-        {
-            let cwd = answers
-                .bus_cwd
-                .clone()
-                .map(Ok)
-                .unwrap_or_else(std::env::current_dir)?;
-            let role = answers
-                .bus_role
-                .clone()
-                .unwrap_or_else(|| derive_role_from_cwd_at(&cwd));
-            bind_bus_role(&role, &cwd)?;
-            Ok(PhaseStatus::Installed {
-                details: format!("role `{role}` -> {}", cwd.display()),
-            })
-        }
-    }
-
-    fn remove(&self) -> io::Result<()> {
-        // Roles are persistent identity, not artifacts — leaving them in the
-        // bus DB is intentional so re-running `init` reconnects rather than
-        // orphans state. Marker drop is handled by the orchestrator.
-        Ok(())
-    }
-}
-
-#[cfg(feature = "bus")]
-fn bind_bus_role(role: &str, cwd: &Path) -> io::Result<()> {
-    let conn = crate::bus::store::open().map_err(io::Error::other)?;
-    crate::bus::store::upsert_role(&conn, role, &cwd.to_string_lossy(), None, None)
-        .map_err(io::Error::other)?;
-    Ok(())
-}
-
-#[cfg(not(feature = "bus"))]
-#[allow(dead_code)]
-fn bind_bus_role(_role: &str, _cwd: &Path) -> io::Result<()> {
-    Ok(())
-}
-
-#[allow(dead_code)]
-fn derive_role_from_cwd() -> String {
-    std::env::current_dir()
-        .ok()
-        .as_deref()
-        .map(derive_role_from_cwd_at)
-        .unwrap_or_else(|| "default".to_string())
-}
-
-#[allow(dead_code)]
-fn derive_role_from_cwd_at(p: &Path) -> String {
-    p.file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .map(|s| s.trim_start_matches('.').to_lowercase())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "default".to_string())
-}
-
 // ===================== Skills ============================================
 
 /// Suggestions only — we don't shell into Codex's plugin installer.
@@ -484,10 +367,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registry_lists_five_phases_in_canonical_order() {
+    fn registry_lists_four_phases_in_canonical_order() {
         let r = registry();
         let ids: Vec<_> = r.iter().map(|p| p.id()).collect();
-        assert_eq!(ids, vec!["budget", "brain", "plugin", "bus", "skills"]);
+        assert_eq!(ids, vec!["budget", "brain", "plugin", "skills"]);
     }
 
     #[test]
@@ -516,15 +399,5 @@ mod tests {
         assert!(!updated.contains("budget = 25"));
         assert!(updated.contains("budget = 50"));
         assert!(updated.contains("interval = 2000"));
-    }
-
-    #[test]
-    fn derive_role_strips_leading_dot_and_lowercases() {
-        assert_eq!(derive_role_from_cwd_at(Path::new("/work/MyProj")), "myproj");
-        assert_eq!(
-            derive_role_from_cwd_at(Path::new("/work/.hidden")),
-            "hidden"
-        );
-        assert_eq!(derive_role_from_cwd_at(Path::new("/")), "default");
     }
 }

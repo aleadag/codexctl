@@ -941,7 +941,6 @@ pub(crate) fn run_headless(
     let mut prev_statuses: HashMap<u32, SessionStatus> =
         app.sessions.iter().map(|s| (s.pid, s.status)).collect();
     #[cfg(feature = "coord")]
-    let mut tick_count: u64 = 0;
     // Supervisor reconciler (#345). Pure tick() returns the action list;
     // the actuator wiring lands in PR4 (#346). For now this drives the
     // skeleton against the live coord DB so any panic / lock issue
@@ -953,9 +952,7 @@ pub(crate) fn run_headless(
         std::thread::sleep(tick_rate);
         app.tick();
         #[cfg(feature = "coord")]
-        {
-            tick_count += 1;
-        }
+        {}
 
         // Emit status change events
         for s in &app.sessions {
@@ -1059,24 +1056,6 @@ pub(crate) fn run_headless(
                     serde_json::json!({"error": e}),
                     json_mode,
                 );
-            }
-        }
-
-        // Auto-prune old coordination data (every ~1 hour = 1800 ticks at 2s)
-        #[cfg(feature = "coord")]
-        if tick_count % 1800 == 0 && tick_count > 0 {
-            if let Ok(conn) = crate::coord::store::open() {
-                if let Ok(pruned) =
-                    crate::coord::store::prune(&conn, Some(cfg.lifecycle.retention_days))
-                {
-                    if pruned > 0 {
-                        emit_headless_event(
-                            "pruned",
-                            serde_json::json!({"rows_deleted": pruned}),
-                            json_mode,
-                        );
-                    }
-                }
             }
         }
 

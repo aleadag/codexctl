@@ -152,14 +152,12 @@ pub fn dispatch_command(command: &RelayCommand, json_mode: bool) -> io::Result<(
 fn cmd_serve(port: u16, http_port: Option<u16>, auth_token: Option<&str>) -> io::Result<()> {
     let mut port = port;
 
-    // Load config for relay/hive settings
-    let cfg = crate::config::Config::load();
-    let relay_cfg = cfg.relay.unwrap_or_default();
+    let relay_cfg = super::RelayConfig::default();
     #[cfg(feature = "hive")]
-    let hive_cfg = cfg.hive.unwrap_or_default();
+    let hive_cfg = crate::hive::HiveConfig::default();
 
     let identity = load_or_create_identity();
-    // CLI --port overrides config; config overrides default
+    // CLI --port overrides the legacy listener default.
     if port == 9847 {
         port = relay_cfg.listen_port;
     }
@@ -819,8 +817,7 @@ fn cmd_interrupt(task_id: &str, interrupt_type: &str, reason: &[String]) -> io::
 /// `codexctl relay invite [--qr] [--words]`
 fn cmd_invite(show_qr: bool, show_words: bool, json_mode: bool) -> io::Result<()> {
     let identity = load_or_create_identity();
-    let cfg = crate::config::Config::load();
-    let relay_cfg = cfg.relay.unwrap_or_default();
+    let relay_cfg = super::RelayConfig::default();
 
     // Detect our LAN IP
     let ip = detect_local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
