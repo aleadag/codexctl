@@ -10,6 +10,8 @@ use crate::app::App;
 use codexctl_core::session::CodexSession;
 use codexctl_core::theme::Theme;
 
+pub(super) const DETAIL_COST_TITLE: &str = " Estimated cost";
+
 pub fn render_detail_panel(frame: &mut Frame, area: Rect, session: &CodexSession, app: &App) {
     let t = &app.theme;
     let pid = session.pid.to_string();
@@ -86,7 +88,7 @@ pub fn render_detail_panel(frame: &mut Frame, area: Rect, session: &CodexSession
         detail_line("  Context", &context_str, t),
         Line::from(""),
         Line::from(Span::styled(
-            " Cost",
+            DETAIL_COST_TITLE,
             Style::default().fg(t.header).add_modifier(Modifier::BOLD),
         )),
         detail_line("  Total", &cost, t),

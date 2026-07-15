@@ -2815,4 +2815,39 @@ mod tests {
         assert!(merged.last_msg_type.is_empty());
         assert!(merged.last_stop_reason.is_empty());
     }
+
+    #[test]
+    fn merge_discovered_session_preserves_cost_for_same_transcript() {
+        let mut prev = make_session(
+            15,
+            "codexctl",
+            "gpt-5.6-sol",
+            SessionStatus::Processing,
+            4.25,
+            20.0,
+            true,
+        );
+        prev.session_id = "stable-session".into();
+        prev.jsonl_path = Some("/tmp/stable.jsonl".into());
+        prev.own_cost_usd = 4.25;
+        prev.priced_total_tokens = 250_000;
+
+        let mut new = make_session(
+            15,
+            "codexctl",
+            "gpt-5.6-sol",
+            SessionStatus::Processing,
+            0.0,
+            10.0,
+            true,
+        );
+        new.session_id = "stable-session".into();
+        new.jsonl_path = Some("/tmp/stable.jsonl".into());
+
+        let merged = merge_discovered_session(prev, new);
+
+        assert_eq!(merged.cost_usd, 4.25);
+        assert_eq!(merged.own_cost_usd, 4.25);
+        assert_eq!(merged.priced_total_tokens, 250_000);
+    }
 }

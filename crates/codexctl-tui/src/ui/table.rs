@@ -13,6 +13,11 @@ use super::detail::render_detail_panel;
 use super::help::render_help_overlay;
 use super::status_bar::render_status_bar;
 
+pub(super) const TABLE_HEADERS: [&str; 11] = [
+    "PID", "Project", "Status", "Context", "Est. $", "$/hr", "Elapsed", "CPU%", "MEM", "In/Out",
+    "Activity",
+];
+
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let t = &app.theme;
     let visible_sessions = app.visible_sessions();
@@ -138,11 +143,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     // Build header with sort indicator
-    let header_names = [
-        "PID", "Project", "Status", "Context", "Cost", "$/hr", "Elapsed", "CPU%", "MEM", "In/Out",
-        "Activity",
-    ];
-
     // Map sort_column index to header index:
     // 0=Status->2, 1=Context->3, 2=Cost->4, 3=$/hr->5, 4=Elapsed->6
     let sort_header_idx = match app.sort_column {
@@ -154,7 +154,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         _ => usize::MAX,
     };
 
-    let header_cells = header_names.iter().enumerate().map(|(i, h)| {
+    let header_cells = TABLE_HEADERS.iter().enumerate().map(|(i, h)| {
         let label = if i == sort_header_idx {
             format!("{h} \u{25bc}") // ▼ sort indicator
         } else {

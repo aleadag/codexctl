@@ -1223,6 +1223,9 @@ fn json_export_format() {
     assert_eq!(json["elapsed_secs"], 300);
     assert_eq!(json["tokens_in"], 50000);
     assert_eq!(json["tokens_out"], 10000);
+    assert_eq!(json["cost_usd"], 1.23);
+    assert!(json["estimate"]["verified"].is_boolean());
+    assert!(json["estimate"]["profile_source"].is_string());
     assert!(json["subagent_breakdown"].as_array().unwrap().is_empty());
 }
 
