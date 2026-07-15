@@ -1206,6 +1206,28 @@ fn resolve_jsonl_encoding_mismatch_fallback() {
 }
 
 #[test]
+fn resolve_jsonl_does_not_guess_latest_for_unknown_process_session() {
+    let _guard = HOME_LOCK.lock().unwrap();
+    let _home = isolated_home();
+    let home_path = std::path::PathBuf::from(std::env::var_os("HOME").unwrap());
+
+    let cwd = "/Users/testuser/projects/webapp";
+    let project_dir = home_path.join(".codex/sessions/-Users-testuser-projects-webapp");
+    std::fs::create_dir_all(&project_dir).unwrap();
+    std::fs::write(project_dir.join("unrelated.jsonl"), "{}\n").unwrap();
+
+    let mut session = CodexSession::from_raw(RawSession {
+        pid: 99998,
+        session_id: "codex-99998".into(),
+        cwd: cwd.into(),
+        started_at: 0,
+    });
+    discovery::resolve_jsonl_paths(std::slice::from_mut(&mut session));
+
+    assert_eq!(session.jsonl_path, None);
+}
+
+#[test]
 fn resolve_jsonl_telemetry_available_after_resolution() {
     let (mut s, _home) = resolve_with_layout(
         "/Users/testuser/myproject",

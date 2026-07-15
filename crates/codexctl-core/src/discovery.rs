@@ -1,9 +1,12 @@
 use std::cmp::Reverse;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::BufRead;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
+
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::codex_transcript::{CodexEvent, parse_line};
 use crate::session::CodexSession;
@@ -31,13 +34,19 @@ pub fn projects_dir() -> PathBuf {
 }
 
 pub fn scan_sessions() -> Vec<CodexSession> {
+    scan_sessions_with_state(&mut TranscriptAssignmentState::default())
+}
+
+pub fn scan_sessions_with_state(state: &mut TranscriptAssignmentState) -> Vec<CodexSession> {
     let processes = scan_live_codex_processes();
     if processes.is_empty() {
+        state.retained.clear();
+        state.transitions.clear();
+        state.unmatched_index_generations.clear();
         return Vec::new();
     }
 
-    let transcripts = collect_transcript_summaries();
-    sessions_from_live_processes(processes, &transcripts)
+    sessions_from_discovered_processes(processes, state)
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +54,7 @@ struct LiveCodexProcess {
     pid: u32,
     cwd: String,
     started_at: u64,
+    start_identity: u64,
     tty: String,
     cpu_percent: f32,
     mem_mb: f64,
@@ -56,12 +66,38 @@ struct CodexTranscriptSummary {
     session_id: String,
     cwd: String,
     path: PathBuf,
+    started_at_ms: u64,
     mtime_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RetainedTranscript {
+    process_start_identity: u64,
+    session_id: String,
+    path: PathBuf,
+    transcript_started_at_ms: u64,
+    transcript_mtime_ms: u64,
+    resume_superseded: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingTranscriptTransition {
+    session_id: String,
+    path: PathBuf,
+    consecutive_uncached_scans: u8,
+}
+
+#[derive(Debug, Default)]
+pub struct TranscriptAssignmentState {
+    retained: HashMap<u32, RetainedTranscript>,
+    transitions: HashMap<u32, PendingTranscriptTransition>,
+    unmatched_index_generations: HashMap<u32, u64>,
 }
 
 struct CachedTranscriptIndex {
     sessions_dir: PathBuf,
     refreshed_at: Instant,
+    generation: u64,
     transcripts: Vec<CodexTranscriptSummary>,
 }
 
@@ -116,10 +152,12 @@ fn parse_live_codex_process(line: &str) -> Option<LiveCodexProcess> {
     let cwd = process_cwd(pid)?.to_string_lossy().to_string();
     let command_args = args_after_codex(&args);
 
+    let started_at = process_started_at_ms(elapsed_secs);
     Some(LiveCodexProcess {
         pid,
         cwd,
-        started_at: process_started_at_ms(elapsed_secs),
+        started_at,
+        start_identity: process_start_identity(pid).unwrap_or(started_at),
         tty,
         cpu_percent,
         mem_mb: rss_kb / 1024.0,
@@ -160,6 +198,29 @@ fn process_started_at_ms(elapsed_secs: u64) -> u64 {
     now_ms.saturating_sub(elapsed_secs.saturating_mul(1000))
 }
 
+fn process_start_identity(pid: u32) -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        parse_proc_start_ticks(&stat)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
+fn parse_proc_start_ticks(stat: &str) -> Option<u64> {
+    stat.rsplit_once(')')?
+        .1
+        .split_whitespace()
+        .nth(19)?
+        .parse()
+        .ok()
+}
+
 fn args_after_codex(args: &str) -> String {
     let mut parts = args.split_whitespace();
     let Some(first) = parts.next() else {
@@ -177,25 +238,36 @@ fn args_after_codex(args: &str) -> String {
     }
 }
 
+#[cfg(test)]
 fn collect_transcript_summaries() -> Vec<CodexTranscriptSummary> {
+    collect_transcript_summaries_with_refresh(false).0
+}
+
+fn collect_transcript_summaries_with_refresh(
+    force_refresh: bool,
+) -> (Vec<CodexTranscriptSummary>, bool, u64) {
     let dir = sessions_dir();
     if let Ok(mut cached) = transcript_index_cache().lock() {
-        if let Some(index) = cached.as_ref() {
+        if !force_refresh && let Some(index) = cached.as_ref() {
             if index.sessions_dir == dir && index.refreshed_at.elapsed() < TRANSCRIPT_INDEX_TTL {
-                return index.transcripts.clone();
+                return (index.transcripts.clone(), false, index.generation);
             }
         }
 
+        let generation = cached
+            .as_ref()
+            .map_or(1, |index| index.generation.saturating_add(1));
         let transcripts = collect_transcript_summaries_uncached(&dir);
         *cached = Some(CachedTranscriptIndex {
             sessions_dir: dir,
             refreshed_at: Instant::now(),
+            generation,
             transcripts: transcripts.clone(),
         });
-        return transcripts;
+        return (transcripts, true, generation);
     }
 
-    collect_transcript_summaries_uncached(&dir)
+    (collect_transcript_summaries_uncached(&dir), true, 0)
 }
 
 fn collect_transcript_summaries_uncached(dir: &PathBuf) -> Vec<CodexTranscriptSummary> {
@@ -210,23 +282,71 @@ fn collect_transcript_summaries_uncached(dir: &PathBuf) -> Vec<CodexTranscriptSu
     transcripts
 }
 
+#[cfg(test)]
 fn sessions_from_live_processes(
     processes: Vec<LiveCodexProcess>,
     transcripts: &[CodexTranscriptSummary],
 ) -> Vec<CodexSession> {
+    let assigned = assign_transcripts(&processes, transcripts, &HashMap::new());
     let mut sessions: Vec<CodexSession> = processes
         .into_iter()
-        .map(|process| session_from_live_process(process, transcripts))
+        .map(|process| {
+            let transcript = assigned.get(&process.pid).copied();
+            session_from_live_process(process, transcript)
+        })
         .collect();
     sessions.sort_by_key(|s| Reverse(s.started_at));
     sessions
 }
 
+fn sessions_from_discovered_processes(
+    processes: Vec<LiveCodexProcess>,
+    state: &mut TranscriptAssignmentState,
+) -> Vec<CodexSession> {
+    let had_pending_transition = !state.transitions.is_empty();
+    let (mut transcripts, refreshed, mut generation) =
+        collect_transcript_summaries_with_refresh(false);
+    let mut assigned = assign_transcripts_with_state(&processes, &transcripts, state, refreshed);
+    let unmatched: Vec<u32> = processes
+        .iter()
+        .filter(|process| !assigned.contains_key(&process.pid))
+        .map(|process| process.pid)
+        .collect();
+    let has_new_unmatched = unmatched
+        .iter()
+        .any(|pid| state.unmatched_index_generations.get(pid).copied() != Some(generation));
+    let needs_uncached = !refreshed && (has_new_unmatched || had_pending_transition);
+    if needs_uncached {
+        drop(assigned);
+        let (fresh, _, fresh_generation) = collect_transcript_summaries_with_refresh(true);
+        transcripts = fresh;
+        generation = fresh_generation;
+        assigned = assign_transcripts_with_state(&processes, &transcripts, state, true);
+    }
+
+    state.unmatched_index_generations.clear();
+    state.unmatched_index_generations.extend(
+        processes
+            .iter()
+            .filter(|process| !assigned.contains_key(&process.pid))
+            .map(|process| (process.pid, generation)),
+    );
+
+    let mut sessions: Vec<CodexSession> = processes
+        .into_iter()
+        .map(|process| {
+            let transcript = assigned.get(&process.pid).copied();
+            session_from_live_process(process, transcript)
+        })
+        .collect();
+    sessions.sort_by_key(|session| Reverse(session.started_at));
+    sessions
+}
+
 fn session_from_live_process(
     process: LiveCodexProcess,
-    transcripts: &[CodexTranscriptSummary],
+    transcript: Option<&CodexTranscriptSummary>,
 ) -> CodexSession {
-    let transcript = best_transcript_for_process(&process, transcripts);
     let session_id = transcript
         .map(|t| t.session_id.clone())
         .unwrap_or_else(|| format!("codex-{}", process.pid));
@@ -251,17 +371,304 @@ fn session_from_live_process(
     session
 }
 
-fn best_transcript_for_process<'a>(
-    process: &LiveCodexProcess,
-    transcripts: &'a [CodexTranscriptSummary],
-) -> Option<&'a CodexTranscriptSummary> {
-    const START_TOLERANCE_MS: u64 = 10 * 60 * 1000;
-    let min_mtime = process.started_at.saturating_sub(START_TOLERANCE_MS);
+const START_TOLERANCE_MS: u64 = 10 * 60 * 1000;
+const TRANSCRIPT_START_SKEW_MS: u64 = 2_000;
 
-    transcripts
+fn compatible_new_session(process: &LiveCodexProcess, transcript: &CodexTranscriptSummary) -> bool {
+    process.cwd == transcript.cwd
+        && transcript
+            .started_at_ms
+            .saturating_add(TRANSCRIPT_START_SKEW_MS)
+            >= process.started_at
+        && process.started_at.abs_diff(transcript.started_at_ms) <= START_TOLERANCE_MS
+}
+
+fn compatible_transition(
+    process: &LiveCodexProcess,
+    previous: &RetainedTranscript,
+    candidate: &CodexTranscriptSummary,
+) -> bool {
+    candidate.cwd == process.cwd
+        && candidate.session_id != previous.session_id
+        && candidate.started_at_ms > previous.transcript_started_at_ms
+}
+
+fn assign_transcripts<'a>(
+    processes: &[LiveCodexProcess],
+    transcripts: &'a [CodexTranscriptSummary],
+    retained: &HashMap<u32, RetainedTranscript>,
+) -> HashMap<u32, &'a CodexTranscriptSummary> {
+    let mut assigned = HashMap::new();
+    let mut used_paths = HashSet::new();
+    let mut blocked_paths_by_pid = HashMap::new();
+
+    for process in processes {
+        let Some(previous) = retained.get(&process.pid) else {
+            continue;
+        };
+        if process.start_identity != previous.process_start_identity {
+            blocked_paths_by_pid.insert(process.pid, previous.path.clone());
+            continue;
+        }
+        if extract_resume_uuid(&process.command_args).is_some_and(|resume_id| {
+            previous.session_id != resume_id && !previous.resume_superseded
+        }) {
+            continue;
+        }
+        let Some(found) = transcripts.iter().find(|transcript| {
+            transcript.session_id == previous.session_id
+                && transcript.path == previous.path
+                && transcript.cwd == process.cwd
+                && !used_paths.contains(&transcript.path)
+        }) else {
+            continue;
+        };
+        used_paths.insert(found.path.clone());
+        assigned.insert(process.pid, found);
+    }
+
+    let mut resume_candidates = Vec::new();
+    let mut resume_claims: HashMap<PathBuf, usize> = HashMap::new();
+    let mut blocked_heuristic_pids = HashSet::new();
+    for process in processes
         .iter()
-        .find(|t| t.cwd == process.cwd && t.mtime_ms >= min_mtime)
-        .or_else(|| transcripts.iter().find(|t| t.cwd == process.cwd))
+        .filter(|process| !assigned.contains_key(&process.pid))
+    {
+        let Some(resume_id) = extract_resume_uuid(&process.command_args) else {
+            continue;
+        };
+        let candidates: Vec<_> = transcripts
+            .iter()
+            .filter(|transcript| {
+                transcript.session_id == resume_id && transcript.cwd == process.cwd
+            })
+            .collect();
+        if candidates.is_empty() {
+            continue;
+        }
+        let [found] = candidates.as_slice() else {
+            blocked_heuristic_pids.insert(process.pid);
+            continue;
+        };
+        if used_paths.contains(&found.path) {
+            blocked_heuristic_pids.insert(process.pid);
+            continue;
+        }
+        *resume_claims.entry(found.path.clone()).or_default() += 1;
+        resume_candidates.push((process.pid, *found));
+    }
+    for (pid, found) in resume_candidates {
+        if resume_claims.get(&found.path) != Some(&1) {
+            blocked_heuristic_pids.insert(pid);
+            continue;
+        }
+        used_paths.insert(found.path.clone());
+        assigned.insert(pid, found);
+    }
+
+    loop {
+        let pending: Vec<&LiveCodexProcess> = processes
+            .iter()
+            .filter(|process| {
+                !assigned.contains_key(&process.pid)
+                    && !blocked_heuristic_pids.contains(&process.pid)
+            })
+            .collect();
+        let mut mutual_best = Vec::new();
+
+        for process in &pending {
+            let mut candidates: Vec<&CodexTranscriptSummary> = transcripts
+                .iter()
+                .filter(|transcript| {
+                    !used_paths.contains(&transcript.path)
+                        && blocked_paths_by_pid.get(&process.pid) != Some(&transcript.path)
+                        && compatible_new_session(process, transcript)
+                })
+                .collect();
+            candidates.sort_by_key(|transcript| {
+                (
+                    process.started_at.abs_diff(transcript.started_at_ms),
+                    transcript.path.as_os_str(),
+                )
+            });
+            let Some(best) = candidates.first().copied() else {
+                continue;
+            };
+            let best_distance = process.started_at.abs_diff(best.started_at_ms);
+            if candidates.get(1).is_some_and(|next| {
+                process.started_at.abs_diff(next.started_at_ms) == best_distance
+            }) {
+                continue;
+            }
+
+            let mut competing: Vec<(&LiveCodexProcess, u64)> = pending
+                .iter()
+                .filter(|candidate| compatible_new_session(candidate, best))
+                .map(|candidate| {
+                    (
+                        *candidate,
+                        candidate.started_at.abs_diff(best.started_at_ms),
+                    )
+                })
+                .collect();
+            competing.sort_by_key(|(candidate, distance)| (*distance, candidate.pid));
+            let Some((best_process, best_process_distance)) = competing.first() else {
+                continue;
+            };
+            if best_process.pid != process.pid
+                || competing
+                    .get(1)
+                    .is_some_and(|(_, distance)| distance == best_process_distance)
+            {
+                continue;
+            }
+            mutual_best.push((best_distance, process.pid, best));
+        }
+
+        mutual_best.sort_by_key(|(distance, pid, transcript)| {
+            (*distance, *pid, transcript.path.as_os_str())
+        });
+        let mut progress = false;
+        for (_, pid, transcript) in mutual_best {
+            if assigned.contains_key(&pid) || used_paths.contains(&transcript.path) {
+                continue;
+            }
+            assigned.insert(pid, transcript);
+            used_paths.insert(transcript.path.clone());
+            progress = true;
+        }
+        if !progress {
+            break;
+        }
+    }
+
+    assigned
+}
+
+fn assign_transcripts_with_state<'a>(
+    processes: &[LiveCodexProcess],
+    transcripts: &'a [CodexTranscriptSummary],
+    state: &mut TranscriptAssignmentState,
+    uncached_scan: bool,
+) -> HashMap<u32, &'a CodexTranscriptSummary> {
+    let mut assigned = assign_transcripts(processes, transcripts, &state.retained);
+    let mut candidate_sets = Vec::new();
+    let mut candidate_claims: HashMap<PathBuf, usize> = HashMap::new();
+    let mut confirmed_transition_pids = HashSet::new();
+
+    for process in processes {
+        let Some(previous) = state.retained.get(&process.pid).cloned() else {
+            continue;
+        };
+        if process.start_identity != previous.process_start_identity {
+            state.transitions.remove(&process.pid);
+            continue;
+        }
+        let Some(current) = assigned.get(&process.pid).copied() else {
+            state.transitions.remove(&process.pid);
+            continue;
+        };
+        if current.session_id != previous.session_id || current.path != previous.path {
+            state.transitions.remove(&process.pid);
+            continue;
+        }
+        if current.mtime_ms > previous.transcript_mtime_ms {
+            state.transitions.remove(&process.pid);
+            continue;
+        }
+
+        let used_by_others: HashSet<&PathBuf> = assigned
+            .iter()
+            .filter(|(pid, _)| **pid != process.pid)
+            .map(|(_, transcript)| &transcript.path)
+            .collect();
+        let mut candidates: Vec<&CodexTranscriptSummary> = transcripts
+            .iter()
+            .filter(|candidate| {
+                compatible_transition(process, &previous, candidate)
+                    && !used_by_others.contains(&candidate.path)
+            })
+            .collect();
+        candidates.sort_by_key(|candidate| candidate.path.as_os_str());
+        for candidate in &candidates {
+            *candidate_claims.entry(candidate.path.clone()).or_default() += 1;
+        }
+        candidate_sets.push((process.pid, candidates));
+    }
+
+    for (pid, candidates) in candidate_sets {
+        let [candidate] = candidates.as_slice() else {
+            state.transitions.remove(&pid);
+            continue;
+        };
+        if candidate_claims.get(&candidate.path) != Some(&1) {
+            state.transitions.remove(&pid);
+            continue;
+        }
+        if !uncached_scan {
+            if state.transitions.get(&pid).is_some_and(|pending| {
+                pending.session_id != candidate.session_id || pending.path != candidate.path
+            }) {
+                state.transitions.remove(&pid);
+            }
+            continue;
+        }
+
+        let scans = match state.transitions.get(&pid) {
+            Some(pending)
+                if pending.session_id == candidate.session_id && pending.path == candidate.path =>
+            {
+                pending.consecutive_uncached_scans.saturating_add(1)
+            }
+            _ => 1,
+        };
+        if scans < 2 {
+            state.transitions.insert(
+                pid,
+                PendingTranscriptTransition {
+                    session_id: candidate.session_id.clone(),
+                    path: candidate.path.clone(),
+                    consecutive_uncached_scans: scans,
+                },
+            );
+            continue;
+        }
+
+        assigned.insert(pid, candidate);
+        confirmed_transition_pids.insert(pid);
+        state.transitions.remove(&pid);
+    }
+
+    let live_pids: HashSet<u32> = processes.iter().map(|process| process.pid).collect();
+    state.retained.retain(|pid, _| live_pids.contains(pid));
+    state.transitions.retain(|pid, _| live_pids.contains(pid));
+    for process in processes {
+        let Some(transcript) = assigned.get(&process.pid) else {
+            state.retained.remove(&process.pid);
+            state.transitions.remove(&process.pid);
+            continue;
+        };
+        let resume_superseded = confirmed_transition_pids.contains(&process.pid)
+            || state.retained.get(&process.pid).is_some_and(|previous| {
+                previous.process_start_identity == process.start_identity
+                    && previous.session_id == transcript.session_id
+                    && previous.path == transcript.path
+                    && previous.resume_superseded
+            });
+        state.retained.insert(
+            process.pid,
+            RetainedTranscript {
+                process_start_identity: process.start_identity,
+                session_id: transcript.session_id.clone(),
+                path: transcript.path.clone(),
+                transcript_started_at_ms: transcript.started_at_ms,
+                transcript_mtime_ms: transcript.mtime_ms,
+                resume_superseded,
+            },
+        );
+    }
+
+    assigned
 }
 
 fn collect_rollout_jsonls(dir: &PathBuf, paths: &mut Vec<PathBuf>) {
@@ -293,15 +700,22 @@ fn transcript_summary_from_codex_jsonl(path: PathBuf) -> Option<CodexTranscriptS
         let Some(CodexEvent::SessionMeta(meta)) = parse_line(line.trim()) else {
             continue;
         };
+        let started_at_ms = transcript_started_at_ms(meta.timestamp.as_deref())?;
         let mtime_ms = file_mtime_ms(&path).unwrap_or_default();
         return Some(CodexTranscriptSummary {
             session_id: meta.session_id,
             cwd: meta.cwd,
             path,
+            started_at_ms,
             mtime_ms,
         });
     }
     None
+}
+
+fn transcript_started_at_ms(timestamp: Option<&str>) -> Option<u64> {
+    let parsed = OffsetDateTime::parse(timestamp?, &Rfc3339).ok()?;
+    u64::try_from(parsed.unix_timestamp_nanos() / 1_000_000).ok()
 }
 
 /// Resolve JSONL paths for sessions. Must be called AFTER command_args are populated
@@ -330,13 +744,7 @@ pub fn resolve_jsonl_paths(sessions: &mut [CodexSession]) {
             }
         }
 
-        // Priority 3: Fall back to most recently modified .jsonl in the project dir
-        if let Some(latest) = find_latest_jsonl(&project_dir) {
-            session.jsonl_path = Some(latest);
-            continue;
-        }
-
-        // Priority 4: Search ALL project directories for a JSONL matching the session ID.
+        // Priority 3: Search ALL project directories for a JSONL matching the session ID.
         // This handles cwd encoding mismatches between codexctl and Codex
         // (e.g., symlink resolution, path normalization differences).
         if let Some(found) = search_all_projects_for_session(&session.session_id) {
@@ -349,23 +757,6 @@ pub fn resolve_jsonl_paths(sessions: &mut [CodexSession]) {
                 ),
             );
             session.jsonl_path = Some(found);
-            continue;
-        }
-
-        let process = LiveCodexProcess {
-            pid: session.pid,
-            cwd: session.cwd.clone(),
-            started_at: session.started_at,
-            tty: session.tty.clone(),
-            cpu_percent: session.cpu_percent,
-            mem_mb: session.mem_mb,
-            command_args: session.command_args.clone(),
-        };
-        let transcripts = collect_transcript_summaries();
-        if let Some(transcript) = best_transcript_for_process(&process, &transcripts) {
-            session.jsonl_path = Some(transcript.path.clone());
-            session.last_message_ts = transcript.mtime_ms;
-            session.model_profile_source = "codex-transcript".into();
             continue;
         }
 
@@ -418,25 +809,6 @@ fn extract_resume_uuid(command_args: &str) -> Option<String> {
     // Strip surrounding quotes
     let token = token.trim_matches('"').trim_matches('\'');
     Some(token.to_string())
-}
-
-/// Find the most recently modified .jsonl file in a project directory.
-fn find_latest_jsonl(dir: &PathBuf) -> Option<PathBuf> {
-    let entries = fs::read_dir(dir).ok()?;
-    let mut best: Option<(PathBuf, std::time::SystemTime)> = None;
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
-            continue;
-        }
-        let modified = entry.metadata().ok()?.modified().ok()?;
-        if best.as_ref().is_none_or(|(_, t)| modified > *t) {
-            best = Some((path, modified));
-        }
-    }
-
-    best.map(|(p, _)| p)
 }
 
 fn file_mtime_ms(path: &PathBuf) -> Option<u64> {
@@ -551,7 +923,319 @@ fn cwd_to_slug(cwd: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
     use super::*;
+
+    static CODEX_HOME_LOCK: Mutex<()> = Mutex::new(());
+
+    fn transcript(id: &str, cwd: &str, start: u64, path: &str) -> CodexTranscriptSummary {
+        CodexTranscriptSummary {
+            session_id: id.into(),
+            cwd: cwd.into(),
+            path: PathBuf::from(path),
+            started_at_ms: start,
+            mtime_ms: start,
+        }
+    }
+
+    fn process(pid: u32, cwd: &str, start: u64, args: &str) -> LiveCodexProcess {
+        process_with_identity(pid, cwd, start, start, args)
+    }
+
+    fn process_with_identity(
+        pid: u32,
+        cwd: &str,
+        start: u64,
+        start_identity: u64,
+        args: &str,
+    ) -> LiveCodexProcess {
+        LiveCodexProcess {
+            pid,
+            cwd: cwd.into(),
+            started_at: start,
+            start_identity,
+            tty: format!("pts/{pid}"),
+            cpu_percent: 0.0,
+            mem_mb: 32.0,
+            command_args: args.into(),
+        }
+    }
+
+    fn retained(
+        pid: u32,
+        process_start: u64,
+        session_id: &str,
+        path: &str,
+        transcript_start: u64,
+    ) -> HashMap<u32, RetainedTranscript> {
+        HashMap::from([(
+            pid,
+            RetainedTranscript {
+                process_start_identity: process_start,
+                session_id: session_id.into(),
+                path: path.into(),
+                transcript_started_at_ms: transcript_start,
+                transcript_mtime_ms: transcript_start,
+                resume_superseded: false,
+            },
+        )])
+    }
+
+    #[test]
+    fn assigns_same_directory_processes_one_to_one_by_start_time() {
+        let processes = vec![
+            process(11, "/repo", 100_000, ""),
+            process(12, "/repo", 200_000, ""),
+        ];
+        let transcripts = vec![
+            transcript("first", "/repo", 101_000, "/rollout-first.jsonl"),
+            transcript("second", "/repo", 201_000, "/rollout-second.jsonl"),
+        ];
+
+        let assigned = assign_transcripts(&processes, &transcripts, &HashMap::new());
+
+        assert_eq!(assigned[&11].session_id, "first");
+        assert_eq!(assigned[&12].session_id, "second");
+        assert_ne!(assigned[&11].path, assigned[&12].path);
+    }
+
+    #[test]
+    fn explicit_resume_session_wins() {
+        let processes = vec![process(11, "/repo", 100_000, "resume second")];
+        let transcripts = vec![
+            transcript("first", "/repo", 100_500, "/first.jsonl"),
+            transcript("second", "/repo", 101_000, "/second.jsonl"),
+        ];
+
+        let assigned = assign_transcripts(&processes, &transcripts, &HashMap::new());
+
+        assert_eq!(assigned[&11].session_id, "second");
+    }
+
+    #[test]
+    fn explicit_resume_replaces_temporary_heuristic_assignment() {
+        let processes = vec![process(11, "/repo", 100_000, "resume wanted")];
+        let temporary = transcript("temporary", "/repo", 101_000, "/temporary.jsonl");
+        let mut state = TranscriptAssignmentState::default();
+
+        let first = assign_transcripts_with_state(
+            &processes,
+            std::slice::from_ref(&temporary),
+            &mut state,
+            true,
+        );
+        assert_eq!(first[&11].session_id, "temporary");
+
+        let wanted = transcript("wanted", "/repo", 102_000, "/wanted.jsonl");
+        let transcripts = [temporary, wanted];
+        let assigned = assign_transcripts_with_state(&processes, &transcripts, &mut state, true);
+
+        assert_eq!(assigned[&11].session_id, "wanted");
+    }
+
+    #[test]
+    fn conflicting_explicit_resume_claims_are_order_independent() {
+        let first = process(11, "/repo", 100_000, "resume shared");
+        let second = process(12, "/repo", 104_000, "resume shared");
+        let transcripts = vec![transcript("shared", "/repo", 100_500, "/shared.jsonl")];
+
+        let forward = assign_transcripts(
+            &[first.clone(), second.clone()],
+            &transcripts,
+            &HashMap::new(),
+        );
+        let reverse = assign_transcripts(&[second, first], &transcripts, &HashMap::new());
+
+        assert!(forward.is_empty());
+        assert!(reverse.is_empty());
+    }
+
+    #[test]
+    fn resume_claimant_does_not_fallback_when_target_is_retained() {
+        let owner = process(11, "/repo", 100_000, "");
+        let claimant = process(12, "/repo", 200_000, "resume shared");
+        let shared = transcript("shared", "/repo", 101_000, "/shared.jsonl");
+        let unrelated = transcript("unrelated", "/repo", 201_000, "/unrelated.jsonl");
+        let retained = retained(11, 100_000, "shared", "/shared.jsonl", 101_000);
+
+        let transcripts = [shared, unrelated];
+        let assigned = assign_transcripts(&[owner, claimant], &transcripts, &retained);
+
+        assert_eq!(assigned[&11].session_id, "shared");
+        assert!(!assigned.contains_key(&12));
+    }
+
+    #[test]
+    fn retains_valid_attachment_when_mtime_order_changes() {
+        let processes = vec![process(11, "/repo", 100_000, "")];
+        let mut kept = transcript("kept", "/repo", 101_000, "/kept.jsonl");
+        kept.mtime_ms = 150_000;
+        let mut newer = transcript("newer", "/repo", 102_000, "/newer.jsonl");
+        newer.mtime_ms = 200_000;
+        let retained = retained(11, 100_000, "kept", "/kept.jsonl", 101_000);
+
+        let transcripts = [kept, newer];
+        let assigned = assign_transcripts(&processes, &transcripts, &retained);
+
+        assert_eq!(assigned[&11].session_id, "kept");
+    }
+
+    #[test]
+    fn reused_pid_does_not_inherit_retained_transcript() {
+        let processes = vec![process(11, "/repo", 300_000, "")];
+        let transcripts = vec![transcript("old", "/repo", 101_000, "/old.jsonl")];
+        let retained = retained(11, 100_000, "old", "/old.jsonl", 101_000);
+
+        let assigned = assign_transcripts(&processes, &transcripts, &retained);
+
+        assert!(!assigned.contains_key(&11));
+    }
+
+    #[test]
+    fn reused_pid_with_similar_display_start_does_not_inherit_transcript() {
+        let processes = vec![process_with_identity(11, "/repo", 101_000, 999, "")];
+        let transcripts = vec![transcript("old", "/repo", 101_000, "/old.jsonl")];
+        let retained = retained(11, 100_000, "old", "/old.jsonl", 101_000);
+
+        let assigned = assign_transcripts(&processes, &transcripts, &retained);
+
+        assert!(!assigned.contains_key(&11));
+    }
+
+    #[test]
+    fn parses_linux_proc_start_ticks_after_parenthesized_command() {
+        let stat = "123 (codex worker) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 4242 20";
+
+        assert_eq!(parse_proc_start_ticks(stat), Some(4242));
+    }
+
+    #[test]
+    fn leaves_equally_close_new_process_unassigned() {
+        let processes = vec![process(11, "/repo", 100_000, "")];
+        let transcripts = vec![
+            transcript("left", "/repo", 99_000, "/left.jsonl"),
+            transcript("right", "/repo", 101_000, "/right.jsonl"),
+        ];
+
+        assert!(assign_transcripts(&processes, &transcripts, &HashMap::new()).is_empty());
+    }
+
+    #[test]
+    fn clear_transition_requires_two_uncached_scans() {
+        let processes = vec![process(11, "/repo", 100_000, "")];
+        let old = transcript("old", "/repo", 101_000, "/old.jsonl");
+        let new = transcript("new", "/repo", 250_000, "/new.jsonl");
+        let transcripts = vec![old, new];
+        let mut state = TranscriptAssignmentState {
+            retained: retained(11, 100_000, "old", "/old.jsonl", 101_000),
+            transitions: HashMap::new(),
+            unmatched_index_generations: HashMap::new(),
+        };
+
+        let first = assign_transcripts_with_state(&processes, &transcripts, &mut state, true);
+        assert_eq!(first[&11].session_id, "old");
+        assert_eq!(state.transitions[&11].consecutive_uncached_scans, 1);
+
+        let second = assign_transcripts_with_state(&processes, &transcripts, &mut state, true);
+        assert_eq!(second[&11].session_id, "new");
+        assert_eq!(state.retained[&11].session_id, "new");
+        assert!(!state.transitions.contains_key(&11));
+    }
+
+    #[test]
+    fn clear_transition_can_start_hours_after_process_launch() {
+        let processes = vec![process(11, "/repo", 100_000, "")];
+        let old = transcript("old", "/repo", 101_000, "/old.jsonl");
+        let new = transcript("new", "/repo", 3_700_000, "/new.jsonl");
+        let transcripts = vec![old, new];
+        let mut state = TranscriptAssignmentState {
+            retained: retained(11, 100_000, "old", "/old.jsonl", 101_000),
+            transitions: HashMap::new(),
+            unmatched_index_generations: HashMap::new(),
+        };
+
+        let assigned = assign_transcripts_with_state(&processes, &transcripts, &mut state, true);
+
+        assert_eq!(assigned[&11].session_id, "old");
+        assert_eq!(state.transitions[&11].session_id, "new");
+
+        let assigned = assign_transcripts_with_state(&processes, &transcripts, &mut state, true);
+        assert_eq!(assigned[&11].session_id, "new");
+        assert!(state.retained[&11].resume_superseded);
+
+        let assigned = assign_transcripts_with_state(&processes, &transcripts, &mut state, true);
+        assert_eq!(assigned[&11].session_id, "new");
+    }
+
+    #[test]
+    fn resumed_process_can_transition_after_clear() {
+        let processes = vec![process(11, "/repo", 100_000, "resume old")];
+        let old = transcript("old", "/repo", 1_000, "/old.jsonl");
+        let new = transcript("new", "/repo", 3_700_000, "/new.jsonl");
+        let transcripts = vec![old, new];
+        let mut state = TranscriptAssignmentState {
+            retained: retained(11, 100_000, "old", "/old.jsonl", 1_000),
+            transitions: HashMap::new(),
+            unmatched_index_generations: HashMap::new(),
+        };
+
+        let assigned = assign_transcripts_with_state(&processes, &transcripts, &mut state, true);
+
+        assert_eq!(assigned[&11].session_id, "old");
+        assert_eq!(state.transitions[&11].session_id, "new");
+
+        let assigned = assign_transcripts_with_state(&processes, &transcripts, &mut state, true);
+        assert_eq!(assigned[&11].session_id, "new");
+        assert!(state.retained[&11].resume_superseded);
+
+        let assigned = assign_transcripts_with_state(&processes, &transcripts, &mut state, true);
+        assert_eq!(assigned[&11].session_id, "new");
+    }
+
+    #[test]
+    fn shared_clear_candidate_is_ambiguous_for_retained_processes() {
+        let processes = vec![
+            process(11, "/repo", 100_000, ""),
+            process(12, "/repo", 200_000, ""),
+        ];
+        let old_one = transcript("old-one", "/repo", 101_000, "/old-one.jsonl");
+        let old_two = transcript("old-two", "/repo", 201_000, "/old-two.jsonl");
+        let new = transcript("new", "/repo", 3_700_000, "/new.jsonl");
+        let transcripts = vec![old_one, old_two, new];
+        let mut retained_map = retained(11, 100_000, "old-one", "/old-one.jsonl", 101_000);
+        retained_map.extend(retained(12, 200_000, "old-two", "/old-two.jsonl", 201_000));
+        let mut state = TranscriptAssignmentState {
+            retained: retained_map,
+            transitions: HashMap::new(),
+            unmatched_index_generations: HashMap::new(),
+        };
+
+        let assigned = assign_transcripts_with_state(&processes, &transcripts, &mut state, true);
+
+        assert_eq!(assigned[&11].session_id, "old-one");
+        assert_eq!(assigned[&12].session_id, "old-two");
+        assert!(state.transitions.is_empty());
+    }
+
+    #[test]
+    fn cached_scan_does_not_advance_clear_transition() {
+        let processes = vec![process(11, "/repo", 100_000, "")];
+        let old = transcript("old", "/repo", 101_000, "/old.jsonl");
+        let new = transcript("new", "/repo", 250_000, "/new.jsonl");
+        let transcripts = vec![old, new];
+        let mut state = TranscriptAssignmentState {
+            retained: retained(11, 100_000, "old", "/old.jsonl", 101_000),
+            transitions: HashMap::new(),
+            unmatched_index_generations: HashMap::new(),
+        };
+
+        let assigned = assign_transcripts_with_state(&processes, &transcripts, &mut state, false);
+
+        assert_eq!(assigned[&11].session_id, "old");
+        assert!(state.transitions.is_empty());
+    }
 
     #[test]
     fn slug_basic_path() {
@@ -597,6 +1281,7 @@ mod tests {
             session_id: "sess-history".into(),
             cwd: "/repo".into(),
             path: PathBuf::from("/tmp/rollout-history.jsonl"),
+            started_at_ms: 10_000,
             mtime_ms: 10_000,
         };
 
@@ -611,12 +1296,14 @@ mod tests {
             session_id: "sess-live".into(),
             cwd: "/repo".into(),
             path: PathBuf::from("/tmp/rollout-live.jsonl"),
+            started_at_ms: 120_000,
             mtime_ms: 120_000,
         };
         let process = LiveCodexProcess {
             pid: 42,
             cwd: "/repo".into(),
             started_at: 100_000,
+            start_identity: 100_000,
             tty: "pts/1".into(),
             cpu_percent: 3.5,
             mem_mb: 64.0,
@@ -642,12 +1329,14 @@ mod tests {
             session_id: "sess-other".into(),
             cwd: "/other".into(),
             path: PathBuf::from("/tmp/rollout-other.jsonl"),
+            started_at_ms: 120_000,
             mtime_ms: 120_000,
         };
         let process = LiveCodexProcess {
             pid: 99,
             cwd: "/repo".into(),
             started_at: 100_000,
+            start_identity: 100_000,
             tty: "pts/2".into(),
             cpu_percent: 0.0,
             mem_mb: 32.0,
@@ -663,6 +1352,7 @@ mod tests {
 
     #[test]
     fn transcript_summary_scan_reuses_fresh_index() {
+        let _guard = CODEX_HOME_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let codex_home = dir.path().join(".codex");
         let first = codex_home
@@ -697,12 +1387,141 @@ mod tests {
         assert_eq!(summaries[0].session_id, "sess-first");
     }
 
+    #[test]
+    fn unmatched_process_forces_uncached_summary_refresh() {
+        let _guard = CODEX_HOME_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let codex_home = dir.path().join(".codex");
+        let sessions = codex_home
+            .join("sessions")
+            .join("2026")
+            .join("07")
+            .join("07");
+        write_transcript(&sessions.join("rollout-other.jsonl"), "other", "/other");
+
+        unsafe {
+            std::env::set_var("CODEXCTL_CODEX_HOME", &codex_home);
+        }
+        assert_eq!(collect_transcript_summaries().len(), 1);
+
+        write_transcript(&sessions.join("rollout-live.jsonl"), "live", "/repo");
+        let started_at = transcript_started_at_ms(Some("2026-07-07T00:00:00Z")).unwrap();
+        let mut state = TranscriptAssignmentState::default();
+        let discovered = sessions_from_discovered_processes(
+            vec![process(42, "/repo", started_at, "")],
+            &mut state,
+        );
+        unsafe {
+            std::env::remove_var("CODEXCTL_CODEX_HOME");
+        }
+
+        assert_eq!(discovered[0].session_id, "live");
+        assert_eq!(state.retained[&42].session_id, "live");
+    }
+
+    #[test]
+    fn persistently_unmatched_process_does_not_refresh_index_twice() {
+        let _guard = CODEX_HOME_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let codex_home = dir.path().join(".codex");
+        let sessions = codex_home
+            .join("sessions")
+            .join("2026")
+            .join("07")
+            .join("07");
+        write_transcript(&sessions.join("rollout-other.jsonl"), "other", "/other");
+
+        unsafe {
+            std::env::set_var("CODEXCTL_CODEX_HOME", &codex_home);
+        }
+        let started_at = transcript_started_at_ms(Some("2026-07-07T00:00:00Z")).unwrap();
+        let mut state = TranscriptAssignmentState::default();
+        let live_process = process(42, "/repo", started_at, "");
+
+        let first = sessions_from_discovered_processes(vec![live_process.clone()], &mut state);
+        assert_eq!(first[0].session_id, "codex-42");
+        let first_refresh = transcript_index_cache()
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .refreshed_at;
+
+        let second = sessions_from_discovered_processes(vec![live_process], &mut state);
+        let second_refresh = transcript_index_cache()
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .refreshed_at;
+        unsafe {
+            std::env::remove_var("CODEXCTL_CODEX_HOME");
+        }
+
+        assert_eq!(second[0].session_id, "codex-42");
+        assert_eq!(second_refresh, first_refresh);
+    }
+
+    #[test]
+    fn clear_transition_requires_two_outer_scans() {
+        let _guard = CODEX_HOME_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let codex_home = dir.path().join(".codex");
+        let sessions = codex_home
+            .join("sessions")
+            .join("2026")
+            .join("07")
+            .join("07");
+        let old_path = sessions.join("rollout-old.jsonl");
+        let new_path = sessions.join("rollout-new.jsonl");
+        write_transcript_at(&old_path, "old", "/repo", "2026-07-07T00:00:00Z");
+        write_transcript_at(&new_path, "new", "/repo", "2026-07-07T02:00:00Z");
+
+        unsafe {
+            std::env::set_var("CODEXCTL_CODEX_HOME", &codex_home);
+        }
+        let process_start = transcript_started_at_ms(Some("2026-07-07T00:00:00Z")).unwrap();
+        let mut retained = retained(
+            42,
+            process_start,
+            "old",
+            old_path.to_str().unwrap(),
+            process_start,
+        );
+        retained.get_mut(&42).unwrap().transcript_mtime_ms = file_mtime_ms(&old_path).unwrap();
+        let mut state = TranscriptAssignmentState {
+            retained,
+            transitions: HashMap::new(),
+            unmatched_index_generations: HashMap::new(),
+        };
+
+        let first = sessions_from_discovered_processes(
+            vec![process(42, "/repo", process_start, "")],
+            &mut state,
+        );
+        assert_eq!(first[0].session_id, "old");
+        assert_eq!(state.transitions[&42].consecutive_uncached_scans, 1);
+
+        let second = sessions_from_discovered_processes(
+            vec![process(42, "/repo", process_start, "")],
+            &mut state,
+        );
+        unsafe {
+            std::env::remove_var("CODEXCTL_CODEX_HOME");
+        }
+        assert_eq!(second[0].session_id, "new");
+    }
+
     fn write_transcript(path: &std::path::Path, session_id: &str, cwd: &str) {
+        write_transcript_at(path, session_id, cwd, "2026-07-07T00:00:00Z");
+    }
+
+    fn write_transcript_at(path: &std::path::Path, session_id: &str, cwd: &str, timestamp: &str) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(
             path,
             format!(
-                r#"{{"timestamp":"2026-07-07T00:00:00Z","type":"session_meta","payload":{{"id":"{session_id}","timestamp":"2026-07-07T00:00:00Z","cwd":"{cwd}","model_provider":"openai"}}}}"#
+                r#"{{"timestamp":"{timestamp}","type":"session_meta","payload":{{"id":"{session_id}","timestamp":"{timestamp}","cwd":"{cwd}","model_provider":"openai"}}}}"#
             ),
         )
         .unwrap();

@@ -250,6 +250,7 @@ fn compact_value(value: &str, empty_label: &str) -> String {
 
 pub struct App {
     pub sessions: Vec<CodexSession>,
+    transcript_assignments: discovery::TranscriptAssignmentState,
     pub table_state: TableState,
     pub should_quit: bool,
     pub status_msg: String,
@@ -474,6 +475,7 @@ impl App {
     pub fn new() -> Self {
         let mut app = Self {
             sessions: Vec::new(),
+            transcript_assignments: discovery::TranscriptAssignmentState::default(),
             table_state: TableState::default(),
             should_quit: false,
             status_msg: String::new(),
@@ -570,7 +572,7 @@ impl App {
 
         // Discover which PIDs have session files
         let scan_start = std::time::Instant::now();
-        let discovered = discovery::scan_sessions();
+        let discovered = discovery::scan_sessions_with_state(&mut self.transcript_assignments);
         let scan_elapsed = scan_start.elapsed();
 
         // Build a map of existing sessions by PID for state preservation
