@@ -364,37 +364,6 @@ impl BrainEngine {
             brain_ctx.few_shot_examples = super::decisions::format_few_shot_examples(&similar);
         }
 
-        // Inject coordination context (leases, blockers, handoffs, memory)
-        #[cfg(feature = "coord")]
-        {
-            brain_ctx.coordination_context =
-                crate::coord::injection::build_coordination_context(session);
-        }
-
-        // Inject hive knowledge only when explicitly enabled.
-        #[cfg(feature = "hive")]
-        {
-            let cfg = crate::config::Config::load();
-            if crate::hive::is_active(cfg.hive.as_ref()) {
-                let hive_cfg = cfg.hive.clone().unwrap_or_default();
-                let store = crate::hive::store::HiveStore::load();
-                let trust_store =
-                    crate::hive::trust::TrustStore::load_with_default(hive_cfg.default_trust);
-                let (ctx, injected_ids) = crate::hive::injection::build_hive_context_for_session(
-                    &store,
-                    &trust_store,
-                    hive_cfg.inject_unverified,
-                    hive_cfg.max_prompt_units,
-                    Some(pid),
-                );
-                brain_ctx.hive_context = ctx;
-                // Stash the injected unit ids so the matching log_decision call
-                // can attribute the outcome back to each unit (#223 feedback loop).
-                let _ = crate::hive::feedback::stash_pending(pid, &injected_ids);
-                crate::hive::feedback::record_injections(&injected_ids);
-            }
-        }
-
         let prompt = context::format_brain_prompt(&brain_ctx);
 
         self.inflight.insert(pid);
@@ -847,6 +816,110 @@ mod tests {
         s.telemetry_status = TelemetryStatus::Available;
         s.pending_tool_name = Some("Bash".into());
         s
+    }
+
+    fn suggestion(action: RuleAction, confidence: f64) -> BrainSuggestion {
+        BrainSuggestion {
+            action,
+            message: None,
+            reasoning: "fixture".into(),
+            confidence,
+            suggested_at: 0,
+        }
+    }
+
+    fn inject(engine: &BrainEngine, pid: u32, suggestion: Result<BrainSuggestion, String>) {
+        engine.tx.send(BrainResult { pid, suggestion }).unwrap();
+    }
+
+    #[test]
+    fn advisory_mode_queues_high_confidence_suggestion() {
+        let mut engine = BrainEngine::new(make_config());
+        let session = make_session(100, SessionStatus::Processing);
+        inject(&engine, 100, Ok(suggestion(RuleAction::Approve, 1.0)));
+
+        assert!(engine.tick(&[session], &[]).is_empty());
+        assert!(engine.pending.contains_key(&100));
+    }
+
+    #[test]
+    fn auto_mode_defers_low_confidence_suggestion() {
+        let mut config = make_config();
+        config.auto_mode = true;
+        let mut engine = BrainEngine::new(config);
+        let mut session = make_session(100, SessionStatus::Processing);
+        session.pending_tool_name = Some("stress-test-unknown-tool".into());
+        inject(&engine, 100, Ok(suggestion(RuleAction::Approve, 0.0)));
+
+        assert!(engine.tick(&[session], &[]).is_empty());
+        assert!(engine.pending.contains_key(&100));
+    }
+
+    #[test]
+    fn deny_rule_overrides_auto_mode() {
+        let mut config = make_config();
+        config.auto_mode = true;
+        let mut engine = BrainEngine::new(config);
+        let session = make_session(100, SessionStatus::Processing);
+        let deny = crate::rules::AutoRule::new("deny all".into(), RuleAction::Deny);
+        inject(&engine, 100, Ok(suggestion(RuleAction::Approve, 1.0)));
+
+        let actions = engine.tick(&[session], &[deny]);
+
+        assert!(actions[0].1.contains("deny rule"));
+        assert!(!engine.pending.contains_key(&100));
+    }
+
+    #[test]
+    fn auto_spawn_respects_max_sessions() {
+        let mut config = make_config();
+        config.auto_mode = true;
+        config.max_sessions = 1;
+        let mut engine = BrainEngine::new(config);
+        let session = make_session(100, SessionStatus::Processing);
+        inject(
+            &engine,
+            100,
+            Ok(suggestion(
+                RuleAction::Spawn {
+                    prompt: "run tests".into(),
+                    cwd: "/tmp/test".into(),
+                },
+                1.0,
+            )),
+        );
+
+        let actions = engine.tick(&[session], &[]);
+
+        assert!(actions[0].1.contains("Spawn blocked"));
+    }
+
+    #[test]
+    fn auto_route_requires_active_target() {
+        let mut config = make_config();
+        config.auto_mode = true;
+        let mut engine = BrainEngine::new(config);
+        let session = make_session(100, SessionStatus::Processing);
+        inject(
+            &engine,
+            100,
+            Ok(suggestion(RuleAction::Route { target_pid: 999 }, 1.0)),
+        );
+
+        let actions = engine.tick(&[session], &[]);
+
+        assert!(actions[0].1.contains("target PID 999 not found"));
+    }
+
+    #[test]
+    fn inference_failure_creates_no_pending_or_task_state() {
+        let mut engine = BrainEngine::new(make_config());
+        let session = make_session(100, SessionStatus::Processing);
+        inject(&engine, 100, Err("endpoint unavailable".into()));
+
+        assert!(engine.tick(&[session], &[]).is_empty());
+        assert!(engine.pending.is_empty());
+        assert!(engine.inflight.is_empty());
     }
 
     #[test]

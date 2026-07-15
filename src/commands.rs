@@ -1789,83 +1789,17 @@ pub(crate) fn run_brain_baseline(cli: &Cli) -> io::Result<()> {
     let _ = brain::outcomes::reap();
     let decisions = brain::decisions::read_all_decisions();
     let resolved = brain::outcomes::load_resolved_map();
-    let scope = match cli.project.as_deref() {
-        Some(p) => crate::hive::KnowledgeScope::Project(p.to_string()),
-        None => crate::hive::KnowledgeScope::Universal,
-    };
-    let units = crate::hive::distiller::distill_outcomes(
-        &decisions,
-        &resolved,
-        "local",
-        &scope,
-        cli.project.as_deref(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0),
-        // Lower the threshold for the CLI view so users see partial signal.
-        &crate::hive::distiller::ExportThresholds {
-            min_outcome_samples: 1,
-            ..Default::default()
-        },
-    );
-
-    type BaselineRow = (String, f64, u32, Option<f64>, Option<u64>);
-    let mut rows: Vec<BaselineRow> = units
-        .into_iter()
-        .filter_map(|u| {
-            if let crate::hive::KnowledgeContent::ApproachOutcome {
-                approach_ref,
-                success_rate,
-                sample_count,
-                median_cost_usd,
-                median_duration_ms,
-                ..
-            } = u.content
-            {
-                if let Some(t) = cli.tool.as_deref() {
-                    if !approach_ref.contains(&format!(":{t}:")) {
-                        return None;
-                    }
-                }
-                Some((
-                    approach_ref,
-                    success_rate,
-                    sample_count,
-                    median_cost_usd,
-                    median_duration_ms,
-                ))
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    // Rank by success_rate * sample_count, desc.
-    rows.sort_by(|a, b| {
-        let av = a.1 * a.2 as f64;
-        let bv = b.1 * b.2 as f64;
-        bv.partial_cmp(&av).unwrap_or(std::cmp::Ordering::Equal)
-    });
+    let mut rows = brain::outcomes::rank_approaches(&decisions, &resolved, cli.project.as_deref());
+    if let Some(tool) = cli.tool.as_deref() {
+        rows.retain(|row| row.approach_ref.contains(&format!(":{tool}:")));
+    }
 
     if let Some(n) = cli.top {
         rows.truncate(n);
     }
 
     if cli.json {
-        let arr: Vec<serde_json::Value> = rows
-            .into_iter()
-            .map(|(r, sr, n, c, d)| {
-                serde_json::json!({
-                    "approach_ref": r,
-                    "success_rate": sr,
-                    "sample_count": n,
-                    "median_cost_usd": c,
-                    "median_duration_ms": d,
-                })
-            })
-            .collect();
-        println!("{}", serde_json::to_string(&arr).unwrap());
+        println!("{}", serde_json::to_string(&rows).unwrap());
     } else if rows.is_empty() {
         println!("No baseline data yet. Need at least 1 attributed outcome.");
     } else {
@@ -1873,16 +1807,22 @@ pub(crate) fn run_brain_baseline(cli: &Cli) -> io::Result<()> {
             "{:<8} {:<6} {:<10} {:<10} APPROACH",
             "SUCC%", "N", "MED_COST", "MED_MS"
         );
-        for (r, sr, n, c, d) in rows {
-            let cost = c.map(|x| format!("${x:.4}")).unwrap_or_else(|| "-".into());
-            let dur = d.map(|x| x.to_string()).unwrap_or_else(|| "-".into());
+        for row in rows {
+            let cost = row
+                .median_cost_usd
+                .map(|x| format!("${x:.4}"))
+                .unwrap_or_else(|| "-".into());
+            let dur = row
+                .median_duration_ms
+                .map(|x| x.to_string())
+                .unwrap_or_else(|| "-".into());
             println!(
                 "{:<8.0} {:<6} {:<10} {:<10} {}",
-                sr * 100.0,
-                n,
+                row.success_rate * 100.0,
+                row.sample_count,
                 cost,
                 dur,
-                r
+                row.approach_ref
             );
         }
     }

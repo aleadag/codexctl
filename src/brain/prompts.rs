@@ -83,7 +83,7 @@ pub fn list_prompts() -> Vec<(String, String)> {
 const ADVISORY_PROMPT: &str = r#"You are a session supervisor for Codex. Analyze the session state and recent conversation to decide what action to take. Consider the state of other active sessions when making decisions.
 
 ## Session State
-{{session_summary}}{{git_context}}{{global_session_map}}{{coordination_context}}{{hive_context}}
+{{session_summary}}{{git_context}}{{global_session_map}}
 
 ## Recent Conversation
 {{recent_transcript}}{{few_shot_examples}}
@@ -155,6 +155,13 @@ mod tests {
         let prompt = builtin(ADVISORY);
         assert!(prompt.contains("session supervisor"));
         assert!(prompt.contains("{{session_summary}}"));
+    }
+
+    #[test]
+    fn advisory_prompt_has_no_external_coordination_slots() {
+        let prompt = builtin(ADVISORY);
+        assert!(!prompt.contains("coordination_context"));
+        assert!(!prompt.contains("hive_context"));
     }
 
     #[test]

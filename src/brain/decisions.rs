@@ -439,12 +439,6 @@ pub fn log_decision_full(
         );
     }
 
-    // #223 injection feedback loop: attribute this decision's outcome back to
-    // every hive unit that appeared in the prompt for `pid`. No-op when hive
-    // wasn't injected for this session (no pending stash).
-    #[cfg(feature = "hive")]
-    crate::hive::feedback::record_outcome(pid, user_action);
-
     // Re-distill preferences in a background thread every Nth decision.
     // The file append above is fast (single write), but distillation reads
     // the full history and computes patterns — must not block the TUI.
@@ -534,13 +528,6 @@ fn maybe_distill_background() {
                 if decisions.len() >= MIN_PROJECT_DECISIONS {
                     let proj_prefs = distill_preferences(decisions);
                     let _ = save_project_preferences(project, &proj_prefs);
-
-                    // Promote high-confidence patterns to coordination memory
-                    #[cfg(feature = "coord")]
-                    {
-                        let _ =
-                            crate::coord::promotion::promote_from_preferences(project, &proj_prefs);
-                    }
                 }
             }
 
@@ -555,67 +542,6 @@ fn maybe_distill_background() {
                 let mut state = super::insights::load_state();
                 let _ = super::insights::merge_insights(insights, &mut state);
                 let _ = super::insights::save_state(&state);
-            }
-
-            // Export knowledge units to hive store for sharing
-            #[cfg(feature = "hive")]
-            {
-                let cfg = crate::config::Config::load();
-                if crate::hive::is_active(cfg.hive.as_ref()) {
-                    let hive_cfg = cfg.hive.clone().unwrap_or_default();
-                    let thresholds = crate::hive::distiller::ExportThresholds {
-                        min_pattern_evidence: hive_cfg.export_min_evidence,
-                        min_tool_decisions: hive_cfg.export_min_tool_decisions,
-                        ..Default::default()
-                    };
-                    #[cfg(feature = "relay")]
-                    let local_id = crate::relay::load_or_create_identity().0;
-                    #[cfg(not(feature = "relay"))]
-                    let local_id = crate::hive::local_identity();
-                    let mut store = crate::hive::store::HiveStore::load();
-                    let units = crate::hive::distiller::distill_to_knowledge_stable(
-                        &prefs,
-                        &local_id,
-                        None,
-                        &thresholds,
-                        &store,
-                    );
-                    let _count = units.len() as u32;
-                    for unit in units {
-                        store.insert(unit);
-                    }
-
-                    // Compact: enforce TTL, max_units, stale peer cleanup
-                    let trust_store =
-                        crate::hive::trust::TrustStore::load_with_default(hive_cfg.default_trust);
-                    let evicted = store.compact(
-                        hive_cfg.knowledge_ttl_days,
-                        hive_cfg.max_units,
-                        hive_cfg.stale_peer_days,
-                        Some(&trust_store),
-                    );
-                    if !evicted.is_empty() {
-                        // Archive evicted units to cold storage (optional)
-                        let archived = crate::hive::archive::archive_units(&evicted).unwrap_or(0);
-                        crate::logger::log(
-                            "HIVE",
-                            &format!(
-                                "compacted: {} evicted, {} archived (max {})",
-                                evicted.len(),
-                                archived,
-                                hive_cfg.max_units
-                            ),
-                        );
-                    }
-
-                    let _ = store.save();
-
-                    // Signal the relay to broadcast new knowledge to peers
-                    #[cfg(feature = "relay")]
-                    if _count > 0 {
-                        crate::hive::signal_new_knowledge(_count);
-                    }
-                }
             }
         }
         DISTILLING.store(false, Ordering::Release);

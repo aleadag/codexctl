@@ -309,7 +309,9 @@ pub fn parse_suggestion_json(text: &str) -> Result<BrainSuggestion, String> {
         let target_pid = json
             .get("target_pid")
             .and_then(|v| v.as_u64())
-            .ok_or("route action requires 'target_pid' field")? as u32;
+            .ok_or("route action requires 'target_pid' field")?;
+        let target_pid =
+            u32::try_from(target_pid).map_err(|_| "route action 'target_pid' exceeds u32 range")?;
         RuleAction::Route { target_pid }
     } else if action_str == "spawn" {
         let prompt = json
@@ -405,6 +407,36 @@ mod tests {
         let json = r#"{"action": "terminate", "reasoning": "over budget", "confidence": 0.7}"#;
         let s = parse_suggestion_json(json).unwrap();
         assert_eq!(s.action, RuleAction::Terminate);
+    }
+
+    #[test]
+    fn parse_route_suggestion() {
+        let suggestion = parse_suggestion_json(
+            r#"{"action":"route","target_pid":42,"reasoning":"better owner","confidence":0.9}"#,
+        )
+        .unwrap();
+        assert_eq!(suggestion.action, RuleAction::Route { target_pid: 42 });
+    }
+
+    #[test]
+    fn parse_route_rejects_pid_overflow() {
+        let json = r#"{"action":"route","target_pid":4294967296,"reasoning":"invalid"}"#;
+        assert!(parse_suggestion_json(json).is_err());
+    }
+
+    #[test]
+    fn parse_spawn_suggestion() {
+        let suggestion = parse_suggestion_json(
+            r#"{"action":"spawn","spawn_prompt":"run tests","spawn_cwd":"/work","reasoning":"parallel","confidence":0.9}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            suggestion.action,
+            RuleAction::Spawn {
+                prompt: "run tests".into(),
+                cwd: "/work".into(),
+            }
+        );
     }
 
     #[test]

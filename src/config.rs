@@ -149,6 +149,7 @@ pub struct HiveConfig {
     pub stale_peer_days: u32,
     /// Outbound exposure mode: "auto" gossips everything that passes filters;
     /// "manual" keeps new units hidden until the user runs `codexctl hive expose`.
+    #[cfg_attr(not(feature = "hive"), allow(dead_code))]
     pub share_mode: String,
 }
 
@@ -481,6 +482,7 @@ impl Config {
             if let Some(v) = raw_hive.stale_peer_days {
                 hive.stale_peer_days = v;
             }
+            #[cfg(feature = "hive")]
             if let Some(v) = raw_hive.share_mode {
                 if crate::hive::exposure::ShareMode::parse(&v).is_some() {
                     hive.share_mode = v.trim().to_lowercase();

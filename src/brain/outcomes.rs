@@ -7,7 +7,7 @@
 //! outcome to the most recent matching decision in `decisions.jsonl` and
 //! writes the resolved outcome to `outcomes/<decision_id>.json`. Distillation
 //! reads decisions and outcomes together to build per-approach success
-//! statistics that feed into the hive as `ApproachOutcome` knowledge units.
+//! statistics for local brain baseline reporting.
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -94,6 +94,118 @@ pub struct ResolvedOutcome {
     #[serde(default)]
     pub stderr_tail: Option<String>,
     pub ts: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ApproachBaselineRow {
+    pub approach_ref: String,
+    pub success_rate: f64,
+    pub sample_count: u32,
+    pub median_cost_usd: Option<f64>,
+    pub median_duration_ms: Option<u64>,
+}
+
+#[derive(Default)]
+struct OutcomeBucket {
+    samples: u32,
+    successes: u32,
+    costs: Vec<f64>,
+    durations_ms: Vec<u64>,
+}
+
+fn approach_ref_for(decision: &DecisionRecord) -> Option<String> {
+    let tool = decision.tool.as_deref()?;
+    let command = decision
+        .command
+        .as_deref()
+        .map(|value| value.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "*".into());
+    Some(format!("pattern:{tool}:{command}"))
+}
+
+fn median_f64(mut values: Vec<f64>) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let middle = values.len() / 2;
+    Some(if values.len() % 2 == 0 {
+        (values[middle - 1] + values[middle]) / 2.0
+    } else {
+        values[middle]
+    })
+}
+
+fn median_u64(mut values: Vec<u64>) -> Option<u64> {
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_unstable();
+    let middle = values.len() / 2;
+    Some(if values.len() % 2 == 0 {
+        (values[middle - 1] + values[middle]) / 2
+    } else {
+        values[middle]
+    })
+}
+
+pub fn rank_approaches(
+    decisions: &[DecisionRecord],
+    resolved: &std::collections::HashMap<String, ResolvedOutcome>,
+    project: Option<&str>,
+) -> Vec<ApproachBaselineRow> {
+    let mut buckets = std::collections::HashMap::<String, OutcomeBucket>::new();
+    for decision in decisions {
+        if project.is_some_and(|name| !decision.project.eq_ignore_ascii_case(name)) {
+            continue;
+        }
+        let Some(decision_id) = decision.decision_id.as_deref() else {
+            continue;
+        };
+        let Some(outcome) = resolved.get(decision_id) else {
+            continue;
+        };
+        let Some(approach_ref) = approach_ref_for(decision) else {
+            continue;
+        };
+        let bucket = buckets.entry(approach_ref).or_default();
+        bucket.samples += 1;
+        if outcome.exit_code == Some(0) {
+            bucket.successes += 1;
+        }
+        if let Some(cost) = decision
+            .context
+            .as_ref()
+            .map(|context| context.cost_usd)
+            .filter(|cost| *cost > 0.0)
+        {
+            bucket.costs.push(cost);
+        }
+        if let Some(duration_ms) = outcome.duration_ms {
+            bucket.durations_ms.push(duration_ms);
+        }
+    }
+
+    let mut rows = buckets
+        .into_iter()
+        .map(|(approach_ref, bucket)| ApproachBaselineRow {
+            approach_ref,
+            success_rate: bucket.successes as f64 / bucket.samples as f64,
+            sample_count: bucket.samples,
+            median_cost_usd: median_f64(bucket.costs),
+            median_duration_ms: median_u64(bucket.durations_ms),
+        })
+        .collect::<Vec<_>>();
+    rows.sort_by(|a, b| {
+        let a_score = a.success_rate * f64::from(a.sample_count);
+        let b_score = b.success_rate * f64::from(b.sample_count);
+        b_score
+            .partial_cmp(&a_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.approach_ref.cmp(&b.approach_ref))
+    });
+    rows
 }
 
 /// Stats returned by `reap()`.
@@ -543,6 +655,88 @@ pub fn reap_with_runners(test_runners: &[String]) -> ReapStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn decision_with_id(id: &str, project: &str, tool: &str, command: &str) -> DecisionRecord {
+        DecisionRecord {
+            timestamp: "2026-07-14T00:00:00Z".into(),
+            pid: 1,
+            project: project.into(),
+            tool: Some(tool.into()),
+            command: Some(command.into()),
+            brain_action: "approve".into(),
+            brain_confidence: 0.9,
+            brain_reasoning: "fixture".into(),
+            user_action: "auto".into(),
+            context: None,
+            outcome: None,
+            decision_type: crate::brain::decisions::DecisionType::Session,
+            suggested_at: None,
+            resolved_at: None,
+            override_reason: None,
+            decision_id: Some(id.into()),
+            brain_decision_ms: None,
+            cache_hit: None,
+            canonical: None,
+        }
+    }
+
+    fn resolved_outcomes(
+        rows: &[(&str, &str, i32, u64)],
+    ) -> std::collections::HashMap<String, ResolvedOutcome> {
+        rows.iter()
+            .map(|(id, project, exit_code, duration_ms)| {
+                (
+                    (*id).to_string(),
+                    ResolvedOutcome {
+                        decision_id: (*id).to_string(),
+                        tool: "Bash".into(),
+                        command: Some("cargo test".into()),
+                        project: (*project).to_string(),
+                        exit_code: Some(*exit_code),
+                        duration_ms: Some(*duration_ms),
+                        stderr_tail: None,
+                        ts: 1,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn rank_approaches_is_local_and_project_filterable() {
+        let decisions = vec![
+            decision_with_id("d1", "alpha", "Bash", "cargo test"),
+            decision_with_id("d2", "alpha", "Bash", "cargo test"),
+            decision_with_id("d3", "beta", "Bash", "cargo test"),
+        ];
+        let resolved = resolved_outcomes(&[
+            ("d1", "alpha", 0, 100),
+            ("d2", "alpha", 1, 300),
+            ("d3", "beta", 0, 200),
+        ]);
+
+        let rows = rank_approaches(&decisions, &resolved, Some("alpha"));
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].approach_ref, "pattern:Bash:cargo test");
+        assert_eq!(rows[0].sample_count, 2);
+        assert_eq!(rows[0].success_rate, 0.5);
+        assert_eq!(rows[0].median_duration_ms, Some(200));
+    }
+
+    #[test]
+    fn rank_approaches_breaks_score_ties_by_approach_ref() {
+        let decisions = vec![
+            decision_with_id("d1", "alpha", "Bash", "z command"),
+            decision_with_id("d2", "alpha", "Bash", "a command"),
+        ];
+        let resolved = resolved_outcomes(&[("d1", "alpha", 0, 100), ("d2", "alpha", 0, 100)]);
+
+        let rows = rank_approaches(&decisions, &resolved, Some("alpha"));
+
+        assert_eq!(rows[0].approach_ref, "pattern:Bash:a command");
+        assert_eq!(rows[1].approach_ref, "pattern:Bash:z command");
+    }
 
     #[test]
     fn truncate_stderr_short() {
