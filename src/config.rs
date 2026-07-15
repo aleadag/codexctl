@@ -505,6 +505,9 @@ impl Config {
 # cache_read_per_m = 0.50
 # cache_write_per_m = 5.00
 # context_max = 258400
+# long_context_threshold = 272000
+# long_context_input_multiplier = 2.0
+# long_context_output_multiplier = 1.5
 
 # ── Auto-Rules ──────────────────────────────────────────────────────
 # Match sessions by status/tool/command/project/cost, then take action.
@@ -700,6 +703,19 @@ fn parse_config_file(path: &PathBuf) -> Option<RawConfig> {
                     }
                     "context_max" => {
                         profile.context_max = value.parse().unwrap_or(profile.context_max);
+                    }
+                    "long_context_threshold" => {
+                        profile.long_context_threshold = value.parse().ok();
+                    }
+                    "long_context_input_multiplier" => {
+                        profile.long_context_input_multiplier = value
+                            .parse()
+                            .unwrap_or(profile.long_context_input_multiplier);
+                    }
+                    "long_context_output_multiplier" => {
+                        profile.long_context_output_multiplier = value
+                            .parse()
+                            .unwrap_or(profile.long_context_output_multiplier);
                     }
                     _ => {}
                 }
@@ -1094,6 +1110,9 @@ fn ensure_model_override<'a>(
             cache_read_per_m: 0.0,
             cache_write_per_m: 0.0,
             context_max: 0,
+            long_context_threshold: None,
+            long_context_input_multiplier: 1.0,
+            long_context_output_multiplier: 1.0,
         },
     });
 
@@ -1173,6 +1192,12 @@ output_per_m = 30.0
 cache_read_per_m = 0.5
 cache_write_per_m = 5.0
 context_max = 258400
+long_context_threshold = 272000
+long_context_input_multiplier = 2.0
+long_context_output_multiplier = 1.5
+
+[models."custom"]
+input_per_m = 1.0
 "#
         )
         .unwrap();
@@ -1190,9 +1215,35 @@ context_max = 258400
             raw.webhook_events,
             Some(vec!["NeedsInput".into(), "Finished".into()])
         );
-        assert_eq!(raw.model_overrides.len(), 1);
+        assert_eq!(raw.model_overrides.len(), 2);
         assert_eq!(raw.model_overrides[0].name, "gpt-5.5");
         assert_eq!(raw.model_overrides[0].profile.context_max, 258_400);
+        assert_eq!(
+            raw.model_overrides[0].profile.long_context_threshold,
+            Some(272_000)
+        );
+        assert_eq!(
+            raw.model_overrides[0].profile.long_context_input_multiplier,
+            2.0
+        );
+        assert_eq!(
+            raw.model_overrides[0]
+                .profile
+                .long_context_output_multiplier,
+            1.5
+        );
+        assert_eq!(raw.model_overrides[1].name, "custom");
+        assert_eq!(raw.model_overrides[1].profile.long_context_threshold, None);
+        assert_eq!(
+            raw.model_overrides[1].profile.long_context_input_multiplier,
+            1.0
+        );
+        assert_eq!(
+            raw.model_overrides[1]
+                .profile
+                .long_context_output_multiplier,
+            1.0
+        );
     }
 
     #[test]

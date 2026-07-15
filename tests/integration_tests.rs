@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{Seek, SeekFrom, Write};
 use std::time::Duration;
 
 use codexctl::discovery;
@@ -365,6 +365,9 @@ fn shorten_model_unknown() {
 fn make_session_with_jsonl(content: &str) -> (CodexSession, tempfile::NamedTempFile) {
     let mut file = tempfile::NamedTempFile::new().unwrap();
     file.write_all(content.as_bytes()).unwrap();
+    if !content.is_empty() && !content.ends_with('\n') {
+        writeln!(file).unwrap();
+    }
     file.flush().unwrap();
 
     let raw = RawSession {
@@ -385,6 +388,9 @@ fn make_codex_session_with_jsonl(content: &str) -> (CodexSession, tempfile::Name
         .tempfile()
         .unwrap();
     file.write_all(content.as_bytes()).unwrap();
+    if !content.is_empty() && !content.ends_with('\n') {
+        writeln!(file).unwrap();
+    }
     file.flush().unwrap();
 
     let raw = RawSession {
@@ -396,6 +402,60 @@ fn make_codex_session_with_jsonl(content: &str) -> (CodexSession, tempfile::Name
     let mut session = CodexSession::from_raw(raw);
     session.jsonl_path = Some(file.path().to_path_buf());
     (session, file)
+}
+
+fn codex_session_file(model: &str) -> (CodexSession, tempfile::NamedTempFile) {
+    make_codex_session_with_jsonl(&format!(
+        "{{\"type\":\"turn_context\",\"payload\":{{\"model\":\"{model}\"}}}}\n"
+    ))
+}
+
+fn codex_token_count_line(
+    total_input: u64,
+    total_cached: u64,
+    total_output: u64,
+    last_input: u64,
+    last_cached: u64,
+    last_output: u64,
+) -> String {
+    format!(
+        concat!(
+            r#"{{"type":"event_msg","payload":{{"type":"token_count","info":{{"total_token_usage":{{"input_tokens":{},"cached_input_tokens":{},"output_tokens":{},"reasoning_output_tokens":0,"total_tokens":{}}},"last_token_usage":{{"input_tokens":{},"cached_input_tokens":{},"output_tokens":{},"reasoning_output_tokens":0,"total_tokens":{}}},"model_context_window":1050000}}}}}}"#
+        ),
+        total_input,
+        total_cached,
+        total_output,
+        total_input + total_output,
+        last_input,
+        last_cached,
+        last_output,
+        last_input + last_output,
+    )
+}
+
+fn append_codex_token_count(
+    file: &mut tempfile::NamedTempFile,
+    total_input: u64,
+    total_cached: u64,
+    total_output: u64,
+    last_input: u64,
+    last_cached: u64,
+    last_output: u64,
+) {
+    writeln!(
+        file,
+        "{}",
+        codex_token_count_line(
+            total_input,
+            total_cached,
+            total_output,
+            last_input,
+            last_cached,
+            last_output,
+        )
+    )
+    .unwrap();
+    file.flush().unwrap();
 }
 
 fn make_session_with_paths(
@@ -418,7 +478,131 @@ fn write_jsonl(path: &std::path::Path, content: &str) {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).unwrap();
     }
-    std::fs::write(path, content).unwrap();
+    std::fs::write(path, format!("{content}\n")).unwrap();
+}
+
+#[test]
+fn codex_cost_prices_each_request_once_and_never_decreases() {
+    let (mut session, mut file) = codex_session_file("gpt-5.6-sol");
+    append_codex_token_count(&mut file, 100_000, 20_000, 1_000, 100_000, 20_000, 1_000);
+    monitor::update_tokens(&mut session);
+    let first = session.cost_usd;
+    assert!(first > 0.0);
+
+    monitor::update_tokens(&mut session);
+    assert_eq!(session.cost_usd, first);
+
+    append_codex_token_count(&mut file, 220_000, 60_000, 3_000, 120_000, 40_000, 2_000);
+    monitor::update_tokens(&mut session);
+    assert!(session.cost_usd > first);
+}
+
+#[test]
+fn counter_reset_freezes_cost_as_unverified() {
+    let (mut session, mut file) = codex_session_file("gpt-5.6-sol");
+    append_codex_token_count(&mut file, 250_000, 40_000, 2_000, 250_000, 40_000, 2_000);
+    monitor::update_tokens(&mut session);
+    let before = session.cost_usd;
+
+    append_codex_token_count(&mut file, 10_000, 2_000, 100, 10_000, 2_000, 100);
+    monitor::update_tokens(&mut session);
+
+    assert_eq!(session.cost_usd, before);
+    assert!(session.cost_estimate_unverified);
+    assert!(session.cost_ledger_frozen);
+}
+
+#[test]
+fn transcript_truncation_freezes_cost_instead_of_lowering_it() {
+    let (mut session, mut file) = codex_session_file("gpt-5.6-sol");
+    append_codex_token_count(&mut file, 250_000, 40_000, 2_000, 250_000, 40_000, 2_000);
+    monitor::update_tokens(&mut session);
+    let before = session.cost_usd;
+
+    file.as_file_mut().set_len(0).unwrap();
+    file.seek(SeekFrom::Start(0)).unwrap();
+    writeln!(
+        file,
+        r#"{{"type":"turn_context","payload":{{"model":"gpt-5.6-sol"}}}}"#
+    )
+    .unwrap();
+    append_codex_token_count(&mut file, 10_000, 2_000, 100, 10_000, 2_000, 100);
+    monitor::update_tokens(&mut session);
+
+    assert_eq!(session.cost_usd, before);
+    assert!(session.cost_estimate_unverified);
+    assert!(session.cost_ledger_frozen);
+}
+
+#[test]
+fn mixed_model_requests_keep_original_prices() {
+    let (mut session, mut file) = codex_session_file("gpt-5.6-sol");
+    append_codex_token_count(&mut file, 100_000, 0, 1_000, 100_000, 0, 1_000);
+    monitor::update_tokens(&mut session);
+    let sol_cost = session.cost_usd;
+    assert!((sol_cost - 0.53).abs() < 0.000_001);
+
+    writeln!(
+        file,
+        r#"{{"type":"turn_context","payload":{{"model":"gpt-5.6-terra"}}}}"#
+    )
+    .unwrap();
+    append_codex_token_count(&mut file, 200_000, 0, 2_000, 100_000, 0, 1_000);
+    monitor::update_tokens(&mut session);
+
+    assert!((session.cost_usd - 0.795).abs() < 0.000_001);
+}
+
+#[test]
+fn long_context_multiplier_uses_request_input_not_session_total() {
+    let (mut long_session, mut long_file) = codex_session_file("gpt-5.6-sol");
+    append_codex_token_count(&mut long_file, 300_000, 0, 10_000, 300_000, 0, 10_000);
+    monitor::update_tokens(&mut long_session);
+    assert!((long_session.cost_usd - 3.45).abs() < 0.000_001);
+
+    let (mut cumulative_session, mut cumulative_file) = codex_session_file("gpt-5.6-sol");
+    append_codex_token_count(&mut cumulative_file, 200_000, 0, 1_000, 200_000, 0, 1_000);
+    monitor::update_tokens(&mut cumulative_session);
+    append_codex_token_count(&mut cumulative_file, 300_000, 0, 2_000, 100_000, 0, 1_000);
+    monitor::update_tokens(&mut cumulative_session);
+    assert!((cumulative_session.cost_usd - 1.56).abs() < 0.000_001);
+}
+
+#[test]
+fn partial_jsonl_line_is_retried_after_newline() {
+    let (mut session, mut file) = codex_session_file("gpt-5.6-sol");
+    monitor::update_tokens(&mut session);
+    let complete_offset = session.jsonl_offset;
+    write!(
+        file,
+        "{}",
+        codex_token_count_line(100_000, 20_000, 1_000, 100_000, 20_000, 1_000)
+    )
+    .unwrap();
+    file.flush().unwrap();
+
+    monitor::update_tokens(&mut session);
+    assert_eq!(session.cost_usd, 0.0);
+    assert_eq!(session.jsonl_offset, complete_offset);
+
+    writeln!(file).unwrap();
+    file.flush().unwrap();
+    monitor::update_tokens(&mut session);
+    assert!(session.cost_usd > 0.0);
+    assert!(session.jsonl_offset > complete_offset);
+}
+
+#[test]
+fn unknown_model_cost_is_monotonic_and_unverified() {
+    let (mut session, mut file) = codex_session_file("future-model");
+    append_codex_token_count(&mut file, 100_000, 0, 1_000, 100_000, 0, 1_000);
+    monitor::update_tokens(&mut session);
+    let first = session.cost_usd;
+    assert!(first > 0.0);
+    assert!(session.cost_estimate_unverified);
+
+    monitor::update_tokens(&mut session);
+    assert_eq!(session.cost_usd, first);
 }
 
 #[test]
@@ -1282,7 +1466,7 @@ fn resolve_with_layout(
     let jsonl_content = r#"{"type":"assistant","message":{"model":"gpt-5.5","stop_reason":"end_turn","usage":{"input_tokens":1,"cache_creation_input_tokens":523,"cache_read_input_tokens":79425,"output_tokens":937}}}"#;
     std::fs::write(
         project_dir.join(format!("{session_id}.jsonl")),
-        jsonl_content,
+        format!("{jsonl_content}\n"),
     )
     .unwrap();
 
