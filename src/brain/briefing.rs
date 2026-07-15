@@ -330,11 +330,14 @@ mod tests {
 
     #[test]
     fn briefing_is_self_explanatory_when_empty() {
+        let _guard = crate::config::HOME_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         // Override HOME so we read from a clean tmp dir instead of the dev
         // machine's real ~/.codexctl (which may have decisions/preferences).
         let tmp = tempfile::tempdir().unwrap();
         let original_home = std::env::var("HOME").ok();
-        // SAFETY: cargo test in this crate runs sequentially for env mutation.
+        // SAFETY: HOME mutation is serialized by HOME_ENV_LOCK.
         unsafe { std::env::set_var("HOME", tmp.path()) };
 
         let opts = BriefingOptions {

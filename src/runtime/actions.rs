@@ -135,10 +135,12 @@ mod tests {
     /// picks it up.
     #[test]
     fn set_gate_mode_persists_to_file() {
+        let _guard = crate::config::HOME_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let dir = tempfile::tempdir().unwrap();
         let original = std::env::var("HOME").ok();
-        // Tests in this crate run serially per-thread, but this still races
-        // with anything else that touches HOME. Acceptable for a smoke test.
+        // SAFETY: HOME mutation is serialized by HOME_ENV_LOCK.
         unsafe { std::env::set_var("HOME", dir.path()) };
 
         let actions = LiveActions;

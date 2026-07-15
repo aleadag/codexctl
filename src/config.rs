@@ -4,6 +4,9 @@ use std::path::PathBuf;
 use crate::models::{ModelOverride, ModelProfile};
 use crate::rules::{AutoRule, RuleAction};
 
+#[cfg(test)]
+pub(crate) static HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Configuration loaded from TOML files, merged with CLI flags.
 /// Priority: CLI flags > project config > global config > defaults.
 #[derive(Debug, Clone)]

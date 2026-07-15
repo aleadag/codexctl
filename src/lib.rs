@@ -30,17 +30,6 @@ pub mod config;
 
 pub mod brain;
 pub mod brain_screen;
-#[cfg(feature = "bus")]
-pub mod bus;
-#[cfg(feature = "coord")]
-pub mod coord;
 pub mod doctor;
-#[cfg(feature = "hive")]
-pub mod hive;
 pub mod init;
-#[cfg(feature = "coord")]
-pub mod r#loop;
-pub mod orchestrator;
-#[cfg(feature = "relay")]
-pub mod relay;
 pub mod runtime;

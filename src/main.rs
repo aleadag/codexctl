@@ -19,23 +19,10 @@ use codexctl_tui::{app, demo, recorder, session_recorder, ui};
 
 mod brain;
 mod brain_screen;
-#[cfg(feature = "bus")]
-mod bus;
 mod commands;
 mod config;
-#[cfg(feature = "coord")]
-mod coord;
 mod doctor;
-#[cfg(feature = "hive")]
-mod hive;
-#[cfg(feature = "coord")]
-mod ingest;
 mod init;
-#[cfg(feature = "coord")]
-mod r#loop;
-mod orchestrator;
-#[cfg(feature = "relay")]
-mod relay;
 mod runtime;
 
 use std::io;
@@ -61,62 +48,6 @@ pub(crate) struct ViewFilters {
 
 #[derive(Subcommand)]
 pub(crate) enum Command {
-    #[cfg(feature = "relay")]
-    /// Relay: peer-to-peer connections, delegation, and discovery
-    Relay {
-        #[command(subcommand)]
-        command: relay::cli::RelayCommand,
-    },
-
-    #[cfg(feature = "hive")]
-    /// Hive: shared knowledge store, trust, archive, and distillation
-    Hive {
-        #[command(subcommand)]
-        command: hive::cli::HiveCommand,
-    },
-
-    #[cfg(feature = "coord")]
-    /// Coordination: events, leases, blockers, handoffs, interrupts, and memory
-    Coord {
-        #[command(subcommand)]
-        command: coord::cli::CoordCommand,
-    },
-
-    #[cfg(feature = "bus")]
-    /// Agent bus: MCP server, roles, mailboxes (docs/AGENT_BUS.md)
-    Bus {
-        #[command(subcommand)]
-        command: bus::cli::BusCommand,
-    },
-
-    #[cfg(feature = "coord")]
-    /// Ingest a Codex hook payload from stdin into coord
-    /// `hook_events` table (#345, RFC v2 §6). Best-effort by
-    /// construction — meant to be called from a bash hook with
-    /// `2>/dev/null || true`. JSONL tail + `ps` stay authoritative;
-    /// this is a latency optimization for the supervisor's reconciler.
-    Ingest {
-        /// Which hook is calling. One of `PreToolUse`, `PostToolUse`,
-        /// `Stop`, `SessionStart`, `Notification`, `UserPromptSubmit`.
-        #[arg(long)]
-        hook: String,
-    },
-
-    #[cfg(feature = "coord")]
-    /// Supervisor task surface (#349, RFC §10). Submit, inspect, and
-    /// drain the durable task ledger.
-    Supervisor {
-        #[command(subcommand)]
-        command: coord::supervisor_cli::SupervisorCommand,
-    },
-
-    #[cfg(feature = "coord")]
-    /// Loop runtime: source polling, triage, and coord task submission
-    Loop {
-        #[command(subcommand)]
-        command: r#loop::cli::LoopCommand,
-    },
-
     /// Onboarding wizard (budget, brain, hooks, skills). See issue #257.
     Init {
         /// Drift report comparing recorded onboarding against current state.
@@ -451,19 +382,6 @@ pub(crate) struct Cli {
     /// anti-patterns into context suitable for injection at session start.
     #[arg(long, help_heading = "Brain (Local LLM)")]
     pub(crate) brain_briefing: bool,
-
-    // ── Orchestration ──────────────────────────────────────────────────
-    /// Analyze a prompt and suggest parallel sub-tasks (outputs TaskFile JSON)
-    #[arg(long, help_heading = "Orchestration")]
-    pub(crate) decompose: Option<String>,
-
-    /// Run tasks from a JSON file (e.g., codexctl --run tasks.json)
-    #[arg(long, help_heading = "Orchestration")]
-    pub(crate) run: Option<String>,
-
-    /// Run independent tasks in parallel (used with --run)
-    #[arg(long, help_heading = "Orchestration")]
-    pub(crate) parallel: bool,
 
     // ── Subcommands ──────────────────────────────────────────────────
     #[command(subcommand)]
@@ -813,30 +731,6 @@ fn run_main(cli: Cli) -> io::Result<()> {
 
     if let Some(ref command) = cli.command {
         match command {
-            #[cfg(feature = "relay")]
-            Command::Relay { command } => return relay::cli::dispatch_command(command, cli.json),
-
-            #[cfg(feature = "hive")]
-            Command::Hive { command } => return hive::cli::dispatch_command(command, cli.json),
-
-            #[cfg(feature = "coord")]
-            Command::Coord { command } => return coord::cli::dispatch_command(command, cli.json),
-
-            #[cfg(feature = "bus")]
-            Command::Bus { command } => return bus::cli::dispatch_command(command, cli.json),
-
-            #[cfg(feature = "coord")]
-            Command::Ingest { hook } => {
-                let code = ingest::run(hook)?;
-                std::process::exit(code);
-            }
-
-            #[cfg(feature = "coord")]
-            Command::Supervisor { command } => return coord::supervisor_cli::dispatch(command),
-
-            #[cfg(feature = "coord")]
-            Command::Loop { command } => return r#loop::cli::dispatch(command, &cfg),
-
             Command::Init {
                 check,
                 reset,
@@ -966,43 +860,6 @@ fn run_main(cli: Cli) -> io::Result<()> {
 
     if cli.brain_briefing {
         return commands::run_brain_briefing(&cli);
-    }
-
-    if let Some(ref prompt) = cli.decompose {
-        let brain_cfg = cfg.brain.clone().unwrap_or_default();
-        if prompt.len() < 200 {
-            println!(
-                "Prompt is short ({} chars) — decomposition works best with larger, multi-part prompts.",
-                prompt.len()
-            );
-        }
-        let cwd = std::env::current_dir()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|_| ".".into());
-        let max_tasks = brain_cfg.max_sessions.min(6);
-        eprintln!("Analyzing prompt for decomposition...");
-        match brain::client::decompose_prompt(&brain_cfg, prompt, &cwd, max_tasks) {
-            Ok(result) => {
-                if result.decomposable {
-                    let task_file = orchestrator::decomposition_to_task_file(result.tasks, &cwd);
-                    let json = serde_json::to_string_pretty(&task_file)
-                        .unwrap_or_else(|e| format!("JSON error: {e}"));
-                    println!("{json}");
-                } else {
-                    println!("Not decomposable: {}", result.reasoning);
-                }
-            }
-            Err(e) => {
-                eprintln!("Decomposition failed: {e}");
-                std::process::exit(1);
-            }
-        }
-        return Ok(());
-    }
-
-    if let Some(ref run_file) = cli.run {
-        let task_file = orchestrator::load_tasks(run_file)?;
-        return orchestrator::run_tasks(task_file, cli.parallel);
     }
 
     if cli.autopsy {
@@ -1322,27 +1179,83 @@ fn run_tui<W: io::Write>(
 }
 
 #[cfg(test)]
+mod brain_only_cli_tests {
+    use super::*;
+
+    #[test]
+    fn removed_product_surfaces_are_rejected() {
+        for command in [
+            "coord",
+            "bus",
+            "relay",
+            "hive",
+            "supervisor",
+            "loop",
+            "ingest",
+        ] {
+            assert!(
+                Cli::try_parse_from(["codexctl", command]).is_err(),
+                "{command}"
+            );
+        }
+
+        assert!(Cli::try_parse_from(["codexctl", "--run", "tasks.json"]).is_err());
+        assert!(Cli::try_parse_from(["codexctl", "--parallel"]).is_err());
+        assert!(Cli::try_parse_from(["codexctl", "--decompose", "split this work"]).is_err());
+
+        let advisory = Cli::try_parse_from(["codexctl"]).unwrap();
+        assert!(!advisory.auto_run);
+        let automatic = Cli::try_parse_from(["codexctl", "--auto-run"]).unwrap();
+        assert!(automatic.auto_run);
+    }
+
+    #[test]
+    fn generated_help_keeps_auto_run_and_omits_removed_surfaces() {
+        let help = Cli::command().render_long_help().to_string();
+        assert!(help.contains("--auto-run"));
+        for command in [
+            "coord",
+            "bus",
+            "relay",
+            "hive",
+            "supervisor",
+            "loop",
+            "ingest",
+        ] {
+            assert!(
+                !help.lines().any(|line| {
+                    line.trim_start().strip_prefix(command).is_some_and(|rest| {
+                        rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t')
+                    })
+                }),
+                "{command} remains in generated help"
+            );
+        }
+        for flag in ["--run", "--parallel", "--decompose"] {
+            assert!(!help.contains(flag), "{flag} remains in generated help");
+        }
+    }
+}
+
+#[cfg(test)]
 mod first_run_tests {
     use super::*;
     use std::fs;
-    use std::sync::Mutex;
-
-    // is_first_run reads HOME and the filesystem; serialize so concurrent
-    // tests don't clobber each other when they set HOME.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn set_home(p: &std::path::Path) {
         // Cargo's test harness shares a process; reset HOME after each test
         // by calling this with the original value (we just leak temp dirs
         // since they're under /tmp anyway).
-        // SAFETY: tests are serialized via ENV_LOCK above; nothing else
+        // SAFETY: tests are serialized via HOME_ENV_LOCK; nothing else
         // here races on env reads inside the lock window.
         unsafe { std::env::set_var("HOME", p) };
     }
 
     #[test]
     fn first_run_when_neither_marker_nor_hooks_present() {
-        let _g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _g = config::HOME_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let tmp = tempfile::tempdir().unwrap();
         set_home(tmp.path());
         assert!(is_first_run(), "fresh home should be first-run");
@@ -1350,7 +1263,9 @@ mod first_run_tests {
 
     #[test]
     fn not_first_run_when_onboarding_marker_present() {
-        let _g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _g = config::HOME_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let tmp = tempfile::tempdir().unwrap();
         fs::create_dir_all(tmp.path().join(".codexctl")).unwrap();
         fs::write(tmp.path().join(".codexctl").join("onboarding.json"), "{}").unwrap();
@@ -1363,7 +1278,9 @@ mod first_run_tests {
 
     #[test]
     fn not_first_run_when_settings_mentions_codexctl() {
-        let _g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _g = config::HOME_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let tmp = tempfile::tempdir().unwrap();
         fs::create_dir_all(tmp.path().join(".codex")).unwrap();
         fs::write(
@@ -1380,8 +1297,10 @@ mod first_run_tests {
 
     #[test]
     fn not_first_run_when_home_missing() {
-        let _g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-        // SAFETY: serialized via ENV_LOCK; nothing else reads HOME inside
+        let _g = config::HOME_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        // SAFETY: serialized via HOME_ENV_LOCK; nothing else reads HOME inside
         // this critical section.
         unsafe { std::env::remove_var("HOME") };
         assert!(

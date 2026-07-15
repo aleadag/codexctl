@@ -13,15 +13,6 @@ categories = ["command-line-utilities"]
 name = "codexctl_tui"
 path = "src/lib.rs"
 
-[features]
-# Feature flags propagated from the binary's same-named features. Used to
-# gate optional UI state (coord widget panels, relay peers panel, hive
-# overlay tabs). The binary turns these on via `codexctl-tui/coord`,
-# `codexctl-tui/relay`, `codexctl-tui/hive` in its own [features] block.
-coord = []
-relay = []
-hive = []
-
 [dependencies]
 codexctl-core = { path = "../codexctl-core", version = "0.52.1" }
 ratatui = "0.29"

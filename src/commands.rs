@@ -863,10 +863,50 @@ pub(crate) fn run_watch(
     }
 }
 
-/// Run headless with brain, coordination, and context rot prevention active.
-/// The full autonomous stack runs in a loop, emitting structured JSON events.
-/// A TUI dashboard can be attached in another terminal -- both share state
-/// via the coordination SQLite store and brain decision logs.
+#[derive(Debug)]
+struct HeadlessEvent {
+    kind: &'static str,
+    data: serde_json::Value,
+}
+
+fn headless_tick_events(
+    app: &App,
+    previous: &std::collections::HashMap<u32, crate::session::SessionStatus>,
+) -> Vec<HeadlessEvent> {
+    let mut events = app
+        .sessions
+        .iter()
+        .filter(|session| {
+            previous
+                .get(&session.pid)
+                .is_none_or(|old| *old != session.status)
+        })
+        .map(|session| HeadlessEvent {
+            kind: "status_change",
+            data: serde_json::json!({
+                "pid": session.pid,
+                "project": session.display_name(),
+                "old_status": previous.get(&session.pid).map(ToString::to_string),
+                "new_status": session.status.to_string(),
+                "cost_usd": session.cost_usd,
+                "context_pct": session.context_percent(),
+                "decay_score": session.decay_score,
+            }),
+        })
+        .collect::<Vec<_>>();
+
+    if !app.status_msg.is_empty()
+        && (app.status_msg.starts_with("Brain:") || app.status_msg.starts_with("MAILBOX"))
+    {
+        events.push(HeadlessEvent {
+            kind: "action",
+            data: serde_json::json!({"detail": app.status_msg}),
+        });
+    }
+    events
+}
+
+/// Run headless with the same session and brain behavior as the TUI.
 pub(crate) fn run_headless(
     tick_rate: Duration,
     cfg: &crate::config::Config,
@@ -940,123 +980,13 @@ pub(crate) fn run_headless(
 
     let mut prev_statuses: HashMap<u32, SessionStatus> =
         app.sessions.iter().map(|s| (s.pid, s.status)).collect();
-    #[cfg(feature = "coord")]
-    // Supervisor reconciler (#345). Pure tick() returns the action list;
-    // the actuator wiring lands in PR4 (#346). For now this drives the
-    // skeleton against the live coord DB so any panic / lock issue
-    // surfaces in headless before the actuator goes hot.
-    #[cfg(feature = "coord")]
-    let supervisor = crate::coord::supervisor::Supervisor::with_defaults();
 
     loop {
         std::thread::sleep(tick_rate);
         app.tick();
-        #[cfg(feature = "coord")]
-        {}
 
-        // Emit status change events
-        for s in &app.sessions {
-            let prev = prev_statuses.get(&s.pid).copied();
-            let changed = prev.is_none_or(|p| p != s.status);
-            if changed {
-                emit_headless_event(
-                    "status_change",
-                    serde_json::json!({
-                        "pid": s.pid,
-                        "project": s.display_name(),
-                        "old_status": prev.map(|p| p.to_string()),
-                        "new_status": s.status.to_string(),
-                        "cost_usd": s.cost_usd,
-                        "context_pct": s.context_percent(),
-                        "decay_score": s.decay_score,
-                    }),
-                    json_mode,
-                );
-            }
-        }
-
-        // Emit brain action events (from status_msg which brain updates)
-        if !app.status_msg.is_empty()
-            && (app.status_msg.starts_with("Brain:")
-                || app.status_msg.starts_with("Interrupt")
-                || app.status_msg.starts_with("MAILBOX"))
-        {
-            emit_headless_event(
-                "action",
-                serde_json::json!({"detail": app.status_msg}),
-                json_mode,
-            );
-        }
-
-        // Context rot prevention
-        #[cfg(feature = "coord")]
-        check_context_rot(&app, json_mode);
-
-        // Supervisor reconciler + actuator tick (#345). Read desired state,
-        // emit actions, carry them out. Opening the coord DB on every tick
-        // is cheap (SQLite WAL keeps the connection lightweight) and
-        // sidesteps any lifetime tangle with the App's borrows.
-        #[cfg(feature = "coord")]
-        if let Ok(mut conn) = crate::coord::store::open() {
-            let sensors = HeadlessSensors::from_coord(&conn);
-            match supervisor.tick(&conn, &sensors) {
-                Ok(actions) if !actions.is_empty() => {
-                    let mut actuated = 0u32;
-                    let mut errors = 0u32;
-                    #[cfg(feature = "bus")]
-                    let fx = LiveSideEffects;
-                    #[cfg(not(feature = "bus"))]
-                    let fx = NoopSideEffects;
-                    for action in &actions {
-                        match crate::coord::actuator::apply(&mut conn, &fx, action) {
-                            Ok(()) => actuated += 1,
-                            Err(e) => {
-                                errors += 1;
-                                emit_headless_event(
-                                    "supervisor_action_failed",
-                                    serde_json::json!({"error": e}),
-                                    json_mode,
-                                );
-                            }
-                        }
-                    }
-                    emit_headless_event(
-                        "supervisor_tick",
-                        serde_json::json!({"emitted": actions.len(), "actuated": actuated, "errors": errors}),
-                        json_mode,
-                    );
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    emit_headless_event(
-                        "supervisor_error",
-                        serde_json::json!({"error": e}),
-                        json_mode,
-                    );
-                }
-            }
-        }
-        #[cfg(feature = "coord")]
-        match crate::r#loop::outcome::reconcile_completed() {
-            Ok(summary) if summary.resolved > 0 || summary.failed > 0 => {
-                emit_headless_event(
-                    "loop_outcome",
-                    serde_json::json!({
-                        "resolved": summary.resolved,
-                        "skipped": summary.skipped,
-                        "failed": summary.failed,
-                    }),
-                    json_mode,
-                );
-            }
-            Ok(_) => {}
-            Err(e) => {
-                emit_headless_event(
-                    "loop_outcome_error",
-                    serde_json::json!({"error": e}),
-                    json_mode,
-                );
-            }
+        for event in headless_tick_events(&app, &prev_statuses) {
+            emit_headless_event(event.kind, event.data, json_mode);
         }
 
         prev_statuses = app.sessions.iter().map(|s| (s.pid, s.status)).collect();
@@ -1085,400 +1015,6 @@ fn emit_headless_event(event: &str, data: serde_json::Value, json_mode: bool) {
             data.to_string()
         };
         println!("[{ts}] {event}: {detail}");
-    }
-}
-
-/// Check for context rot and raise typed interrupts for decaying sessions.
-/// Headless supervisor sensors for direct `codex exec` spawns. Interactive
-/// sessions still flow through the normal app/session monitor; this sensor
-/// only bridges pid-derived `codex-exec-*` attempt ids back into coord.
-#[cfg(feature = "coord")]
-struct HeadlessSensors {
-    sessions: Vec<crate::coord::supervisor::ObservedSession>,
-}
-
-#[cfg(feature = "coord")]
-impl HeadlessSensors {
-    fn from_coord(conn: &rusqlite::Connection) -> Self {
-        let mut sessions = Vec::new();
-        let running =
-            crate::coord::tasks::list_tasks(conn, Some(crate::coord::tasks::TaskState::Running))
-                .unwrap_or_default();
-        for task in running {
-            let Ok(Some(session_id)) = crate::coord::tasks::latest_session_id(conn, &task.id)
-            else {
-                continue;
-            };
-            let Some(pid) = codex_exec_session_pid(&session_id) else {
-                continue;
-            };
-            let status = if pid_is_alive(pid) {
-                crate::coord::supervisor::ObservedStatus::Running
-            } else {
-                crate::coord::supervisor::ObservedStatus::Dead
-            };
-            sessions.push(crate::coord::supervisor::ObservedSession {
-                session_id,
-                pid,
-                status,
-                health_alerts: Vec::new(),
-            });
-        }
-
-        Self { sessions }
-    }
-}
-
-#[cfg(feature = "coord")]
-impl crate::coord::supervisor::Sensors for HeadlessSensors {
-    fn last_hook_event_id(&self) -> i64 {
-        0
-    }
-    fn observed_sessions(&self) -> Vec<crate::coord::supervisor::ObservedSession> {
-        self.sessions.clone()
-    }
-}
-
-#[cfg(feature = "coord")]
-fn codex_exec_session_pid(session_id: &str) -> Option<u32> {
-    let raw = session_id.strip_prefix("codex-exec-")?;
-    let pid = raw.parse::<u32>().ok()?;
-    if pid == 0 || pid > i32::MAX as u32 {
-        return None;
-    }
-    Some(pid)
-}
-
-#[cfg(feature = "coord")]
-fn pid_is_alive(pid: u32) -> bool {
-    #[cfg(unix)]
-    {
-        let pid = match i32::try_from(pid) {
-            Ok(pid) if pid > 0 => pid,
-            _ => return false,
-        };
-        unsafe {
-            libc::kill(pid, 0) == 0
-                || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = pid;
-        false
-    }
-}
-
-/// Build the detached headless Codex process used by supervisor `Spawn`.
-#[cfg(feature = "coord")]
-fn build_codex_exec_spawn_command(
-    cwd: &std::path::Path,
-    prompt: &str,
-    sandbox: &str,
-) -> std::process::Command {
-    let mut cmd = std::process::Command::new("codex");
-    cmd.arg("exec")
-        .arg("--sandbox")
-        .arg(sandbox)
-        .arg("--cd")
-        .arg(cwd)
-        .arg("--add-dir")
-        .arg(cwd)
-        .arg("--skip-git-repo-check")
-        .arg(prompt)
-        .current_dir(cwd)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    cmd
-}
-
-#[cfg(feature = "coord")]
-fn spawn_codex_exec_session(
-    cwd: &std::path::Path,
-    prompt: &str,
-    sandbox: &str,
-) -> Result<String, String> {
-    let mut child = build_codex_exec_spawn_command(cwd, prompt, sandbox)
-        .spawn()
-        .map_err(|e| format!("spawn codex exec: {e}"))?;
-    let pid = child.id();
-
-    std::thread::Builder::new()
-        .name(format!("codexctl-supervisor-spawn-{pid}"))
-        .spawn(move || {
-            let _ = child.wait();
-        })
-        .map_err(|e| format!("spawn codex exec reaper for pid {pid}: {e}"))?;
-
-    Ok(format!("codex-exec-{pid}"))
-}
-
-/// Real side effects for the supervisor's actuator (#345). Routes
-/// `AssignViaMailbox` through the bus's publish path (sanitized body,
-/// hop guard from PR2). `spawn_session` runs a detached headless
-/// `codex exec` process and records its pid-derived session id.
-#[cfg(all(feature = "coord", feature = "bus"))]
-struct LiveSideEffects;
-#[cfg(all(feature = "coord", feature = "bus"))]
-impl crate::coord::verify::VerifierBackend for LiveSideEffects {
-    fn run_shell(
-        &self,
-        cwd: &std::path::Path,
-        command: &str,
-        timeout: std::time::Duration,
-    ) -> Result<crate::coord::verify::ShellResult, String> {
-        // /bin/sh -c so users can pipe / chain / quote naturally.
-        // Inheriting env mirrors what the user would see running by hand.
-        let mut child = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg(command)
-            .current_dir(cwd)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("spawn verifier shell: {e}"))?;
-        use std::io::Read;
-        let stdout_reader = child.stdout.take().map(|mut stdout| {
-            std::thread::spawn(move || {
-                let mut out = String::new();
-                let _ = stdout.read_to_string(&mut out);
-                out
-            })
-        });
-        let stderr_reader = child.stderr.take().map(|mut stderr| {
-            std::thread::spawn(move || {
-                let mut out = String::new();
-                let _ = stderr.read_to_string(&mut out);
-                out
-            })
-        });
-        let start = std::time::Instant::now();
-        loop {
-            match child.try_wait() {
-                Ok(Some(status)) => {
-                    let mut combined = String::new();
-                    if let Some(reader) = stdout_reader {
-                        if let Ok(out) = reader.join() {
-                            combined.push_str(&out);
-                        }
-                    }
-                    if let Some(reader) = stderr_reader {
-                        if let Ok(out) = reader.join() {
-                            combined.push_str(&out);
-                        }
-                    }
-                    return Ok(crate::coord::verify::ShellResult {
-                        exit_code: status.code().unwrap_or(-1),
-                        combined_output: combined,
-                    });
-                }
-                Ok(None) => {
-                    if start.elapsed() >= timeout {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        return Err(format!("shell verifier timed out after {timeout:?}"));
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(50));
-                }
-                Err(e) => return Err(format!("wait verifier shell: {e}")),
-            }
-        }
-    }
-    fn query_brain(&self, _prompt: &str) -> Result<String, String> {
-        // The brain client surface needs more plumbing than fits in
-        // this PR (it currently runs as an inflight task inside the
-        // engine, not a sync request/response). Return a structured
-        // error so the actuator marks the verifier as FAIL with a
-        // clear message — gates fail closed, not open.
-        Err(
-            "live brain verifier not yet wired; declare a `run` verifier or stub the brain backend"
-                .into(),
-        )
-    }
-    fn run_agent(
-        &self,
-        _prompt: &str,
-        _model: Option<&str>,
-        _budget_usd: Option<f64>,
-    ) -> Result<crate::coord::verify::AgentResult, String> {
-        Err(
-            "live agent verifier not yet wired; headless `codex exec` adapter is a follow-up"
-                .into(),
-        )
-    }
-}
-#[cfg(all(feature = "coord", feature = "bus"))]
-impl crate::coord::actuator::SideEffects for LiveSideEffects {
-    fn publish_assignment(
-        &self,
-        role: &str,
-        task_id: &str,
-        prompt: &str,
-        hop_count: u32,
-    ) -> Result<String, String> {
-        let conn = crate::bus::store::open()?;
-        let subject = format!("task.assigned.{task_id}");
-        let body = crate::bus::policy::sanitize_body(prompt);
-        crate::bus::store::insert_message(
-            &conn,
-            &subject,
-            "task",
-            Some("supervisor"),
-            Some(role),
-            None,
-            &body,
-            "normal",
-            hop_count,
-        )
-    }
-    fn spawn_session(
-        &self,
-        cwd: &std::path::Path,
-        prompt: &str,
-        sandbox: &str,
-    ) -> Result<String, String> {
-        spawn_codex_exec_session(cwd, prompt, sandbox)
-    }
-}
-
-/// Bus-less fallback so the supervisor can run in a `--no-default-
-/// features --features hive` build. Mailbox assignment is unavailable;
-/// the actuator surfaces a clean error instead of panicking.
-#[cfg(all(feature = "coord", not(feature = "bus")))]
-struct NoopSideEffects;
-#[cfg(all(feature = "coord", not(feature = "bus")))]
-impl crate::coord::verify::VerifierBackend for NoopSideEffects {
-    fn run_shell(
-        &self,
-        _cwd: &std::path::Path,
-        _command: &str,
-        _timeout: std::time::Duration,
-    ) -> Result<crate::coord::verify::ShellResult, String> {
-        Err("verifier shell unavailable in this build".into())
-    }
-    fn query_brain(&self, _prompt: &str) -> Result<String, String> {
-        Err("verifier brain unavailable in this build".into())
-    }
-    fn run_agent(
-        &self,
-        _prompt: &str,
-        _model: Option<&str>,
-        _budget_usd: Option<f64>,
-    ) -> Result<crate::coord::verify::AgentResult, String> {
-        Err("verifier agent unavailable in this build".into())
-    }
-}
-#[cfg(all(feature = "coord", not(feature = "bus")))]
-impl crate::coord::actuator::SideEffects for NoopSideEffects {
-    fn publish_assignment(
-        &self,
-        _role: &str,
-        _task_id: &str,
-        _prompt: &str,
-        _hop_count: u32,
-    ) -> Result<String, String> {
-        Err("bus feature not compiled in; AssignViaMailbox is unavailable".into())
-    }
-    fn spawn_session(
-        &self,
-        cwd: &std::path::Path,
-        prompt: &str,
-        sandbox: &str,
-    ) -> Result<String, String> {
-        spawn_codex_exec_session(cwd, prompt, sandbox)
-    }
-}
-
-#[cfg(feature = "coord")]
-fn check_context_rot(app: &App, json_mode: bool) {
-    let conn = match crate::coord::store::open() {
-        Ok(c) => c,
-        Err(_) => return,
-    };
-
-    for session in &app.sessions {
-        if session.decay_score == 0 || !session.has_usage_metrics() {
-            continue;
-        }
-
-        let (interrupt_type, priority) = if session.decay_score >= 85 {
-            (
-                crate::coord::types::InterruptType::Stop,
-                "critical".to_string(),
-            )
-        } else if session.decay_score as f64 >= app.health_thresholds.decay_compaction_pct {
-            (
-                crate::coord::types::InterruptType::Compact,
-                "high".to_string(),
-            )
-        } else {
-            continue;
-        };
-
-        // Severity-specific dedupe key so compact doesn't block escalation to stop
-        let dedupe_key = format!("decay:{}:{}", interrupt_type.as_str(), session.session_id);
-
-        if let Ok(Some(_)) = crate::coord::store::find_duplicate_interrupt(&conn, &dedupe_key) {
-            continue;
-        }
-
-        let reason = format!(
-            "Context rot detected: decay_score={}/100, context={}%",
-            session.decay_score,
-            session.context_percent() as u32
-        );
-
-        let intr = crate::coord::types::Interrupt {
-            id: crate::coord::store::gen_id("intr"),
-            interrupt_type,
-            priority: priority.clone(),
-            target_session_id: session.session_id.clone(),
-            reason: reason.clone(),
-            payload: Some(serde_json::json!({
-                "decay_score": session.decay_score,
-                "context_pct": session.context_percent(),
-                "pid": session.pid,
-            })),
-            delivery_mode: "safe_boundary".into(),
-            max_retries: 3,
-            retry_count: 0,
-            next_retry_at: None,
-            expires_at: None,
-            dedupe_key: Some(dedupe_key),
-            state: crate::coord::types::InterruptState::Pending,
-            created_at: crate::logger::timestamp_now(),
-            delivered_at: None,
-            acknowledged_at: None,
-        };
-
-        let _ = crate::coord::store::insert_interrupt(&conn, &intr);
-        let _ = crate::coord::store::append_event(
-            &conn,
-            &crate::coord::types::CoordEvent {
-                id: None,
-                event_type: crate::coord::types::EventType::InterruptRaised,
-                timestamp: crate::logger::timestamp_now(),
-                session_id: Some(session.session_id.clone()),
-                payload: serde_json::json!({
-                    "interrupt_id": intr.id,
-                    "type": interrupt_type.as_str(),
-                    "decay_score": session.decay_score,
-                }),
-            },
-        );
-
-        emit_headless_event(
-            "context_rot",
-            serde_json::json!({
-                "pid": session.pid,
-                "project": session.display_name(),
-                "decay_score": session.decay_score,
-                "action": interrupt_type.as_str(),
-                "priority": priority,
-            }),
-            json_mode,
-        );
     }
 }
 
@@ -2041,6 +1577,26 @@ pub(crate) fn run_brain_query(cfg: &config::Config, cli: &Cli) -> io::Result<()>
 }
 
 #[cfg(test)]
+mod headless_tests {
+    use super::*;
+
+    #[test]
+    fn headless_tick_emits_brain_state_without_coordination_events() {
+        let mut app = App::new();
+        app.status_msg = "Brain: approved Bash".into();
+        let events = headless_tick_events(&app, &std::collections::HashMap::new());
+
+        assert!(events.iter().any(|event| event.kind == "action"));
+        assert!(events.iter().all(|event| {
+            !matches!(
+                event.kind,
+                "supervisor_tick" | "coord_summary" | "loop_outcome"
+            )
+        }));
+    }
+}
+
+#[cfg(test)]
 mod digest_parser_tests {
     use super::*;
 
@@ -2078,70 +1634,5 @@ mod digest_parser_tests {
     #[test]
     fn returns_none_for_invalid_json() {
         assert!(digest_from_hook_payload("Edit", "{not json").is_none());
-    }
-}
-
-#[cfg(all(test, feature = "coord"))]
-mod supervisor_spawn_tests {
-    use super::*;
-
-    #[test]
-    fn codex_exec_spawn_command_preserves_prompt_and_cwd() {
-        let temp = tempfile::tempdir().unwrap();
-        let prompt = "Use skill `loop-triage` before acting.\n\nHandle issue #1.";
-        let cmd = build_codex_exec_spawn_command(temp.path(), prompt, "workspace-write");
-
-        assert_eq!(cmd.get_program(), std::ffi::OsStr::new("codex"));
-        assert_eq!(
-            cmd.get_args().collect::<Vec<_>>(),
-            vec![
-                std::ffi::OsStr::new("exec"),
-                std::ffi::OsStr::new("--sandbox"),
-                std::ffi::OsStr::new("workspace-write"),
-                std::ffi::OsStr::new("--cd"),
-                temp.path().as_os_str(),
-                std::ffi::OsStr::new("--add-dir"),
-                temp.path().as_os_str(),
-                std::ffi::OsStr::new("--skip-git-repo-check"),
-                std::ffi::OsStr::new(prompt),
-            ]
-        );
-        assert_eq!(cmd.get_current_dir(), Some(temp.path()));
-    }
-
-    #[test]
-    fn codex_exec_spawn_command_uses_configured_sandbox() {
-        let temp = tempfile::tempdir().unwrap();
-        let prompt = "Create the PR.";
-        let cmd = build_codex_exec_spawn_command(temp.path(), prompt, "danger-full-access");
-
-        assert_eq!(
-            cmd.get_args().collect::<Vec<_>>()[2],
-            std::ffi::OsStr::new("danger-full-access")
-        );
-    }
-
-    #[test]
-    fn codex_exec_session_pid_parses_only_positive_pid_ids() {
-        assert_eq!(codex_exec_session_pid("codex-exec-123"), Some(123));
-        assert_eq!(codex_exec_session_pid("sess_a"), None);
-        assert_eq!(codex_exec_session_pid("codex-exec-0"), None);
-        assert_eq!(codex_exec_session_pid("codex-exec-not-a-pid"), None);
-    }
-
-    #[cfg(feature = "bus")]
-    #[test]
-    fn live_shell_verifier_drains_large_output_before_waiting() {
-        let temp = tempfile::tempdir().unwrap();
-        let result = crate::coord::verify::VerifierBackend::run_shell(
-            &LiveSideEffects,
-            temp.path(),
-            "yes verifier-output | head -n 20000",
-            std::time::Duration::from_secs(2),
-        )
-        .unwrap();
-
-        assert_eq!(result.exit_code, 0);
-        assert!(result.combined_output.contains("verifier-output"));
     }
 }

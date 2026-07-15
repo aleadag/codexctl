@@ -550,11 +550,13 @@ mod tests {
             last_seen: 12345,
             avg_downstream_cost: 0.42,
         }];
+        let _guard = crate::config::HOME_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let tmp = tempfile::tempdir().unwrap();
         // Redirect HOME so antipatterns_path() points into the temp dir.
         let original_home = std::env::var("HOME").ok();
-        // SAFETY: tests are single-threaded by Cargo default for cfg-controlled
-        // env mutation here; we restore HOME below.
+        // SAFETY: HOME mutation is serialized by HOME_ENV_LOCK.
         unsafe { std::env::set_var("HOME", tmp.path()) };
         save_library(&lib).expect("save");
         let loaded = load_library();

@@ -478,20 +478,17 @@ mod drift_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    static HOME_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn upgrade_preserves_legacy_state() {
         use std::ffi::OsString;
 
-        let _guard = HOME_LOCK
+        let _guard = crate::config::HOME_ENV_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let old_home: Option<OsString> = std::env::var_os("HOME");
         let home = tempfile::tempdir().unwrap();
-        // SAFETY: HOME mutation is serialized by HOME_LOCK for this test module.
+        // SAFETY: HOME mutation is serialized by HOME_ENV_LOCK.
         unsafe { std::env::set_var("HOME", home.path()) };
 
         let sentinels = [
