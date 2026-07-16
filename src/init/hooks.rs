@@ -42,8 +42,6 @@ const HOOKS: &[HookSpec] = &[
     },
 ];
 
-const LEGACY_SNAPSHOT_COMMAND: &str = "codexctl --json 2>/dev/null || true";
-const CURRENT_PERMISSION_COMMAND: &str = "codexctl --permission-hook";
 const PERMISSION_STATUS_MESSAGE: &str = "Brain reviewing permission…";
 
 /// Managed PermissionRequest hook state in one Codex configuration scope.
@@ -249,7 +247,7 @@ fn inspect_permission_handlers(value: &serde_json::Value, scope: &mut Permission
             scope.disabled |= matcher_disabled || entry_is_disabled(handler);
             let current = matcher_name == "Bash"
                 && handler.get("type").and_then(serde_json::Value::as_str) == Some("command")
-                && command.trim() == CURRENT_PERMISSION_COMMAND
+                && is_current_permission_command(command)
                 && handler.get("timeout").and_then(serde_json::Value::as_u64) == Some(30)
                 && handler
                     .get("statusMessage")
@@ -327,30 +325,42 @@ fn has_codexctl_hooks(existing: &serde_json::Value) -> bool {
     false
 }
 
-fn is_current_permission_command(command: &str) -> bool {
-    let command = command.trim();
-    command == CURRENT_PERMISSION_COMMAND
-        || command.split_whitespace().next().is_some_and(|program| {
-            (program == "codexctl" || program.ends_with("/codexctl"))
-                && command
-                    .split_whitespace()
-                    .any(|arg| arg == "--permission-hook")
-        })
+fn is_codexctl_program(program: &str) -> bool {
+    program == "codexctl" || (Path::new(program).is_absolute() && program.ends_with("/codexctl"))
 }
 
-fn is_legacy_snapshot_command(command: &str) -> bool {
-    matches!(command.trim(), LEGACY_SNAPSHOT_COMMAND | "codexctl --json")
+fn is_exact_codexctl_command(command: &str, expected_args: &[&str]) -> bool {
+    let mut words = command.split_whitespace();
+    let Some(program) = words.next() else {
+        return false;
+    };
+    is_codexctl_program(program) && words.eq(expected_args.iter().copied())
+}
+
+fn is_current_permission_command(command: &str) -> bool {
+    is_exact_codexctl_command(command, &["--permission-hook"])
+}
+
+fn contains_managed_permission_flag(command: &str) -> bool {
+    let mut words = command.split_whitespace();
+    words.next().is_some_and(is_codexctl_program)
+        && words.any(|argument| argument == "--permission-hook")
+}
+
+fn is_managed_snapshot_command(command: &str) -> bool {
+    is_exact_codexctl_command(command, &["--json"])
+        || is_exact_codexctl_command(command, &["--json", "2>/dev/null", "||", "true"])
 }
 
 fn is_managed_permission_command(matcher: &str, command: &str) -> bool {
-    is_current_permission_command(command)
-        || (matcher == "Bash" && is_legacy_snapshot_command(command))
+    contains_managed_permission_flag(command)
+        || (matcher == "Bash" && is_managed_snapshot_command(command))
 }
 
 fn is_managed_command(event: &str, matcher: &str, command: &str) -> bool {
     match event {
         "PermissionRequest" => is_managed_permission_command(matcher, command),
-        "PostToolUse" | "Stop" => is_legacy_snapshot_command(command),
+        "PostToolUse" | "Stop" => is_managed_snapshot_command(command),
         _ => false,
     }
 }
@@ -917,6 +927,134 @@ mod tests {
     }
 
     #[test]
+    fn merge_replaces_absolute_managed_hooks_without_duplicates() {
+        let mut settings = serde_json::json!({
+            "hooks": {
+                "PermissionRequest": [{
+                    "matcher": "Bash",
+                    "hooks": [{
+                        "type": "command",
+                        "command": "/nix/store/test-codexctl/bin/codexctl --permission-hook",
+                        "timeout": 30,
+                        "statusMessage": "Brain reviewing permission…"
+                    }]
+                }],
+                "PostToolUse": [{
+                    "matcher": "*",
+                    "hooks": [{
+                        "type": "command",
+                        "command": "/nix/store/test-codexctl/bin/codexctl --json 2>/dev/null || true",
+                        "timeout": 5
+                    }]
+                }],
+                "Stop": [{
+                    "matcher": "",
+                    "hooks": [{
+                        "type": "command",
+                        "command": "/nix/store/test-codexctl/bin/codexctl --json 2>/dev/null || true",
+                        "timeout": 5
+                    }]
+                }]
+            }
+        });
+
+        merge_hooks(&mut settings);
+        let once = settings.clone();
+        merge_hooks(&mut settings);
+
+        assert_eq!(settings, once);
+        for event in ["PermissionRequest", "PostToolUse", "Stop"] {
+            assert_eq!(settings["hooks"][event].as_array().unwrap().len(), 1);
+        }
+    }
+
+    #[test]
+    fn merge_replaces_absolute_snapshot_without_shell_suffix_idempotently() {
+        let mut settings = serde_json::json!({
+            "hooks": {
+                "PostToolUse": [{
+                    "matcher": "*",
+                    "hooks": [{
+                        "type": "command",
+                        "command": "/nix/store/test-codexctl/bin/codexctl --json",
+                        "timeout": 5
+                    }]
+                }]
+            }
+        });
+
+        assert!(has_codexctl_hooks(&settings));
+        merge_hooks(&mut settings);
+        let once = settings.clone();
+        merge_hooks(&mut settings);
+
+        assert_eq!(settings, once);
+        let refresh = settings["hooks"]["PostToolUse"].as_array().unwrap();
+        assert_eq!(refresh.len(), 1);
+        assert_eq!(
+            refresh[0]["hooks"][0]["command"],
+            "codexctl --json 2>/dev/null || true"
+        );
+    }
+
+    #[test]
+    fn merge_preserves_lookalike_permission_executable() {
+        let lookalike = serde_json::json!({
+            "type": "command",
+            "command": "notify-codexctl --permission-hook",
+            "timeout": 30
+        });
+        let mut settings = serde_json::json!({
+            "hooks": { "PermissionRequest": [{
+                "matcher": "Bash",
+                "hooks": [lookalike.clone()]
+            }] }
+        });
+
+        merge_hooks(&mut settings);
+
+        let permission = settings["hooks"]["PermissionRequest"].as_array().unwrap();
+        assert_eq!(permission[0]["hooks"], serde_json::json!([lookalike]));
+    }
+
+    #[test]
+    fn merge_preserves_relative_permission_and_snapshot_executables() {
+        let relative_permission = serde_json::json!({
+            "type": "command",
+            "command": "./codexctl --permission-hook",
+            "timeout": 30
+        });
+        let relative_snapshot = serde_json::json!({
+            "type": "command",
+            "command": "tools/codexctl --json",
+            "timeout": 5
+        });
+        let mut settings = serde_json::json!({
+            "hooks": {
+                "PermissionRequest": [{
+                    "matcher": "Bash",
+                    "hooks": [relative_permission.clone()]
+                }],
+                "PostToolUse": [{
+                    "matcher": "*",
+                    "hooks": [relative_snapshot.clone()]
+                }]
+            }
+        });
+
+        merge_hooks(&mut settings);
+
+        assert_eq!(
+            settings["hooks"]["PermissionRequest"][0]["hooks"],
+            serde_json::json!([relative_permission])
+        );
+        assert_eq!(
+            settings["hooks"]["PostToolUse"][0]["hooks"],
+            serde_json::json!([relative_snapshot])
+        );
+    }
+
+    #[test]
     fn merge_preserves_unrelated_handlers_and_keys_in_shared_matcher() {
         let unrelated = serde_json::json!({
             "type": "command",
@@ -985,6 +1123,91 @@ mod tests {
         assert!(discovery.global.disabled);
         assert!(discovery.global.stale);
         assert!(!discovery.project.configured);
+        assert!(discovery.blocks_terminal_fallback());
+    }
+
+    #[test]
+    fn discovery_treats_absolute_permission_hook_as_current() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        let cwd = temp.path().join("project");
+        std::fs::create_dir_all(cwd.join(".git")).unwrap();
+        write_hooks(
+            &home.join(".codex/hooks.json"),
+            serde_json::json!({
+                "hooks": { "PermissionRequest": [{
+                    "matcher": "Bash",
+                    "hooks": [{
+                        "type": "command",
+                        "command": "/nix/store/test-codexctl/bin/codexctl --permission-hook",
+                        "timeout": 30,
+                        "statusMessage": "Brain reviewing permission…"
+                    }]
+                }] }
+            }),
+        );
+
+        let discovery = discover_permission_hooks_at(Some(&home), &cwd);
+
+        assert!(discovery.global.configured);
+        assert!(discovery.global.current);
+        assert!(!discovery.global.stale);
+    }
+
+    #[test]
+    fn discovery_ignores_relative_permission_executable() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        let cwd = temp.path().join("project");
+        std::fs::create_dir_all(cwd.join(".git")).unwrap();
+        write_hooks(
+            &home.join(".codex/hooks.json"),
+            serde_json::json!({
+                "hooks": { "PermissionRequest": [{
+                    "matcher": "Bash",
+                    "hooks": [{
+                        "type": "command",
+                        "command": "./codexctl --permission-hook",
+                        "timeout": 30,
+                        "statusMessage": "Brain reviewing permission…"
+                    }]
+                }] }
+            }),
+        );
+
+        let discovery = discover_permission_hooks_at(Some(&home), &cwd);
+
+        assert!(!discovery.global.configured);
+        assert!(!discovery.global.current);
+        assert!(!discovery.blocks_terminal_fallback());
+    }
+
+    #[test]
+    fn permission_hook_with_extra_arguments_is_managed_but_stale() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        let cwd = temp.path().join("project");
+        std::fs::create_dir_all(cwd.join(".git")).unwrap();
+        write_hooks(
+            &home.join(".codex/hooks.json"),
+            serde_json::json!({
+                "hooks": { "PermissionRequest": [{
+                    "matcher": "Bash",
+                    "hooks": [{
+                        "type": "command",
+                        "command": "/nix/store/test-codexctl/bin/codexctl --permission-hook --unexpected",
+                        "timeout": 30,
+                        "statusMessage": "Brain reviewing permission…"
+                    }]
+                }] }
+            }),
+        );
+
+        let discovery = discover_permission_hooks_at(Some(&home), &cwd);
+
+        assert!(discovery.global.configured);
+        assert!(!discovery.global.current);
+        assert!(discovery.global.stale);
         assert!(discovery.blocks_terminal_fallback());
     }
 
@@ -1283,6 +1506,36 @@ mod tests {
             settings["hooks"]["PermissionRequest"][0]["hooks"][0]["command"],
             "echo keep"
         );
+    }
+
+    #[test]
+    fn uninit_preserves_relative_permission_and_snapshot_executables() {
+        let mut settings = serde_json::json!({
+            "hooks": {
+                "PermissionRequest": [{
+                    "matcher": "Bash",
+                    "hooks": [{
+                        "type": "command",
+                        "command": "tools/codexctl --permission-hook",
+                        "timeout": 30
+                    }]
+                }],
+                "PostToolUse": [{
+                    "matcher": "*",
+                    "hooks": [{
+                        "type": "command",
+                        "command": "./codexctl --json 2>/dev/null || true",
+                        "timeout": 5
+                    }]
+                }]
+            }
+        });
+        let original = settings.clone();
+
+        let removed = remove_codexctl_hooks(&mut settings);
+
+        assert_eq!(removed, 0);
+        assert_eq!(settings, original);
     }
 
     #[test]
