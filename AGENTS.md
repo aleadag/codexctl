@@ -44,6 +44,7 @@ src/                   # codexctl binary: brain, config, init, runtime
 - Keep changes surgical and tied to the request.
 - Do not add abstractions for one-off behavior.
 - Match existing style unless the migration requires a public rename.
+- Run Beads commands against the writable planning checkout with `bd -C ~/.beads-planning <command>` (uppercase `-C`); plain `bd` uses the repository-local contributor store, which is read-only.
 - Config fields must be added to all three layers: CLI args in `main.rs`, TOML structs in `src/config.rs`, and merge logic in `src/config.rs`.
 - All jj descriptions created or updated in this repo must use the emoji conventional format: `<emoji> <type>: <imperative summary>`.
 - When starting a jj changeset before editing, set the initial description in that format; do not use a plain temporary subject.

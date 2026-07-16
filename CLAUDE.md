@@ -83,5 +83,6 @@ binary-only modules.
 
 - Keep changes surgical and preserve the brain-only product boundary.
 - Coordination and durable task tracking belong to external tools such as Beads.
+- Run Beads commands against the writable planning checkout with `bd -C ~/.beads-planning <command>` (uppercase `-C`); plain `bd` uses the repository-local contributor store, which is read-only.
 - Use Jujutsu for version-control operations in this repository.
 - Format jj descriptions as `<emoji> <type>: <imperative summary>`.
