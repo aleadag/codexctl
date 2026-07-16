@@ -7,6 +7,41 @@ codexctl loads global configuration first and project configuration second. CLI 
 
 Print the template with `codexctl --config-template`, inspect resolved values with `codexctl --config`, and validate a file with `codexctl --config-validate`.
 
+## Home Manager
+
+With codexctl declared as a flake input, import its Home Manager module and configure it with your other Home Manager modules:
+
+```nix
+{
+  imports = [ inputs.codexctl.homeManagerModules.default ];
+
+  programs.codex.enable = true;
+  programs.codexctl = {
+    enable = true;
+    settings.brain = {
+      enabled = true;
+      endpoint = "http://localhost:11434/api/generate";
+      model = "gemma4:e4b";
+      auto = false;
+      timeout_ms = 25000;
+      terminal_auto_approve_fallback = false;
+    };
+  };
+}
+```
+
+Apply the configuration with your Home Manager configuration name in place of `<profile>`:
+
+```bash
+home-manager switch --flake .#<profile>
+```
+
+The module installs its selected package, writes the settings as TOML, and merges `PermissionRequest`, `PostToolUse`, and `Stop` handlers into `programs.codex.hooks`. Each handler calls the selected codexctl package by its immutable Nix store path rather than relying on `PATH`.
+
+`programs.codexctl.settings` is visible in the Nix store. Do not put secrets, tokens, credentials, or token-bearing URLs in it.
+
+Changing the codexctl package changes the trusted hook definition. After an upgrade, rebuild Home Manager, restart Codex, and review `/hooks` before trusting the new handlers.
+
 ## Brain
 
 ```toml

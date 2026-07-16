@@ -12,6 +12,9 @@ cargo install codexctl
 cargo install --path .
 ```
 
+- Nix/Home Manager: import `homeManagerModules.default` (or the equivalent
+  `homeModules.default`) and follow the [declarative configuration guide](docs/configuration.md#home-manager).
+
 ## Quick start
 
 ```bash
