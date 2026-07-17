@@ -52,14 +52,18 @@ evaluate requests and append activity whether or not the TUI is open. The TUI
 is a cockpit over persisted state, and `--headless` is the only continuous
 evaluator. Coding Brain adds no daemon or background service.
 
-Activity uses an append-only lifecycle in `activity.jsonl` while
-`decisions.jsonl` remains the resolved learning set. Cross-process append and
-compaction share one lock. Deterministic safety denies run before inference and
-still deny if audit persistence fails; a model-derived decision abstains unless
-its audit record was persisted. Model endpoints may be local or remote, but
-only a CLI flag or user-level configuration can select one. Project
-configuration cannot redirect model traffic, and non-loopback endpoints remain
-visibly identified.
+Activity uses an append-only lifecycle in `activity.jsonl`, while
+`decisions.jsonl` retains model proposals and learning evidence. Cross-process
+append and compaction share one lock. Deterministic safety denies run before
+inference and still deny if audit persistence fails; a model-derived decision
+abstains unless its proposal and committed activity were persisted. The exact
+proposal, commitment, delivery, execution, corruption-recovery, and preference
+publication semantics are defined in
+[ADR-0003](ADR-0003-fail-safe-hook-and-learning-persistence.md).
+
+Model endpoints may be local or remote, but only a CLI flag or user-level
+configuration can select one. Project configuration cannot redirect model
+traffic, and non-loopback endpoints remain visibly identified.
 
 All public persistent paths use the Coding Brain namespace:
 
