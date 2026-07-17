@@ -1,10 +1,9 @@
 #![allow(dead_code)]
 
-use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::brain::client::BrainSuggestion;
@@ -27,27 +26,15 @@ pub use super::preferences::{
 #[allow(unused_imports)]
 pub use super::retrieval::{format_few_shot_examples, retrieve_similar};
 
-// Re-export save functions for use within the brain crate (used by maybe_distill_background)
-pub(super) use super::preferences::{save_preferences, save_project_preferences};
-
 // ────────────────────────────────────────────────────────────────────────────
 // Atomics and constants
 // ────────────────────────────────────────────────────────────────────────────
 
-/// Counter for decisions logged this process lifetime (avoids reading file to check).
-static DECISION_COUNT: AtomicU32 = AtomicU32::new(0);
-/// Guard to prevent concurrent distillation threads.
-static DISTILLING: AtomicBool = AtomicBool::new(false);
 /// Monotonic counter for decision_id uniqueness within a process.
 static DECISION_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
 #[cfg(test)]
 static TEST_RUN_ID: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
 
-/// How often to re-distill preferences (every N decisions).
-const DISTILL_INTERVAL: u32 = 10;
-
-/// Minimum number of per-project decisions before using project-specific preferences.
-const MIN_PROJECT_DECISIONS: usize = 10;
 const MAX_DECISION_RECORD_BYTES: u64 = 1024 * 1024;
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -329,13 +316,36 @@ fn append_json_line(path: &std::path::Path, record: &serde_json::Value) -> io::R
         fs::create_dir_all(parent)?;
         set_directory_mode(parent)?;
     }
-    let lock_path = path.with_extension("lock");
+    let lock = acquire_decisions_lock(path)?;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(path)?;
+    set_file_mode(&file)?;
+    repair_jsonl_tail(&mut file)?;
+    file.seek(SeekFrom::End(0))?;
+    file.write_all(&line)?;
+    file.flush()?;
+    file.sync_data()?;
+    if let Some(parent) = path.parent() {
+        sync_directory(parent)?;
+    }
+    FileExt::unlock(&lock)
+}
+
+fn acquire_decisions_lock(path: &std::path::Path) -> io::Result<fs::File> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+        set_directory_mode(parent)?;
+    }
     let lock = OpenOptions::new()
         .create(true)
         .read(true)
         .write(true)
         .truncate(false)
-        .open(lock_path)?;
+        .open(path.with_extension("lock"))?;
     set_file_mode(&lock)?;
     let started = Instant::now();
     loop {
@@ -353,22 +363,7 @@ fn append_json_line(path: &std::path::Path, record: &serde_json::Value) -> io::R
             Err(error) => return Err(error),
         }
     }
-    let mut file = OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .truncate(false)
-        .open(path)?;
-    set_file_mode(&file)?;
-    repair_jsonl_tail(&mut file)?;
-    file.seek(SeekFrom::End(0))?;
-    file.write_all(&line)?;
-    file.flush()?;
-    file.sync_data()?;
-    if let Some(parent) = path.parent() {
-        sync_directory(parent)?;
-    }
-    FileExt::unlock(&lock)
+    Ok(lock)
 }
 
 fn repair_jsonl_tail(file: &mut fs::File) -> io::Result<()> {
@@ -579,12 +574,9 @@ pub fn log_decision_full(
         record["context"] = snapshot_context(s);
     }
 
-    let _ = append_json_line(&decisions_path(), &record);
-
-    // Re-distill preferences in a background thread every Nth decision.
-    // The file append above is fast (single write), but distillation reads
-    // the full history and computes patterns — must not block the TUI.
-    maybe_distill_background();
+    if append_json_line(&decisions_path(), &record).is_ok() {
+        trigger_distill();
+    }
 }
 
 /// Log a passive observation: a user action the brain was NOT involved in.
@@ -615,9 +607,9 @@ pub fn log_observation(
         record["context"] = snapshot_context(s);
     }
 
-    let _ = append_json_line(&decisions_path(), &record);
-
-    maybe_distill_background();
+    if append_json_line(&decisions_path(), &record).is_ok() {
+        trigger_distill();
+    }
 }
 
 pub(crate) struct HookDecisionAudit<'a> {
@@ -671,67 +663,19 @@ fn append_hook_audit(audit: &HookDecisionAudit<'_>, user_action: &str) -> io::Re
         "turn_id": audit.turn_id,
     });
     append_json_line(&decisions_path(), &record)?;
-    maybe_distill_background();
+    trigger_distill();
     Ok(decision_id)
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Background distillation
-// ────────────────────────────────────────────────────────────────────────────
-
-/// Spawn a background thread to re-distill preferences if the interval has been reached.
-/// Uses atomic guards to avoid blocking the main thread and prevent concurrent distillation.
-fn maybe_distill_background() {
-    let count = DECISION_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
-    if count % DISTILL_INTERVAL != 0 {
-        return;
+fn trigger_distill() {
+    let environment = PathEnvironment::new(
+        std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+        std::env::var_os("XDG_STATE_HOME").map(PathBuf::from),
+        std::env::var_os("HOME").map(PathBuf::from),
+    );
+    if let Ok(paths) = CodingBrainPaths::resolve(&environment) {
+        let _ = super::distill::spawn_one_shot_if_due(&paths);
     }
-
-    // Prevent concurrent distillation (compare_exchange: only one thread wins)
-    if DISTILLING
-        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-        .is_err()
-    {
-        return; // Another distillation is already running
-    }
-
-    std::thread::spawn(|| {
-        let all = read_learning_decisions();
-        if !all.is_empty() {
-            // Global distillation
-            let prefs = distill_preferences(&all);
-            let _ = save_preferences(&prefs);
-
-            // Per-project distillation for projects with enough data
-            let mut projects: HashMap<String, Vec<DecisionRecord>> = HashMap::new();
-            for d in &all {
-                projects
-                    .entry(d.project.to_lowercase())
-                    .or_default()
-                    .push(d.clone());
-            }
-            for (project, decisions) in &projects {
-                if decisions.len() >= MIN_PROJECT_DECISIONS {
-                    let proj_prefs = distill_preferences(decisions);
-                    let _ = save_project_preferences(project, &proj_prefs);
-                }
-            }
-
-            // Mine and persist the anti-pattern library (#201). Cheap to run
-            // alongside distillation; reads decision history we already have.
-            let library = super::sequences::mine_antipatterns(&all);
-            let _ = super::sequences::save_library(&library);
-
-            // Generate insights if insights mode is on
-            if super::insights::read_insights_mode() == "on" {
-                let insights = super::insights::generate_insights(&all, &prefs);
-                let mut state = super::insights::load_state();
-                let _ = super::insights::merge_insights(insights, &mut state);
-                let _ = super::insights::save_state(&state);
-            }
-        }
-        DISTILLING.store(false, Ordering::Release);
-    });
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -780,18 +724,52 @@ pub fn read_stats() -> DecisionStats {
 
 /// Clear all decision history and distilled preferences.
 pub fn forget() -> Result<(), String> {
-    let path = decisions_path();
+    let environment = PathEnvironment::new(
+        std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+        std::env::var_os("XDG_STATE_HOME").map(PathBuf::from),
+        std::env::var_os("HOME").map(PathBuf::from),
+    );
+    let paths = CodingBrainPaths::resolve(&environment)
+        .map_err(|error| format!("failed to resolve Coding Brain state: {error:?}"))?;
+    forget_at(&paths, &decisions_dir())
+}
+
+fn forget_at(paths: &CodingBrainPaths, source_root: &std::path::Path) -> Result<(), String> {
+    forget_at_with(paths, source_root, || {})
+}
+
+pub(crate) fn forget_at_with(
+    paths: &CodingBrainPaths,
+    source_root: &std::path::Path,
+    after_source_erased: impl FnOnce(),
+) -> Result<(), String> {
+    let path = source_root.join("decisions.jsonl");
+    let decisions_lock = acquire_decisions_lock(&path)
+        .map_err(|error| format!("failed to lock {}: {error}", path.display()))?;
+    let result = super::distill::forget_preferences_with(paths, || {
+        erase_decision_source(source_root)?;
+        after_source_erased();
+        Ok(())
+    })
+    .map_err(|error| error.to_string());
+    let unlock = FileExt::unlock(&decisions_lock)
+        .map_err(|error| format!("failed to unlock {}: {error}", path.display()));
+    result.and(unlock)
+}
+
+fn erase_decision_source(source_root: &std::path::Path) -> io::Result<()> {
+    let path = source_root.join("decisions.jsonl");
     if path.exists() {
-        fs::remove_file(&path).map_err(|e| format!("failed to delete {}: {e}", path.display()))?;
+        fs::remove_file(&path)?;
     }
-    let pref_path = decisions_dir().join("preferences.json");
+    let pref_path = source_root.join("preferences.json");
     if pref_path.exists() {
-        let _ = fs::remove_file(&pref_path);
+        fs::remove_file(&pref_path)?;
     }
     // Also clean per-project preference files
-    let proj_dir = decisions_dir().join("preferences");
+    let proj_dir = source_root.join("preferences");
     if proj_dir.is_dir() {
-        let _ = fs::remove_dir_all(&proj_dir);
+        fs::remove_dir_all(&proj_dir)?;
     }
     Ok(())
 }
@@ -897,6 +875,10 @@ pub fn read_all_decisions() -> Vec<DecisionRecord> {
 }
 
 pub(crate) fn read_learning_decisions() -> Vec<DecisionRecord> {
+    read_distillation_decisions().1
+}
+
+pub(crate) fn read_distillation_decisions() -> (Vec<DecisionRecord>, Vec<DecisionRecord>) {
     let decisions = read_all_decisions();
     let environment = PathEnvironment::new(
         std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
@@ -912,7 +894,8 @@ pub(crate) fn read_learning_decisions() -> Vec<DecisionRecord> {
         })
         .map(|log| log.events().to_vec())
         .unwrap_or_default();
-    filter_learning_decisions(decisions, &events)
+    let learning = filter_learning_decisions(decisions.clone(), &events);
+    (decisions, learning)
 }
 
 pub(crate) fn filter_learning_decisions(

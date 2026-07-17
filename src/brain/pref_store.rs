@@ -1,74 +1,19 @@
 #![allow(dead_code)]
 
-use std::fs;
+use std::path::PathBuf;
 
-use super::decisions::{DecisionRecord, decisions_dir, project_slug, read_learning_decisions};
+use codexctl_core::paths::{CodingBrainPaths, PathEnvironment};
+
 use super::preferences::{
     DistilledPreferences, PreferenceCondition, PreferencePattern, TemporalPattern, ToolAccuracy,
-    distill_preferences,
 };
-
-// ────────────────────────────────────────────────────────────────────────────
-// File paths
-// ────────────────────────────────────────────────────────────────────────────
-
-fn preferences_path() -> std::path::PathBuf {
-    decisions_dir().join("preferences.json")
-}
-
-/// Path for per-project preference files.
-fn project_preferences_path(project: &str) -> std::path::PathBuf {
-    let slug = project_slug(project);
-    decisions_dir()
-        .join("preferences")
-        .join(format!("{slug}.json"))
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Save / load preferences
-// ────────────────────────────────────────────────────────────────────────────
-
-/// Save distilled preferences to disk.
-pub(super) fn save_preferences(prefs: &DistilledPreferences) -> Result<(), String> {
-    let path = preferences_path();
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-
-    let json = preferences_to_json(prefs);
-
-    fs::write(
-        &path,
-        serde_json::to_string_pretty(&json).map_err(|e| format!("json error: {e}"))?,
-    )
-    .map_err(|e| format!("write error: {e}"))
-}
-
-/// Save per-project distilled preferences to disk.
-pub(super) fn save_project_preferences(
-    project: &str,
-    prefs: &DistilledPreferences,
-) -> Result<(), String> {
-    let path = project_preferences_path(project);
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-
-    let json = preferences_to_json(prefs);
-
-    fs::write(
-        &path,
-        serde_json::to_string_pretty(&json).map_err(|e| format!("json error: {e}"))?,
-    )
-    .map_err(|e| format!("write error: {e}"))
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // JSON serialization
 // ────────────────────────────────────────────────────────────────────────────
 
 /// Convert DistilledPreferences to serde_json::Value for saving.
-fn preferences_to_json(prefs: &DistilledPreferences) -> serde_json::Value {
+pub(crate) fn preferences_to_json(prefs: &DistilledPreferences) -> serde_json::Value {
     serde_json::json!({
         "patterns": prefs.patterns.iter().map(|p| {
             serde_json::json!({
@@ -102,7 +47,7 @@ fn preferences_to_json(prefs: &DistilledPreferences) -> serde_json::Value {
 }
 
 /// Parse a DistilledPreferences from JSON.
-fn parse_preferences_json(json: &serde_json::Value) -> Option<DistilledPreferences> {
+pub(crate) fn parse_preferences_json(json: &serde_json::Value) -> Option<DistilledPreferences> {
     let patterns = json
         .get("patterns")?
         .as_array()?
@@ -174,10 +119,7 @@ fn parse_preferences_json(json: &serde_json::Value) -> Option<DistilledPreferenc
 
 /// Load distilled preferences from disk.
 pub fn load_preferences() -> Option<DistilledPreferences> {
-    let path = preferences_path();
-    let content = fs::read_to_string(&path).ok()?;
-    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
-    parse_preferences_json(&json)
+    super::distill::load_global(&current_paths()?)
 }
 
 /// Minimum number of per-project decisions before using project-specific preferences.
@@ -187,34 +129,22 @@ const MIN_PROJECT_DECISIONS: usize = 10;
 /// Falls back to global preferences when the project has fewer than
 /// `MIN_PROJECT_DECISIONS` decisions.
 pub fn load_preferences_for_project(project: &str) -> Option<DistilledPreferences> {
-    // Try loading persisted per-project preferences first
-    let proj_path = project_preferences_path(project);
-    if let Ok(content) = fs::read_to_string(&proj_path) {
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-            if let Some(prefs) = parse_preferences_json(&json) {
-                if prefs.total_decisions >= MIN_PROJECT_DECISIONS as u32 {
-                    return Some(prefs);
-                }
-            }
+    let paths = current_paths()?;
+    if let Some(preferences) = super::distill::load_project(&paths, project) {
+        if preferences.total_decisions >= MIN_PROJECT_DECISIONS as u32 {
+            return Some(preferences);
         }
     }
+    super::distill::load_global(&paths)
+}
 
-    // Try distilling on-the-fly from project-specific decisions
-    let all = read_learning_decisions();
-    let project_decisions: Vec<DecisionRecord> = all
-        .into_iter()
-        .filter(|d| d.project.to_lowercase() == project.to_lowercase())
-        .collect();
-
-    if project_decisions.len() >= MIN_PROJECT_DECISIONS {
-        let prefs = distill_preferences(&project_decisions);
-        // Save for future use
-        let _ = save_project_preferences(project, &prefs);
-        return Some(prefs);
-    }
-
-    // Not enough project data — fall back to global
-    load_preferences()
+fn current_paths() -> Option<CodingBrainPaths> {
+    CodingBrainPaths::resolve(&PathEnvironment::new(
+        std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+        std::env::var_os("XDG_STATE_HOME").map(PathBuf::from),
+        std::env::var_os("HOME").map(PathBuf::from),
+    ))
+    .ok()
 }
 
 /// Get the adaptive confidence threshold for a specific tool.
@@ -235,7 +165,8 @@ pub fn adaptive_threshold(tool: Option<&str>) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::decisions::DecisionType;
+    use super::super::decisions::{DecisionRecord, DecisionType, project_slug};
+    use super::super::preferences::distill_preferences;
     use super::*;
 
     fn make_decision(tool: &str, project: &str, user_action: &str) -> DecisionRecord {

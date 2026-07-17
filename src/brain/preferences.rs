@@ -919,7 +919,6 @@ pub fn format_preference_summary(prefs: &DistilledPreferences) -> String {
 // ────────────────────────────────────────────────────────────────────────────
 
 pub use super::pref_store::{adaptive_threshold, load_preferences, load_preferences_for_project};
-pub(super) use super::pref_store::{save_preferences, save_project_preferences};
 
 // ────────────────────────────────────────────────────────────────────────────
 // Tests

@@ -307,6 +307,10 @@ pub(crate) struct Cli {
     #[arg(long, hide = true)]
     pub(crate) lifecycle_hook: bool,
 
+    /// Internal one-shot preference distiller.
+    #[arg(long, hide = true)]
+    pub(crate) distill_once: bool,
+
     /// Tool name for --brain-query (e.g., "Bash", "Write", "Edit")
     #[arg(long, help_heading = "Brain (Local LLM)")]
     pub(crate) tool: Option<String>,
@@ -488,7 +492,7 @@ pub(crate) struct Cli {
 fn main() -> io::Result<()> {
     let cli = Cli::parse();
     let is_demo = cli.demo;
-    let is_internal_hook = cli.permission_hook || cli.lifecycle_hook;
+    let is_internal_hook = cli.permission_hook || cli.lifecycle_hook || cli.distill_once;
     let result = run_main(cli);
     if result.is_ok() && !is_internal_hook {
         maybe_print_star_prompt(is_demo);
@@ -581,6 +585,11 @@ fn apply_brain_cli_overrides(cfg: &mut config::Config, cli: &Cli) {
 }
 
 fn run_main(cli: Cli) -> io::Result<()> {
+    if cli.distill_once {
+        let paths = brain::distill::current_paths()?;
+        brain::distill::run_once(&paths).map_err(io::Error::other)?;
+        return Ok(());
+    }
     if cli.lifecycle_hook {
         lifecycle_hook::run();
         return Ok(());
@@ -922,6 +931,7 @@ fn run_main(cli: Cli) -> io::Result<()> {
     }
 
     if cli.headless {
+        catch_up_distillation();
         return commands::run_headless(Duration::from_millis(cfg.interval), &cfg, cli.json);
     }
 
@@ -942,6 +952,7 @@ fn run_main(cli: Cli) -> io::Result<()> {
         );
     }
 
+    catch_up_distillation();
     let tick_rate = Duration::from_millis(cfg.interval);
     let theme_mode = theme::ThemeMode::detect(cli.theme.as_deref());
     let app_theme = theme::Theme::from_mode(theme_mode);
@@ -1022,6 +1033,15 @@ fn run_main(cli: Cli) -> io::Result<()> {
         terminal.show_cursor()?;
 
         result
+    }
+}
+
+fn catch_up_distillation() {
+    let result = brain::distill::current_paths()
+        .map_err(brain::distill::DistillError::Io)
+        .and_then(|paths| brain::distill::run_once(&paths));
+    if let Err(error) = result {
+        eprintln!("Warning: Coding Brain preference catch-up failed: {error}");
     }
 }
 
@@ -1366,6 +1386,14 @@ mod permission_hook_cli_tests {
         assert!(cli.lifecycle_hook);
         let help = Cli::command().render_long_help().to_string();
         assert!(!help.contains("--lifecycle-hook"));
+    }
+
+    #[test]
+    fn distill_once_flag_is_hidden() {
+        let cli = Cli::try_parse_from(["codexctl", "--distill-once"]).unwrap();
+        assert!(cli.distill_once);
+        let help = Cli::command().render_long_help().to_string();
+        assert!(!help.contains("--distill-once"));
     }
 
     #[test]
