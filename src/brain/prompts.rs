@@ -5,8 +5,6 @@ use std::path::PathBuf;
 
 /// Prompt template names.
 pub const ADVISORY: &str = "advisory";
-pub const ORCHESTRATION: &str = "orchestration";
-pub const SUMMARIZE: &str = "summarize";
 pub const AUTOPSY: &str = "autopsy";
 
 /// Load a prompt template by name. Checks user overrides first, falls back to built-in.
@@ -49,8 +47,6 @@ fn user_prompt_path(name: &str) -> Option<PathBuf> {
 fn builtin(name: &str) -> &'static str {
     match name {
         ADVISORY => ADVISORY_PROMPT,
-        ORCHESTRATION => ORCHESTRATION_PROMPT,
-        SUMMARIZE => SUMMARIZE_PROMPT,
         AUTOPSY => AUTOPSY_PROMPT,
         _ => {
             "Respond with JSON: {\"action\": \"deny\", \"reasoning\": \"unknown prompt\", \"confidence\": 0.0}"
@@ -60,7 +56,7 @@ fn builtin(name: &str) -> &'static str {
 
 /// List all available prompt names and their source (builtin vs user override).
 pub fn list_prompts() -> Vec<(String, String)> {
-    let names = [ADVISORY, ORCHESTRATION, SUMMARIZE, AUTOPSY];
+    let names = [ADVISORY, AUTOPSY];
     names
         .iter()
         .map(|name| {
@@ -78,39 +74,16 @@ pub fn list_prompts() -> Vec<(String, String)> {
 // Built-in prompt templates
 // ────────────────────────────────────────────────────────────────────────────
 
-const ADVISORY_PROMPT: &str = r#"You are a session supervisor for Codex. Analyze the session state and recent conversation to decide what action to take. Consider the state of other active sessions when making decisions.
+const ADVISORY_PROMPT: &str = r#"You are a session supervisor for Codex. Analyze the session state and recent conversation to decide whether to approve or deny the pending tool call.
 
 ## Session State
-{{session_summary}}{{git_context}}{{global_session_map}}
+{{session_summary}}{{git_context}}
 
 ## Recent Conversation
 {{recent_transcript}}{{few_shot_examples}}
 
 ## Decision
 {{decision_prompt}}"#;
-
-const ORCHESTRATION_PROMPT: &str = r#"You are a session orchestrator for Codex. You have {{session_count}} active sessions.
-
-## Active Sessions
-{{session_map}}
-
-## Orchestration Decision
-Analyze all sessions and decide if any cross-session action should be taken:
-- "spawn": launch a new session to handle decomposed work (provide spawn_prompt and spawn_cwd)
-- "route": send summarized output from one session to another (provide target_pid)
-- "terminate": kill a redundant or stuck session
-- "deny": no action needed right now
-
-Consider: Are sessions doing redundant work? Could work be parallelized? Is a session stuck? Has one session produced output another needs?
-
-Respond with JSON: {"action": "spawn"|"route"|"terminate"|"deny", "target_pid": <pid if route>, "spawn_prompt": "...", "spawn_cwd": ".", "reasoning": "...", "confidence": 0.0-1.0}"#;
-
-const SUMMARIZE_PROMPT: &str = r#"Summarize this output from session '{{source_project}}' for another Codex session working on: {{target_task}}
-
-Keep ONLY what's relevant to the target task. Be concise — this will be injected into another session's context. Max 500 words.
-
-Output to summarize:
-{{source_output}}"#;
 
 const AUTOPSY_PROMPT: &str = r#"You are analyzing a completed Codex session post-mortem. Given the session statistics and detected issues, suggest what the session should have done differently.
 
@@ -146,20 +119,6 @@ mod tests {
     }
 
     #[test]
-    fn builtin_orchestration_exists() {
-        let prompt = builtin(ORCHESTRATION);
-        assert!(prompt.contains("orchestrator"));
-        assert!(prompt.contains("{{session_map}}"));
-    }
-
-    #[test]
-    fn builtin_summarize_exists() {
-        let prompt = builtin(SUMMARIZE);
-        assert!(prompt.contains("Summarize"));
-        assert!(prompt.contains("{{source_output}}"));
-    }
-
-    #[test]
     fn builtin_autopsy_exists() {
         let prompt = builtin(AUTOPSY);
         assert!(prompt.contains("post-mortem"));
@@ -191,10 +150,8 @@ mod tests {
     #[test]
     fn list_prompts_returns_all() {
         let prompts = list_prompts();
-        assert_eq!(prompts.len(), 4);
+        assert_eq!(prompts.len(), 2);
         assert!(prompts.iter().any(|(n, _)| n == ADVISORY));
-        assert!(prompts.iter().any(|(n, _)| n == ORCHESTRATION));
-        assert!(prompts.iter().any(|(n, _)| n == SUMMARIZE));
         assert!(prompts.iter().any(|(n, _)| n == AUTOPSY));
     }
 

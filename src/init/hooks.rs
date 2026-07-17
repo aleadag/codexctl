@@ -182,7 +182,6 @@ pub struct PermissionHookScope {
 pub struct PermissionHookDiscovery {
     pub global: PermissionHookScope,
     pub project: PermissionHookScope,
-    conservative_ancestor_configured: bool,
 }
 
 impl PermissionHookDiscovery {
@@ -192,17 +191,6 @@ impl PermissionHookDiscovery {
 
     pub fn duplicate_scopes(&self) -> bool {
         self.global.configured && self.project.configured
-    }
-
-    /// Whether terminal input fallback must remain disabled.
-    ///
-    /// This deliberately includes managed permission hooks in every cwd
-    /// ancestor, even outside the exact project scope derived from the base
-    /// user config. Codex may have a CLI/profile root-marker override that
-    /// codexctl cannot observe; a false positive safely leaves the normal
-    /// permission prompt visible, while a false negative could inject Enter.
-    pub fn blocks_terminal_fallback(&self) -> bool {
-        self.configured() || self.conservative_ancestor_configured
     }
 }
 
@@ -215,13 +203,6 @@ fn settings_path(project: bool) -> PathBuf {
             .unwrap_or_else(|| PathBuf::from("/tmp"));
         home.join(".codex/hooks.json")
     }
-}
-
-/// Discover codexctl's managed PermissionRequest hook in the global and
-/// project configuration layers applicable to `cwd`.
-pub fn discover_permission_hooks(cwd: &Path) -> PermissionHookDiscovery {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    discover_permission_hooks_at(home.as_deref(), cwd)
 }
 
 pub(crate) fn discover_lifecycle_hooks_at(
@@ -255,13 +236,7 @@ pub(crate) fn discover_permission_hooks_at(
         .unwrap_or_default();
     let markers = project_root_markers(home);
     let project = scope_from_paths(applicable_project_hook_paths(cwd, &markers));
-    let conservative_ancestor_configured =
-        scope_from_paths(cwd.ancestors().map(|path| path.join(".codex/hooks.json"))).configured;
-    PermissionHookDiscovery {
-        global,
-        project,
-        conservative_ancestor_configured,
-    }
+    PermissionHookDiscovery { global, project }
 }
 
 fn project_root_markers(home: Option<&Path>) -> Vec<String> {
@@ -1533,7 +1508,6 @@ mod tests {
         assert!(discovery.global.disabled);
         assert!(discovery.global.stale);
         assert!(!discovery.project.configured);
-        assert!(discovery.blocks_terminal_fallback());
     }
 
     #[test]
@@ -1589,7 +1563,6 @@ mod tests {
 
         assert!(!discovery.global.configured);
         assert!(!discovery.global.current);
-        assert!(!discovery.blocks_terminal_fallback());
     }
 
     #[test]
@@ -1618,7 +1591,6 @@ mod tests {
         assert!(discovery.global.configured);
         assert!(!discovery.global.current);
         assert!(discovery.global.stale);
-        assert!(discovery.blocks_terminal_fallback());
     }
 
     #[test]
@@ -1677,7 +1649,6 @@ mod tests {
         assert!(!discovery.global.configured);
         assert!(discovery.project.configured);
         assert!(!discovery.project.stale);
-        assert!(discovery.blocks_terminal_fallback());
     }
 
     #[test]
@@ -1967,52 +1938,5 @@ mod tests {
 
         assert_eq!(removed, 0);
         assert_eq!(settings, original);
-    }
-
-    #[test]
-    fn ancestor_hook_blocks_fallback_without_becoming_exact_project_scope() {
-        let temp = tempfile::tempdir().unwrap();
-        let home = temp.path().join("home");
-        let jj_root = temp.path().join("project");
-        let git_root = jj_root.join("nested");
-        let cwd = git_root.join("work");
-        std::fs::create_dir_all(jj_root.join(".jj")).unwrap();
-        std::fs::create_dir_all(git_root.join(".git")).unwrap();
-        std::fs::create_dir_all(&cwd).unwrap();
-        write_hooks(
-            &jj_root.join(".codex/hooks.json"),
-            serde_json::json!({
-                "hooks": { "PermissionRequest": [{
-                    "matcher": "Bash",
-                    "hooks": [{
-                        "type": "command",
-                        "command": "codexctl --permission-hook",
-                        "timeout": 30,
-                        "statusMessage": "Brain reviewing permission…"
-                    }]
-                }] }
-            }),
-        );
-
-        let discovery = discover_permission_hooks_at(Some(&home), &cwd);
-
-        assert!(!discovery.configured());
-        assert!(!discovery.project.configured);
-        assert!(discovery.blocks_terminal_fallback());
-    }
-
-    #[test]
-    fn fallback_is_not_blocked_without_global_or_ancestor_hook() {
-        let temp = tempfile::tempdir().unwrap();
-        let home = temp.path().join("home");
-        let root = temp.path().join("project");
-        let cwd = root.join("nested");
-        std::fs::create_dir_all(root.join(".git")).unwrap();
-        std::fs::create_dir_all(&cwd).unwrap();
-
-        let discovery = discover_permission_hooks_at(Some(&home), &cwd);
-
-        assert!(!discovery.configured());
-        assert!(!discovery.blocks_terminal_fallback());
     }
 }

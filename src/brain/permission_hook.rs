@@ -1216,11 +1216,6 @@ mod tests {
                 "off",
                 Ok(suggestion(RuleAction::Approve, 0.9)),
             ),
-            (
-                enabled_config(),
-                "on",
-                Ok(suggestion(RuleAction::Send, 0.9)),
-            ),
             (enabled_config(), "on", Err("endpoint unavailable".into())),
         ];
         for (config, gate_mode, inference) in cases {

@@ -23,24 +23,15 @@ pub struct BrainContext {
     pub few_shot_examples: String,
     /// Distilled preference summary (compact alternative to few-shot for small contexts).
     pub preference_summary: String,
-    /// Global view of all active sessions (empty if only one session).
-    pub global_session_map: String,
     /// Git state for the session's working directory (empty if not a git repo).
     pub git_context: String,
 }
 
 /// Build a compact context for the brain from a session's state and JSONL transcript.
-/// Pass all sessions for cross-session awareness.
-pub fn build_context(
-    session: &CodexSession,
-    all_sessions: &[CodexSession],
-    max_tokens: u32,
-) -> BrainContext {
+pub fn build_context(session: &CodexSession, max_tokens: u32) -> BrainContext {
     let session_summary = format_session_summary(session);
     let recent_transcript = read_recent_transcript(session, max_tokens);
     let decision_prompt = format_decision_prompt(session);
-    let global_session_map = format_global_session_map(session.pid, all_sessions);
-
     let git_context = build_git_context(&session.cwd);
 
     BrainContext {
@@ -49,7 +40,6 @@ pub fn build_context(
         decision_prompt,
         few_shot_examples: String::new(), // Set by engine after retrieval
         preference_summary: String::new(), // Set by engine from distilled preferences
-        global_session_map,
         git_context,
     }
 }
@@ -104,80 +94,23 @@ fn format_decision_prompt(session: &CodexSession) -> String {
             let tool = session.actionable_tool_name().unwrap_or("unknown");
             format!(
                 "The session is waiting for approval of a '{}' tool call. \
-                 Should this be approved, denied, or should a message be sent instead? \
-                 Respond with JSON: {{\"action\": \"approve\"|\"deny\"|\"send\"|\"terminate\"|\"route\", \
-                 \"message\": \"...\", \"reasoning\": \"...\", \"confidence\": 0.0-1.0, \
-                 \"target_pid\": <pid if action is route>}}. \
-                 Use 'route' to send summarized output from this session to another session.",
+                 Should this be approved or denied? \
+                 Respond with JSON: {{\"action\": \"approve\"|\"deny\", \
+                 \"message\": \"...\", \"reasoning\": \"...\", \"confidence\": 0.0-1.0}}.",
                 tool
             )
         }
         crate::session::SessionStatus::WaitingInput => {
             "The session finished its response and is waiting for user input. \
-             Should a message be sent (e.g. 'continue'), or should the session be left alone? \
-             Respond with JSON: {\"action\": \"send\"|\"deny\", \
-             \"message\": \"...\", \"reasoning\": \"...\", \"confidence\": 0.0-1.0}"
+             Coding Brain does not send input; deny the request. \
+             Respond with JSON: {\"action\": \"deny\", \
+             \"reasoning\": \"...\", \"confidence\": 0.0-1.0}"
                 .to_string()
         }
         _ => "The session is in an unexpected state. Respond with JSON: \
              {\"action\": \"deny\", \"reasoning\": \"...\", \"confidence\": 0.0}"
             .to_string(),
     }
-}
-
-/// Format a compact map of all sessions (public, for orchestration prompts).
-pub fn format_global_session_map_public(sessions: &[CodexSession]) -> String {
-    format_global_session_map(0, sessions)
-}
-
-/// Format a compact map of all active sessions for cross-session awareness.
-fn format_global_session_map(current_pid: u32, sessions: &[CodexSession]) -> String {
-    if sessions.len() <= 1 {
-        return String::new();
-    }
-
-    let mut lines = Vec::new();
-    for s in sessions {
-        let marker = if s.pid == current_pid {
-            " ← evaluating"
-        } else {
-            ""
-        };
-        let ctx_pct = if s.context_max > 0 {
-            (s.context_tokens as f64 / s.context_max as f64 * 100.0) as u32
-        } else {
-            0
-        };
-
-        let tool_info = match s.actionable_tool_name() {
-            Some(tool) => {
-                let command = s
-                    .actionable_tool_input()
-                    .map(|command| {
-                        if command.len() > 60 {
-                            format!(" \"{}...\"", session::truncate_str(command, 60))
-                        } else {
-                            format!(" \"{command}\"")
-                        }
-                    })
-                    .unwrap_or_default();
-                format!(" [{}{}]", tool, command)
-            }
-            None => String::new(),
-        };
-
-        lines.push(format!(
-            "- {} [PID {}]: {}{} (${:.1}, {}% ctx){marker}",
-            s.display_name(),
-            s.pid,
-            s.status,
-            tool_info,
-            s.cost_usd,
-            ctx_pct,
-        ));
-    }
-
-    lines.join("\n")
 }
 
 /// Read recent transcript entries from the JSONL file, compacted to fit budget.
@@ -467,19 +400,12 @@ pub fn format_brain_prompt(ctx: &BrainContext) -> String {
         format!("\n\n## Repository State\n{}", ctx.git_context)
     };
 
-    let global_map = if ctx.global_session_map.is_empty() {
-        String::new()
-    } else {
-        format!("\n\n## All Active Sessions\n{}", ctx.global_session_map)
-    };
-
     let template = super::prompts::load(super::prompts::ADVISORY);
     super::prompts::expand(
         &template,
         &[
             ("session_summary", &ctx.session_summary),
             ("git_context", &git_section),
-            ("global_session_map", &global_map),
             ("recent_transcript", &ctx.recent_transcript),
             ("few_shot_examples", &learning_section),
             ("decision_prompt", &ctx.decision_prompt),
@@ -539,7 +465,7 @@ mod tests {
 
         let summary = format_session_summary(&session);
         let prompt = format_decision_prompt(&session);
-        let context = build_context(&session, std::slice::from_ref(&session), 4000);
+        let context = build_context(&session, 4000);
 
         assert!(summary.contains("exec_command"));
         assert!(summary.contains("install -m 664 source target"));
@@ -595,13 +521,13 @@ mod tests {
         s.status = SessionStatus::WaitingInput;
         let prompt = format_decision_prompt(&s);
         assert!(prompt.contains("waiting for user input"));
-        assert!(prompt.contains("continue"));
+        assert!(prompt.contains("does not send input"));
     }
 
     #[test]
     fn context_with_no_jsonl_path() {
         let s = make_session();
-        let ctx = build_context(&s, std::slice::from_ref(&s), 4000);
+        let ctx = build_context(&s, 4000);
         assert!(ctx.recent_transcript.contains("no transcript"));
     }
 
@@ -622,7 +548,7 @@ mod tests {
         let mut s = make_session();
         s.jsonl_path = Some(jsonl);
 
-        let ctx = build_context(&s, std::slice::from_ref(&s), 4000);
+        let ctx = build_context(&s, 4000);
         assert!(ctx.recent_transcript.contains("Bash"));
         assert!(ctx.recent_transcript.contains("file1.rs"));
         assert!(!ctx.session_summary.is_empty());
@@ -637,52 +563,12 @@ mod tests {
             decision_prompt: "decide".into(),
             few_shot_examples: String::new(),
             preference_summary: String::new(),
-            global_session_map: String::new(),
             git_context: String::new(),
         };
         let prompt = format_brain_prompt(&ctx);
         assert!(prompt.contains("summary"));
         assert!(prompt.contains("transcript"));
         assert!(prompt.contains("decide"));
-    }
-
-    #[test]
-    fn global_session_map_single_session_empty() {
-        let s = make_session();
-        let map = format_global_session_map(s.pid, &[s]);
-        assert!(map.is_empty());
-    }
-
-    #[test]
-    fn global_session_map_multiple_sessions() {
-        let s1 = make_session();
-        let mut s2 = make_session();
-        s2.pid = 200;
-        s2.project_name = "other-project".into();
-        s2.status = SessionStatus::Processing;
-        s2.cost_usd = 3.0;
-
-        let map = format_global_session_map(s1.pid, &[s1, s2]);
-        assert!(map.contains("my-project"));
-        assert!(map.contains("other-project"));
-        assert!(map.contains("← evaluating"));
-        assert!(map.contains("Processing"));
-    }
-
-    #[test]
-    fn global_session_map_in_prompt() {
-        let ctx = BrainContext {
-            session_summary: "summary".into(),
-            recent_transcript: "transcript".into(),
-            decision_prompt: "decide".into(),
-            few_shot_examples: String::new(),
-            preference_summary: String::new(),
-            global_session_map: "- session1: Processing\n- session2: Idle".into(),
-            git_context: String::new(),
-        };
-        let prompt = format_brain_prompt(&ctx);
-        assert!(prompt.contains("All Active Sessions"));
-        assert!(prompt.contains("session1: Processing"));
     }
 
     #[test]
@@ -735,7 +621,6 @@ mod tests {
             decision_prompt: "decide".into(),
             few_shot_examples: String::new(),
             preference_summary: String::new(),
-            global_session_map: String::new(),
             git_context: "Git state:\n  Branch: main\n  Uncommitted: 3 files".into(),
         };
         let prompt = format_brain_prompt(&ctx);
@@ -751,7 +636,6 @@ mod tests {
             decision_prompt: "decide".into(),
             few_shot_examples: String::new(),
             preference_summary: String::new(),
-            global_session_map: String::new(),
             git_context: String::new(),
         };
         let prompt = format_brain_prompt(&ctx);

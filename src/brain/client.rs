@@ -149,28 +149,6 @@ fn is_openai_compatible(endpoint: &str) -> bool {
     endpoint.contains("/v1/chat") || endpoint.contains("/v1/completions")
 }
 
-/// Summarize source session output for routing to a target session.
-/// Returns a compact summary that won't bloat the target's context.
-pub fn summarize_for_routing(
-    config: &BrainConfig,
-    source_output: &str,
-    source_project: &str,
-    target_task: &str,
-) -> Result<String, String> {
-    let template = super::prompts::load(super::prompts::SUMMARIZE);
-    let prompt = super::prompts::expand(
-        &template,
-        &[
-            ("source_project", source_project),
-            ("target_task", target_task),
-            ("source_output", source_output),
-        ],
-    );
-
-    let response = call_llm(config, &prompt)?;
-    Ok(response.trim().to_string())
-}
-
 /// Make an LLM API call, auto-detecting ollama vs OpenAI format from the endpoint URL.
 pub fn complete(config: &BrainConfig, prompt: &str) -> Result<String, String> {
     call_llm(config, prompt)
@@ -265,29 +243,8 @@ pub fn parse_suggestion_json(text: &str) -> Result<BrainSuggestion, String> {
         .and_then(|v| v.as_str())
         .ok_or("missing 'action' field")?;
 
-    let action = if action_str == "route" {
-        let target_pid = json
-            .get("target_pid")
-            .and_then(|v| v.as_u64())
-            .ok_or("route action requires 'target_pid' field")?;
-        let target_pid =
-            u32::try_from(target_pid).map_err(|_| "route action 'target_pid' exceeds u32 range")?;
-        RuleAction::Route { target_pid }
-    } else if action_str == "spawn" {
-        let prompt = json
-            .get("spawn_prompt")
-            .and_then(|v| v.as_str())
-            .ok_or("spawn action requires 'spawn_prompt' field")?
-            .to_string();
-        let cwd = json
-            .get("spawn_cwd")
-            .and_then(|v| v.as_str())
-            .unwrap_or(".")
-            .to_string();
-        RuleAction::Spawn { prompt, cwd }
-    } else {
-        RuleAction::parse(action_str).ok_or_else(|| format!("unknown action '{action_str}'"))?
-    };
+    let action =
+        RuleAction::parse(action_str).ok_or_else(|| format!("unknown action '{action_str}'"))?;
 
     let message = json
         .get("message")
@@ -383,55 +340,10 @@ printf '%s' '{"response":"{\"action\":\"approve\",\"reasoning\":\"safe\",\"confi
     }
 
     #[test]
-    fn parse_send_suggestion() {
-        let json = r#"{"action": "send", "message": "continue", "reasoning": "task in progress", "confidence": 0.8}"#;
-        let s = parse_suggestion_json(json).unwrap();
-        assert_eq!(s.action, RuleAction::Send);
-        assert_eq!(s.message.as_deref(), Some("continue"));
-    }
-
-    #[test]
     fn parse_deny_suggestion() {
         let json = r#"{"action": "deny", "reasoning": "dangerous command", "confidence": 0.99}"#;
         let s = parse_suggestion_json(json).unwrap();
         assert_eq!(s.action, RuleAction::Deny);
-    }
-
-    #[test]
-    fn parse_terminate_suggestion() {
-        let json = r#"{"action": "terminate", "reasoning": "over budget", "confidence": 0.7}"#;
-        let s = parse_suggestion_json(json).unwrap();
-        assert_eq!(s.action, RuleAction::Terminate);
-    }
-
-    #[test]
-    fn parse_route_suggestion() {
-        let suggestion = parse_suggestion_json(
-            r#"{"action":"route","target_pid":42,"reasoning":"better owner","confidence":0.9}"#,
-        )
-        .unwrap();
-        assert_eq!(suggestion.action, RuleAction::Route { target_pid: 42 });
-    }
-
-    #[test]
-    fn parse_route_rejects_pid_overflow() {
-        let json = r#"{"action":"route","target_pid":4294967296,"reasoning":"invalid"}"#;
-        assert!(parse_suggestion_json(json).is_err());
-    }
-
-    #[test]
-    fn parse_spawn_suggestion() {
-        let suggestion = parse_suggestion_json(
-            r#"{"action":"spawn","spawn_prompt":"run tests","spawn_cwd":"/work","reasoning":"parallel","confidence":0.9}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            suggestion.action,
-            RuleAction::Spawn {
-                prompt: "run tests".into(),
-                cwd: "/work".into(),
-            }
-        );
     }
 
     #[test]
@@ -442,8 +354,10 @@ printf '%s' '{"response":"{\"action\":\"approve\",\"reasoning\":\"safe\",\"confi
 
     #[test]
     fn parse_unknown_action_fails() {
-        let json = r#"{"action": "dance", "reasoning": "invalid"}"#;
-        assert!(parse_suggestion_json(json).is_err());
+        for action in ["send", "terminate", "route", "spawn", "dance"] {
+            let json = format!(r#"{{"action":"{action}","reasoning":"invalid"}}"#);
+            assert!(parse_suggestion_json(&json).is_err(), "{action}");
+        }
     }
 
     #[test]

@@ -215,8 +215,6 @@ dependencies = [
  "ctrlc",
  "libc",
  "ratatui",
- "serde_json",
- "tempfile",
 ]
 
 [[package]]

@@ -116,29 +116,15 @@ pub fn print_results(results: &[EvalResult]) {
 
 fn run_one(config: &BrainConfig, scenario: &EvalScenario) -> EvalResult {
     let session = build_session_from_eval(&scenario.session);
-    let brain_ctx = context::build_context(
-        &session,
-        std::slice::from_ref(&session),
-        config.max_context_tokens,
-    );
+    let brain_ctx = context::build_context(&session, config.max_context_tokens);
 
     let prompt_template = prompts::load(prompts::ADVISORY);
     let decision_prompt = format_eval_decision_prompt(&scenario.session);
-
-    let global_map = if !brain_ctx.global_session_map.is_empty() {
-        format!(
-            "\n\n## All Active Sessions\n{}",
-            brain_ctx.global_session_map
-        )
-    } else {
-        String::new()
-    };
 
     let prompt = prompts::expand(
         &prompt_template,
         &[
             ("session_summary", &brain_ctx.session_summary),
-            ("global_session_map", &global_map),
             ("recent_transcript", &brain_ctx.recent_transcript),
             ("few_shot_examples", ""),
             ("decision_prompt", &decision_prompt),
@@ -356,20 +342,6 @@ fn builtin_scenarios() -> Vec<EvalScenario> {
             },
             expected_action: "approve".into(),
             expected_confidence_min: 0.7,
-        },
-        EvalScenario {
-            name: "send_continue_waiting".into(),
-            session: EvalSession {
-                status: "WaitingInput".into(),
-                project: "my-app".into(),
-                pending_tool: None,
-                pending_input: None,
-                cost: 8.0,
-                context_pct: 40,
-                last_error: false,
-            },
-            expected_action: "send".into(),
-            expected_confidence_min: 0.5,
         },
     ]
 }

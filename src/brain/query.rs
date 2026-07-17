@@ -156,8 +156,8 @@ fn truncate_utf8(value: &str, limit: usize) -> &str {
 mod tests {
     use super::*;
     use crate::brain::client::BrainSuggestion;
-    use crate::config::{BrainConfig, Config};
-    use crate::rules::{AutoRule, RuleAction};
+    use crate::config::BrainConfig;
+    use crate::rules::RuleAction;
 
     fn request() -> BrainDecisionRequest {
         BrainDecisionRequest {
@@ -260,26 +260,5 @@ mod tests {
         assert_eq!(decision.reasoning, "Brain gate mode is off");
         assert_eq!(decision.confidence, 0.0);
         assert_eq!(decision.source, "gate");
-    }
-
-    #[test]
-    fn codexctl_rules_do_not_override_brain_result() {
-        let mut cfg = Config::default();
-        let mut deny = AutoRule::new("deny cargo".into(), RuleAction::Deny);
-        deny.match_tool.push("Bash".into());
-        deny.match_command.push("cargo test".into());
-        let mut approve = AutoRule::new("approve cargo".into(), RuleAction::Approve);
-        approve.match_tool.push("Bash".into());
-        approve.match_command.push("cargo test".into());
-        cfg.rules = vec![deny, approve];
-        cfg.brain = Some(BrainConfig::default());
-
-        let decision = evaluate_with(&request(), cfg.brain.as_ref().unwrap(), "on", |_, _| {
-            Ok(suggestion(RuleAction::Approve, 0.9))
-        });
-
-        assert_eq!(decision.action, "approve");
-        assert_eq!(decision.source, "brain");
-        assert_eq!(decision.reasoning, "brain reasoning");
     }
 }

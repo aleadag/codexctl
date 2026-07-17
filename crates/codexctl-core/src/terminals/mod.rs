@@ -14,6 +14,7 @@ mod windows_terminal;
 
 use crate::session::{ApprovalEvidence, ApprovalObservation, CodexSession};
 use std::io::Read;
+#[cfg(test)]
 use std::path::PathBuf;
 use std::process::{Command, ExitStatus, Stdio};
 use std::time::Duration;
@@ -213,6 +214,7 @@ impl DoctorCheck {
         }
     }
 
+    #[cfg(test)]
     fn blocked(
         name: &'static str,
         detail: impl Into<String>,
@@ -286,6 +288,7 @@ fn platform_name() -> String {
     platform_label(std::env::consts::OS, is_wsl())
 }
 
+#[cfg(test)]
 fn environment_notes(is_wsl: bool, has_windows_terminal_bridge: bool) -> Vec<String> {
     if !is_wsl {
         return Vec::new();
@@ -313,10 +316,12 @@ fn environment_notes(is_wsl: bool, has_windows_terminal_bridge: bool) -> Vec<Str
     notes
 }
 
+#[cfg(test)]
 fn windows_terminal_bridge_ready() -> bool {
     command_ready("cmd.exe") && command_ready("wt.exe")
 }
 
+#[cfg(test)]
 fn wsl_interop_check(is_wsl: bool) -> Option<DoctorCheck> {
     if !is_wsl {
         return None;
@@ -506,11 +511,13 @@ fn ancestor_process_contains(needle: &str) -> bool {
     false
 }
 
-pub fn can_launch_session() -> bool {
+#[allow(dead_code)]
+pub(crate) fn can_launch_session() -> bool {
     supported_actions(&detect_terminal()).contains(&TerminalAction::Launch)
 }
 
-pub fn help_capability_summary() -> String {
+#[allow(dead_code)]
+pub(crate) fn help_capability_summary() -> String {
     help_capability_summary_for(&detect_terminal())
 }
 
@@ -531,6 +538,7 @@ fn help_capability_summary_for(terminal: &Terminal) -> String {
     }
 }
 
+#[cfg(test)]
 fn find_command_path(name: &str) -> Option<PathBuf> {
     if name.contains(std::path::MAIN_SEPARATOR) {
         let path = PathBuf::from(name);
@@ -543,6 +551,7 @@ fn find_command_path(name: &str) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
+#[cfg(test)]
 fn binary_check(name: &'static str) -> DoctorCheck {
     match find_command_path(name) {
         Some(path) => DoctorCheck::ready(name, format!("Found at {}", path.display())),
@@ -554,10 +563,12 @@ fn binary_check(name: &'static str) -> DoctorCheck {
     }
 }
 
+#[cfg(test)]
 fn command_ready(name: &'static str) -> bool {
     find_command_path(name).is_some()
 }
 
+#[cfg(test)]
 fn output_message(output: &std::process::Output) -> String {
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     if !stderr.is_empty() {
@@ -570,6 +581,7 @@ fn output_message(output: &std::process::Output) -> String {
     format!("Command exited with status {}", output.status)
 }
 
+#[cfg(test)]
 fn probe_kitty_remote_control() -> Result<(), String> {
     let output = std::process::Command::new("kitty")
         .args(["@", "ls"])
@@ -583,6 +595,7 @@ fn probe_kitty_remote_control() -> Result<(), String> {
     }
 }
 
+#[cfg(test)]
 fn probe_tmux_connectivity() -> Result<(), String> {
     let output = std::process::Command::new("tmux")
         .args(["list-panes", "-a", "-F", "#{pane_tty}"])
@@ -596,6 +609,7 @@ fn probe_tmux_connectivity() -> Result<(), String> {
     }
 }
 
+#[cfg(test)]
 fn probe_wezterm_cli() -> Result<(), String> {
     let output = std::process::Command::new("wezterm")
         .args(["cli", "list", "--format", "json"])
@@ -609,7 +623,7 @@ fn probe_wezterm_cli() -> Result<(), String> {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(test, target_os = "macos"))]
 fn probe_system_events_access() -> Result<(), String> {
     let script = r#"tell application "System Events" to return UI elements enabled"#;
     let output = std::process::Command::new("osascript")
@@ -624,6 +638,7 @@ fn probe_system_events_access() -> Result<(), String> {
     }
 }
 
+#[cfg(test)]
 fn action_check(
     action: TerminalAction,
     status: DoctorStatus,
@@ -638,9 +653,42 @@ fn action_check(
 }
 
 pub fn doctor_report() -> DoctorReport {
-    doctor_report_for(detect_terminal())
+    navigation_doctor_report_for(detect_terminal())
 }
 
+fn navigation_doctor_report_for(terminal: Terminal) -> DoctorReport {
+    let supported = matches!(
+        terminal,
+        Terminal::Kitty | Terminal::Tmux | Terminal::WezTerm
+    ) || cfg!(target_os = "macos")
+        && matches!(
+            terminal,
+            Terminal::Ghostty | Terminal::Warp | Terminal::ITerm2 | Terminal::Apple
+        );
+    let action = if supported {
+        DoctorCheck::ready(
+            TerminalAction::Switch.label(),
+            "Coding Brain can focus a matching live session in this terminal.",
+        )
+    } else {
+        DoctorCheck::unsupported(
+            TerminalAction::Switch.label(),
+            "Automatic session focus is unavailable in this terminal; Agent Deck may provide navigation when installed.",
+        )
+    };
+    DoctorReport {
+        terminal: terminal_name(&terminal).to_string(),
+        platform: platform_name(),
+        actions: vec![action],
+        prerequisites: Vec::new(),
+        notes: vec![
+            "Agent Deck integration is optional; Coding Brain falls back to terminal focus."
+                .to_string(),
+        ],
+    }
+}
+
+#[cfg(test)]
 fn doctor_report_for(terminal: Terminal) -> DoctorReport {
     let terminal_label = terminal_name(&terminal).to_string();
     let is_wsl = is_wsl();
@@ -1105,7 +1153,8 @@ pub fn format_doctor_report(report: &DoctorReport) -> String {
     lines.join("\n")
 }
 
-pub fn launch_session(
+#[allow(dead_code)]
+pub(crate) fn launch_session(
     cwd: &str,
     prompt: Option<&str>,
     resume: Option<&str>,
@@ -1171,7 +1220,8 @@ pub fn switch_to_terminal(session: &CodexSession) -> Result<(), String> {
     }
 }
 
-pub fn send_input(session: &CodexSession, text: &str) -> Result<(), String> {
+#[allow(dead_code)]
+pub(crate) fn send_input(session: &CodexSession, text: &str) -> Result<(), String> {
     match detect_terminal() {
         Terminal::Gnome => gnome_terminal::send_input(session, text),
         #[cfg(target_os = "macos")]
@@ -1469,7 +1519,8 @@ fn refresh_approval_observation_with(
     session.approval = observation;
 }
 
-pub fn refresh_approval_observation(session: &mut CodexSession) {
+#[allow(dead_code)]
+pub(crate) fn refresh_approval_observation(session: &mut CodexSession) {
     let checked_at_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -1496,12 +1547,13 @@ fn approve_shell_permission_with(
     io.send_enter(session, expected.backend.clone(), expected.target.as_str())
 }
 
-pub fn approve_shell_permission(session: &CodexSession) -> Result<(), String> {
+#[allow(dead_code)]
+pub(crate) fn approve_shell_permission(session: &CodexSession) -> Result<(), String> {
     approve_shell_permission_with(&RealApprovalIo, session)
 }
 
 #[cfg(target_os = "macos")]
-pub fn run_osascript(script: &str) -> Result<(), String> {
+pub(crate) fn run_osascript(script: &str) -> Result<(), String> {
     let output = std::process::Command::new("osascript")
         .args(["-e", script])
         .output()

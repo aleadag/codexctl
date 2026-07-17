@@ -3,8 +3,8 @@
 //! Tracking issue: <https://github.com/aleadag/codexctl/issues/257>.
 //!
 //! This module owns the single canonical first-run flow for getting a
-//! codexctl install ready: weekly budget cap, local-LLM brain detection,
-//! Codex hook install and curated skill suggestions.
+//! codexctl install ready: local-LLM brain detection, Codex hook install, and
+//! curated skill suggestions.
 //!
 //! Public surface:
 //!
@@ -18,11 +18,11 @@
 //!
 //! Module layout:
 //!
-//! * `hooks.rs` — the legacy `--init` / `--uninstall` hook writer.
+//! * `hooks.rs` — managed Codex hook installation.
 //! * `marker.rs` — `~/.codexctl/onboarding.json` read/write.
 //! * `prompt.rs` — minimal stdin/stdout prompt helpers.
 //! * `state.rs` — environment detection (probes ollama and hooks.json).
-//! * `phases.rs` — `Phase` trait + Budget/Brain/Plugin/Skills impls.
+//! * `phases.rs` — `Phase` trait + Brain/Plugin/Skills impls.
 
 pub mod hooks;
 pub mod marker;
@@ -35,11 +35,6 @@ use std::io;
 use marker::{OnboardingMarker, PhaseRecord};
 use phases::{Answers, Phase};
 use state::PhaseStatus;
-
-// Re-export the legacy entry points so existing `--init` / `--uninstall`
-// flag dispatch in main.rs still compiles. The new subcommand path delegates
-// through `run_wizard` and friends instead.
-pub use hooks::{run_init, run_uninit};
 
 /// Interactive wizard — walks every phase in `registry()` order, prompts,
 /// applies, and updates the onboarding marker.
@@ -165,9 +160,7 @@ pub fn run_check() -> io::Result<()> {
     Ok(())
 }
 
-/// Remove every codexctl-managed artifact. Phases that own user state (such as
-/// the config file's `budget` line) decline to delete it — we don't erase a
-/// user's setup, only artifacts codexctl actively manages.
+/// Remove every codexctl-managed artifact without erasing user-owned setup.
 pub fn run_remove() -> io::Result<()> {
     let registry = phases::registry();
     let mut errors = Vec::new();
@@ -586,7 +579,6 @@ mod tests {
         // assert the marker captures one record per phase.
         let registry = phases::registry();
         let answers = Answers {
-            skip_budget: true,
             skip_brain: true,
             install_plugin: Some(false),
             skip_skills: true,
@@ -602,8 +594,8 @@ mod tests {
                 phases::record_from_status(&status, stamp),
             );
         }
-        // Four entries, one per phase, all skipped.
-        assert_eq!(records.len(), 4);
+        // Three entries, one per phase, all skipped.
+        assert_eq!(records.len(), 3);
         for record in records.values() {
             assert_eq!(record.status, "skipped");
         }

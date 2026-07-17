@@ -7,19 +7,10 @@
 
 // Foundational modules from codexctl-core (epic #279). Re-aliased so existing
 // `crate::session::*` paths still resolve. See `lib.rs` for the rationale.
-use codexctl_core::{
-    discovery, history, hooks, launch, logger, models, process, rules, session, terminals, theme,
-    transcript,
-};
-// TUI now lives in `codexctl-tui` (issue #275). The `app` + `ui` + TUI
-// peripheral modules are imported here so existing `app::App`, `ui::table`,
-// `demo::*`, `recorder::*`, `session_recorder::*` paths in main.rs resolve
-// unchanged.
-use codexctl_tui::{app, demo, session_recorder, ui};
+use codexctl_core::{discovery, hooks, logger, rules, session, theme, transcript};
+use codexctl_tui::ui;
 
 mod brain;
-#[allow(dead_code)]
-mod brain_screen;
 mod commands;
 mod config;
 mod doctor;
@@ -28,7 +19,7 @@ mod lifecycle_hook;
 mod runtime;
 
 use std::io;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
@@ -39,18 +30,9 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 
-use app::{App, FocusFilter, StatusFilter};
-
-#[derive(Clone)]
-pub(crate) struct ViewFilters {
-    pub(crate) status_filter: StatusFilter,
-    pub(crate) focus_filter: FocusFilter,
-    pub(crate) search: String,
-}
-
 #[derive(Subcommand)]
 pub(crate) enum Command {
-    /// Onboarding wizard (budget, brain, hooks, skills). See issue #257.
+    /// Onboarding wizard (brain, hooks, skills). See issue #257.
     Init {
         /// Drift report comparing recorded onboarding against current state.
         #[arg(long, conflicts_with_all = ["reset", "remove", "non_interactive"])]
@@ -74,7 +56,7 @@ pub(crate) enum Command {
         yes: bool,
         /// Install (or re-install) just Codex hooks (#325).
         /// Skip every other phase. Useful for users who already configured
-        /// budget / brain and just want to refresh hook entries
+        /// brain and just want to refresh hook entries
         /// after `brew upgrade codexctl`.
         #[arg(
             long,
@@ -90,16 +72,9 @@ pub(crate) enum Command {
         )]
         upgrade: bool,
         /// Run every phase without prompting. Combine with the per-phase
-        /// flags below (`--budget`, `--brain-url`, etc.).
+        /// flags below (`--brain-url`, etc.).
         #[arg(long)]
         non_interactive: bool,
-
-        /// Weekly budget cap in USD (used with --non-interactive).
-        #[arg(long)]
-        budget: Option<f64>,
-        /// Skip the budget phase (used with --non-interactive).
-        #[arg(long)]
-        skip_budget: bool,
 
         /// Local-LLM endpoint URL for the brain phase.
         #[arg(long)]
@@ -148,107 +123,18 @@ pub(crate) enum Command {
     about = "Supervise Codex sessions with a local brain that learns from you."
 )]
 pub(crate) struct Cli {
-    // ── Dashboard ───────────────────────────────────────────────────────
-    /// Refresh interval in milliseconds
-    #[arg(short, long, default_value_t = 2000, help_heading = "Dashboard")]
-    pub(crate) interval: u64,
-
     /// Color theme: dark, light, or none (respects NO_COLOR env var)
-    #[arg(long, help_heading = "Dashboard")]
+    #[arg(long, help_heading = "Brain TUI")]
     pub(crate) theme: Option<String>,
 
-    /// Enable debug mode: show timing metrics in the footer
-    #[arg(long, help_heading = "Dashboard")]
-    pub(crate) debug: bool,
-
-    /// Run with deterministic fake sessions for screenshots and recordings
-    #[arg(long, help_heading = "Dashboard")]
-    pub(crate) demo: bool,
-
-    // ── Output Modes ───────────────────────────────────────────────────
-    /// Print session list to stdout and exit (no TUI)
-    #[arg(short, long, help_heading = "Output Modes")]
-    pub(crate) list: bool,
-
-    /// Print JSON array of sessions and exit
+    /// Emit JSON from supported non-interactive Brain commands
     #[arg(long, help_heading = "Output Modes")]
     pub(crate) json: bool,
-
-    /// Stream status changes to stdout (no TUI). Only prints when status changes.
-    #[arg(short, long, help_heading = "Output Modes")]
-    pub(crate) watch: bool,
 
     /// Run headless with brain evaluation and context rot prevention active (no TUI).
     /// Activity remains available to the Brain TUI in another terminal.
     #[arg(long, help_heading = "Output Modes")]
     pub(crate) headless: bool,
-
-    /// Output format for watch mode. Placeholders: {pid}, {project}, {status}, {cost}, {context}
-    #[arg(
-        long,
-        default_value = "{pid} {project}: {status} (${cost}, ctx {context}%)",
-        help_heading = "Output Modes"
-    )]
-    pub(crate) format: String,
-
-    /// Show summary of session activity and exit
-    #[arg(long, help_heading = "Output Modes")]
-    pub(crate) summary: bool,
-
-    /// Time window for --summary, --history, --stats (e.g., "8h", "24h", "30m")
-    #[arg(long, default_value = "24h", help_heading = "Output Modes")]
-    pub(crate) since: String,
-
-    // ── Filtering ──────────────────────────────────────────────────────
-    /// Filter sessions by status (e.g., "NeedsInput", "Processing", "Finished")
-    #[arg(long, help_heading = "Filtering")]
-    pub(crate) filter_status: Option<String>,
-
-    /// Focus on a high-signal subset: attention, over-budget, high-context, unknown-telemetry, conflict
-    #[arg(long, help_heading = "Filtering")]
-    pub(crate) focus: Option<String>,
-
-    /// Search project/model/session text
-    #[arg(long, help_heading = "Filtering")]
-    pub(crate) search: Option<String>,
-
-    // ── Session Management ─────────────────────────────────────────────
-    /// Launch a new Codex session in the given directory
-    #[arg(long = "new", help_heading = "Session Management")]
-    pub(crate) new_session: bool,
-
-    /// Working directory for the new session (used with --new)
-    #[arg(long, default_value = ".", help_heading = "Session Management")]
-    pub(crate) cwd: String,
-
-    /// Prompt to send to the new session (used with --new)
-    #[arg(long, help_heading = "Session Management")]
-    pub(crate) prompt: Option<String>,
-
-    /// Resume a session by ID (used with --new)
-    #[arg(long, help_heading = "Session Management")]
-    pub(crate) resume: Option<String>,
-
-    // ── Budget & Notifications ─────────────────────────────────────────
-    /// Per-session budget in USD. Alert at 80%, optionally kill at 100%.
-    #[arg(long, help_heading = "Budget & Notifications")]
-    pub(crate) budget: Option<f64>,
-
-    /// Auto-kill sessions that exceed the budget (requires --budget)
-    #[arg(long, help_heading = "Budget & Notifications")]
-    pub(crate) kill_on_budget: bool,
-
-    /// Enable desktop notifications on NeedsInput transitions
-    #[arg(long, help_heading = "Budget & Notifications")]
-    pub(crate) notify: bool,
-
-    /// Webhook URL to POST JSON on status changes
-    #[arg(long, help_heading = "Budget & Notifications")]
-    pub(crate) webhook: Option<String>,
-
-    /// Only fire webhook on these status transitions (comma-separated, e.g. "NeedsInput,Finished")
-    #[arg(long, help_heading = "Budget & Notifications")]
-    pub(crate) webhook_on: Option<String>,
 
     // ── Brain (Local LLM) ──────────────────────────────────────────────
     /// Enable local LLM brain for session advisory (requires ollama or compatible endpoint)
@@ -258,10 +144,6 @@ pub(crate) struct Cli {
     /// Auto-execute brain suggestions without confirmation (requires --brain)
     #[arg(long, help_heading = "Brain (Local LLM)")]
     pub(crate) auto_run: bool,
-
-    /// UNSAFE: allow guarded terminal Enter approval when no managed permission hook is configured
-    #[arg(long, help_heading = "Brain (Local LLM)")]
-    pub(crate) terminal_auto_approve_fallback: bool,
 
     /// LLM endpoint URL for brain (requires --brain)
     #[arg(long, help_heading = "Brain (Local LLM)")]
@@ -405,32 +287,6 @@ pub(crate) struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
 
-    // ── Recording ──────────────────────────────────────────────────────
-    /// Record the TUI session as an asciicast v2 file (e.g., --record demo.cast)
-    #[arg(long, help_heading = "Recording")]
-    pub(crate) record: Option<String>,
-
-    /// Auto-quit the TUI after this many seconds (useful with --demo --record)
-    #[arg(long, help_heading = "Recording")]
-    pub(crate) duration: Option<u64>,
-
-    // ── Cleanup ────────────────────────────────────────────────────────
-    /// Clean up old session data (JSONL transcripts, session JSON files)
-    #[arg(long, help_heading = "Cleanup")]
-    pub(crate) clean: bool,
-
-    /// Only clean sessions older than this duration (e.g., "7d", "24h"). Used with --clean.
-    #[arg(long, help_heading = "Cleanup")]
-    pub(crate) older_than: Option<String>,
-
-    /// Only clean sessions that have finished. Used with --clean.
-    #[arg(long, help_heading = "Cleanup")]
-    pub(crate) finished: bool,
-
-    /// Show what would be removed without deleting. Used with --clean.
-    #[arg(long, help_heading = "Cleanup")]
-    pub(crate) dry_run: bool,
-
     // ── History & Diagnostics ──────────────────────────────────────────
     /// Run post-mortem analysis on a completed session transcript
     #[arg(long, help_heading = "History & Diagnostics")]
@@ -439,14 +295,6 @@ pub(crate) struct Cli {
     /// Session ID or JSONL path for --autopsy (defaults to most recent session)
     #[arg(long, help_heading = "History & Diagnostics")]
     pub(crate) session: Option<String>,
-
-    /// Show history of completed sessions and exit
-    #[arg(long, help_heading = "History & Diagnostics")]
-    pub(crate) history: bool,
-
-    /// Show aggregated session statistics and exit
-    #[arg(long, help_heading = "History & Diagnostics")]
-    pub(crate) stats: bool,
 
     /// Show resolved configuration and exit
     #[arg(long, help_heading = "History & Diagnostics")]
@@ -468,26 +316,9 @@ pub(crate) struct Cli {
     #[arg(long, help_heading = "History & Diagnostics")]
     pub(crate) hooks: bool,
 
-    /// Diagnose terminal integration and setup requirements
-    #[arg(long, help_heading = "History & Diagnostics")]
-    pub(crate) doctor: bool,
-
     /// Write diagnostic logs to a file (for debugging/bug reports)
     #[arg(long, help_heading = "History & Diagnostics")]
     pub(crate) log: Option<String>,
-
-    // ── Setup ─────────────────────────────────────────────────────────
-    /// Wire up Codex hooks in .codex/hooks.json and exit
-    #[arg(long, help_heading = "Setup")]
-    pub(crate) init: bool,
-
-    /// Remove codexctl hooks from .codex/hooks.json and exit
-    #[arg(long, help_heading = "Setup", conflicts_with = "init")]
-    pub(crate) uninstall: bool,
-
-    /// Configuration scope: user (global ~/.codex/hooks.json) or project (.codex/hooks.json)
-    #[arg(short, long, default_value = "user", help_heading = "Setup")]
-    pub(crate) scope: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -506,16 +337,15 @@ fn select_mode(cli: &Cli) -> RunMode {
 
 fn main() -> io::Result<()> {
     let cli = Cli::parse();
-    let is_demo = cli.demo;
     let is_internal_hook = cli.permission_hook || cli.lifecycle_hook || cli.distill_once;
     let result = run_main(cli);
     if result.is_ok() && !is_internal_hook {
-        maybe_print_star_prompt(is_demo);
+        maybe_print_star_prompt();
     }
     result
 }
 
-fn maybe_print_star_prompt(is_demo: bool) {
+fn maybe_print_star_prompt() {
     let marker = std::env::var_os("HOME")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
@@ -523,7 +353,7 @@ fn maybe_print_star_prompt(is_demo: bool) {
 
     let first_run = !marker.exists();
 
-    if is_demo || first_run {
+    if first_run {
         eprintln!();
         eprintln!("\u{2b50} If codexctl is useful, star it: https://github.com/aleadag/codexctl");
 
@@ -589,13 +419,6 @@ fn apply_brain_cli_overrides(cfg: &mut config::Config, cli: &Cli) {
             brain.model = model.clone();
         }
     }
-    if cli.terminal_auto_approve_fallback {
-        let brain = cfg.brain.get_or_insert_with(|| config::BrainConfig {
-            enabled: false,
-            ..config::BrainConfig::default()
-        });
-        brain.terminal_auto_approve_fallback = true;
-    }
 }
 
 fn run_main(cli: Cli) -> io::Result<()> {
@@ -627,33 +450,6 @@ fn run_main(cli: Cli) -> io::Result<()> {
         );
     }
 
-    // CLI flags override config file values (only override if explicitly set)
-    if cli.interval != 2000 {
-        cfg.interval = cli.interval;
-    }
-    if cli.notify {
-        cfg.notify = true;
-    }
-    if cli.debug {
-        cfg.debug = true;
-    }
-    if cli.budget.is_some() {
-        cfg.budget = cli.budget;
-    }
-    if cli.kill_on_budget {
-        cfg.kill_on_budget = true;
-    }
-    if cli.webhook.is_some() {
-        cfg.webhook = cli.webhook.clone();
-    }
-    if cli.webhook_on.is_some() {
-        cfg.webhook_on = cli.webhook_on.as_deref().map(|s| {
-            s.split(',')
-                .map(|t| t.trim().to_string())
-                .collect::<Vec<_>>()
-        });
-    }
-
     apply_brain_cli_overrides(&mut cfg, &cli);
     if cli.permission_hook {
         brain::permission_hook::run(cfg.brain.as_ref());
@@ -667,13 +463,6 @@ fn run_main(cli: Cli) -> io::Result<()> {
             );
         }
     }
-
-    models::set_overrides(cfg.model_overrides.clone());
-    let filters = ViewFilters {
-        status_filter: commands::parse_status_filter(cli.filter_status.as_deref())?,
-        focus_filter: commands::parse_focus_filter(cli.focus.as_deref())?,
-        search: cli.search.clone().unwrap_or_default(),
-    };
 
     // Load event hooks from config
     let hook_registry = config::load_hooks();
@@ -699,34 +488,6 @@ fn run_main(cli: Cli) -> io::Result<()> {
     if cli.hooks {
         hook_registry.print_list();
         return Ok(());
-    }
-
-    if cli.doctor {
-        eprintln!(
-            "note: `--doctor` is deprecated. Use `codexctl doctor` for the new \
-             structured checklist (PATH + hooks + brain + sessions + \
-             terminal). The legacy report follows below."
-        );
-        return commands::print_doctor();
-    }
-
-    if cli.init {
-        eprintln!(
-            "note: `--init` is deprecated and will be removed in a future release. \
-             Use `codexctl init` for the full onboarding wizard, or this flag for \
-             the hook-only install."
-        );
-        let project = cli.scope == "project";
-        return init::run_init(project, cli.dry_run);
-    }
-
-    if cli.uninstall {
-        eprintln!(
-            "note: `--uninstall` is deprecated and will be removed in a future release. \
-             Use `codexctl init --remove` instead."
-        );
-        let project = cli.scope == "project";
-        return init::run_uninit(project);
     }
 
     if cli.brain_prompts {
@@ -796,8 +557,6 @@ fn run_main(cli: Cli) -> io::Result<()> {
                 plugin_only,
                 upgrade,
                 non_interactive,
-                budget,
-                skip_budget,
                 brain_url,
                 skip_brain,
                 install_plugin,
@@ -836,8 +595,6 @@ fn run_main(cli: Cli) -> io::Result<()> {
                         None
                     };
                     let answers = init::phases::Answers {
-                        budget_weekly_usd: *budget,
-                        skip_budget: *skip_budget,
                         brain_url: brain_url.clone(),
                         skip_brain: *skip_brain,
                         install_plugin: install_plugin_opt,
@@ -922,67 +679,25 @@ fn run_main(cli: Cli) -> io::Result<()> {
         return commands::run_autopsy(cli.session.as_deref(), cli.json);
     }
 
-    if cli.clean {
-        return commands::run_clean(cli.older_than.as_deref(), cli.finished, cli.dry_run);
-    }
-
-    if cli.history {
-        history::print_history(&cli.since);
-        return Ok(());
-    }
-
-    if cli.stats {
-        history::print_stats(&cli.since);
-        return Ok(());
-    }
-
-    if cli.new_session {
-        return commands::launch_session(&cli.cwd, cli.prompt.as_deref(), cli.resume.as_deref());
-    }
-
-    if cli.summary {
-        return commands::print_summary(&cli.since);
-    }
-
     if let RunMode::Headless { json } = select_mode(&cli) {
-        return commands::run_headless(Duration::from_millis(cfg.interval), &cfg, json);
-    }
-
-    if cli.json && !cli.watch {
-        return commands::print_json(cli.demo, &filters);
-    }
-
-    if cli.list {
-        return commands::print_list(cli.demo, &filters);
-    }
-
-    if cli.watch {
-        return commands::run_watch(
-            Duration::from_millis(cfg.interval),
-            cli.json,
-            &cli.format,
-            &filters,
-        );
+        return commands::run_headless(Duration::from_secs(2), &cfg, json);
     }
 
     catch_up_distillation();
-    let theme_mode = theme::ThemeMode::detect(cli.theme.as_deref());
+    let theme_mode = theme::ThemeMode::detect(cli.theme.as_deref().or(cfg.theme.as_deref()));
     let app_theme = theme::Theme::from_mode(theme_mode);
 
-    // #322 — first-run nudge. If the user has neither onboarded nor
-    // installed hooks, drop a hint above the TUI before launching so
-    // they understand why Brain activity is going to be empty. Skipped in
-    // --demo (the wizard's whole point is moot there) and when the
-    // operator opts out via env.
-    if !cli.demo && std::env::var("CODEXCTL_SKIP_FIRST_RUN").is_err() && is_first_run() {
+    // #322 — first-run nudge. If the user has neither onboarded nor installed
+    // hooks, explain why Brain activity will initially be empty.
+    if std::env::var("CODEXCTL_SKIP_FIRST_RUN").is_err() && is_first_run() {
         print_first_run_banner();
     }
 
     debug_assert_eq!(select_mode(&cli), RunMode::BrainTui);
-    launch_brain_tui(app_theme, cli.duration.map(Duration::from_secs))
+    launch_brain_tui(app_theme)
 }
 
-fn launch_brain_tui(theme: theme::Theme, max_duration: Option<Duration>) -> io::Result<()> {
+fn launch_brain_tui(theme: theme::Theme) -> io::Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     if let Err(error) = execute!(stdout, EnterAlternateScreen) {
@@ -999,7 +714,7 @@ fn launch_brain_tui(theme: theme::Theme, max_duration: Option<Duration>) -> io::
         }
     };
     let app = codexctl_tui::brain_app::BrainApp::new(runtime::build_brain_runtime(), theme);
-    let result = run_brain_tui(&mut terminal, app, max_duration);
+    let result = run_brain_tui(&mut terminal, app);
     let raw_result = disable_raw_mode();
     let screen_result = execute!(terminal.backend_mut(), LeaveAlternateScreen);
     let cursor_result = terminal.show_cursor();
@@ -1009,17 +724,12 @@ fn launch_brain_tui(theme: theme::Theme, max_duration: Option<Duration>) -> io::
 fn run_brain_tui<W: io::Write>(
     terminal: &mut Terminal<CrosstermBackend<W>>,
     mut app: codexctl_tui::brain_app::BrainApp,
-    max_duration: Option<Duration>,
 ) -> io::Result<()> {
     use codexctl_core::runtime::BrainEffect;
     use codexctl_tui::terminal_suspend::{CrosstermTerminalControl, navigate_to_session};
 
-    let started = Instant::now();
     loop {
         terminal.draw(|frame| ui::brain::render(frame, &app))?;
-        if max_duration.is_some_and(|duration| started.elapsed() >= duration) {
-            return Ok(());
-        }
         if event::poll(Duration::from_millis(100))?
             && let Event::Key(key) = event::read()?
             && let Some(effect) = app.handle_key(key)
@@ -1051,197 +761,6 @@ fn catch_up_distillation() {
     }
 }
 
-#[allow(dead_code, clippy::too_many_arguments)]
-fn run_tui<W: io::Write>(
-    terminal: &mut Terminal<CrosstermBackend<W>>,
-    tick_rate: Duration,
-    cfg: &config::Config,
-    app_theme: theme::Theme,
-    hook_registry: hooks::HookRegistry,
-    demo_mode: bool,
-    filters: &ViewFilters,
-    max_duration: Option<Duration>,
-) -> io::Result<()> {
-    let mut app = App::new();
-    // Replace the App's default in-memory MockRuntime with a real one wired
-    // to the live brain and discovery subsystems. App::new
-    // intentionally uses a mock so its many test call sites stay parameter-
-    // free; the production wiring happens here, in main.
-    app.runtime = runtime::build_runtime();
-    app.prime_brain_decision_notice();
-    app.notify = cfg.notify;
-    app.debug = cfg.debug;
-    app.webhook_url = cfg.webhook.clone();
-    app.webhook_filter = cfg.webhook_on.clone();
-    app.budget_usd = cfg.budget;
-    app.kill_on_budget = cfg.kill_on_budget;
-    app.grouped_view = cfg.grouped;
-    app.theme = app_theme;
-    app.hooks = hook_registry;
-    app.daily_limit = cfg.daily_limit;
-    app.weekly_limit = cfg.weekly_limit;
-    app.context_warn_threshold = cfg.context_warn_threshold;
-    app.rules = cfg.rules.clone();
-    app.health_thresholds = cfg.health.clone();
-    app.file_conflicts_enabled = cfg.file_conflicts;
-    app.auto_deny_file_conflicts = cfg.auto_deny_file_conflicts;
-    app.brain_config = cfg.brain.clone();
-    if let Some(ref brain_cfg) = cfg.brain {
-        if brain_cfg.enabled {
-            if commands::check_brain_endpoint(&brain_cfg.endpoint, brain_cfg.timeout_ms) {
-                let mut engine = brain::engine::BrainEngine::new(brain_cfg.clone());
-                engine.set_terminal_fallback_blocker(|cwd| {
-                    init::hooks::discover_permission_hooks(cwd).blocks_terminal_fallback()
-                });
-                app.brain_driver = Some(Box::new(runtime::LiveBrainDriver::new(engine)));
-                app.status_msg = format!(
-                    "Brain: connected to {} ({})",
-                    brain_cfg.endpoint, brain_cfg.model
-                );
-            } else {
-                app.status_msg = format!(
-                    "Error: Brain endpoint {} not reachable — run `codexctl doctor` or start ollama",
-                    brain_cfg.endpoint
-                );
-            }
-        }
-    }
-    app.demo_mode = demo_mode;
-    commands::apply_filters(&mut app, filters);
-
-    if demo_mode {
-        app.daily_limit = Some(50.0);
-        app.budget_usd = Some(10.0);
-        app.rules = demo::demo_rules();
-        // Create a stub brain engine so the status bar can show brain suggestions
-        if app.brain_driver.is_none() {
-            let mut engine = brain::engine::BrainEngine::new(config::BrainConfig::default());
-            engine.set_terminal_fallback_blocker(|cwd| {
-                init::hooks::discover_permission_hooks(cwd).blocks_terminal_fallback()
-            });
-            app.brain_driver = Some(Box::new(runtime::LiveBrainDriver::new(engine)));
-        }
-        // Re-refresh to replace real sessions discovered during App::new()
-        app.refresh();
-
-        // Optional: auto-open the Skills view for recording demo GIFs.
-        // `CODEXCTL_DEMO_SKILLS=1 codexctl --demo --record demo-skills.cast`.
-        if std::env::var("CODEXCTL_DEMO_SKILLS").as_deref() == Ok("1") {
-            app.open_skills_overlay();
-        }
-    }
-
-    let mut last_tick = Instant::now();
-    let tui_start = Instant::now();
-    let mut sess_recs: std::collections::HashMap<u32, session_recorder::SessionRecorder> =
-        std::collections::HashMap::new();
-    let term_size = crossterm::terminal::size().unwrap_or((120, 40));
-
-    loop {
-        // Auto-quit after --duration seconds (graceful exit, flushes recordings)
-        if let Some(max) = max_duration {
-            if tui_start.elapsed() >= max {
-                for (_, rec) in sess_recs.iter_mut() {
-                    let _ = rec.finish();
-                }
-                if let Some(ref hl) = app.demo_highlight {
-                    hl.cleanup();
-                }
-                return Ok(());
-            }
-        }
-        terminal.draw(|frame| {
-            let area = frame.area();
-
-            // Full-screen mode: Skills takes over the entire frame.
-            if app.show_skills {
-                ui::skills::render_skills_screen(frame, area, &app);
-                return;
-            }
-
-            // Full-screen mode: Brain Review (scorecard + review queue).
-            if app.show_brain {
-                brain_screen::render_brain_screen(frame, area, &app);
-                return;
-            }
-
-            ui::table::render(frame, area, &app);
-        })?;
-
-        let timeout = tick_rate
-            .checked_sub(last_tick.elapsed())
-            .unwrap_or_else(|| Duration::from_secs(0));
-
-        if event::poll(timeout)? {
-            if let Event::Key(key) = event::read()? {
-                if !app.handle_key(key) {
-                    // Finish all session recordings on quit
-                    for (_, rec) in sess_recs.iter_mut() {
-                        let _ = rec.finish();
-                    }
-                    if let Some(ref hl) = app.demo_highlight {
-                        hl.cleanup();
-                    }
-                    return Ok(());
-                }
-            }
-        }
-
-        if last_tick.elapsed() >= tick_rate {
-            app.tick();
-            last_tick = Instant::now();
-
-            // Start recorders for newly added recordings
-            for (pid, path) in &app.session_recordings {
-                if sess_recs.contains_key(pid) {
-                    continue;
-                }
-                if let Some(session) = app.sessions.iter().find(|s| s.pid == *pid) {
-                    if let Some(ref jsonl) = session.jsonl_path {
-                        let name = session.display_name();
-                        match session_recorder::SessionRecorder::new(
-                            jsonl,
-                            path,
-                            name,
-                            term_size.0,
-                            term_size.1,
-                        ) {
-                            Ok(r) => {
-                                sess_recs.insert(*pid, r);
-                            }
-                            Err(e) => {
-                                app.status_msg = format!("Record error: {e}");
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Poll all active recorders
-            for (_, rec) in sess_recs.iter_mut() {
-                let _ = rec.poll();
-            }
-
-            // Finish recorders that were removed from app.session_recordings
-            let stopped: Vec<u32> = sess_recs
-                .keys()
-                .filter(|pid| !app.session_recordings.contains_key(pid))
-                .copied()
-                .collect();
-            for pid in stopped {
-                if let Some(mut rec) = sess_recs.remove(&pid) {
-                    match rec.finish() {
-                        Ok(()) => {}
-                        Err(e) => {
-                            app.status_msg = format!("{e}");
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod default_brain_cli_tests {
     use super::*;
@@ -1264,6 +783,104 @@ mod default_brain_cli_tests {
 #[cfg(test)]
 mod brain_only_cli_tests {
     use super::*;
+
+    const REMOVED_ARGS: &[&str] = &[
+        "--interval",
+        "--debug",
+        "--demo",
+        "--list",
+        "--watch",
+        "--summary",
+        "--since",
+        "--filter-status",
+        "--focus",
+        "--search",
+        "--new",
+        "--cwd",
+        "--prompt",
+        "--resume",
+        "--budget",
+        "--kill-on-budget",
+        "--notify",
+        "--webhook",
+        "--webhook-on",
+        "--terminal-auto-approve-fallback",
+        "--record",
+        "--duration",
+        "--clean",
+        "--older-than",
+        "--finished",
+        "--history",
+        "--stats",
+        "--scope",
+        "--init",
+        "--uninstall",
+        "--doctor",
+    ];
+
+    const RETAINED_ARGS: &[&str] = &[
+        "--headless",
+        "--json",
+        "--theme",
+        "--brain",
+        "--auto-run",
+        "--url",
+        "--brain-model",
+        "--brain-eval",
+        "--brain-prompts",
+        "--brain-stats",
+        "--brain-review",
+        "--brain-mark-canonical",
+        "--brain-query",
+        "--tool",
+        "--tool-input",
+        "--project",
+        "--mode",
+        "--record-outcome",
+        "--exit-code",
+        "--duration-ms",
+        "--stderr-tail",
+        "--session-id",
+        "--tool-use-id",
+        "--reap-outcomes",
+        "--brain-outcomes",
+        "--brain-baseline",
+        "--top",
+        "--insights",
+        "--brain-garden",
+        "--apply",
+        "--brain-briefing",
+        "--autopsy",
+        "--session",
+        "--config",
+        "--config-template",
+        "--config-validate",
+        "--config-init",
+        "--hooks",
+        "--log",
+    ];
+
+    #[test]
+    fn removed_args_fail_and_retained_args_are_in_long_help() {
+        let help = Cli::command().render_long_help().to_string();
+        for arg in REMOVED_ARGS {
+            assert!(Cli::try_parse_from(["codexctl", arg]).is_err(), "{arg}");
+            assert!(!help_has_long_flag(&help, arg), "{arg}");
+        }
+        for arg in RETAINED_ARGS {
+            assert!(help_has_long_flag(&help, arg), "{arg}");
+        }
+    }
+
+    fn help_has_long_flag(help: &str, flag: &str) -> bool {
+        help.split_whitespace().any(|token| {
+            let token = token.trim_matches(|character: char| matches!(character, ',' | '[' | ']'));
+            token == flag
+                || token
+                    .strip_prefix(flag)
+                    .is_some_and(|rest| rest.starts_with('='))
+        })
+    }
 
     #[test]
     fn removed_product_surfaces_are_rejected() {
@@ -1419,18 +1036,5 @@ mod permission_hook_cli_tests {
         assert!(cli.distill_once);
         let help = Cli::command().render_long_help().to_string();
         assert!(!help.contains("--distill-once"));
-    }
-
-    #[test]
-    fn terminal_fallback_cli_override_does_not_enable_brain_or_auto_mode() {
-        let cli = Cli::try_parse_from(["codexctl", "--terminal-auto-approve-fallback"]).unwrap();
-        let mut cfg = config::Config::default();
-
-        apply_brain_cli_overrides(&mut cfg, &cli);
-
-        let brain = cfg.brain.expect("CLI override should be retained");
-        assert!(!brain.enabled);
-        assert!(!brain.auto_mode);
-        assert!(brain.terminal_auto_approve_fallback);
     }
 }

@@ -41,28 +41,20 @@ const MAX_DECISION_RECORD_BYTES: u64 = 1024 * 1024;
 // Core types
 // ────────────────────────────────────────────────────────────────────────────
 
-/// Whether a decision was made for a single session or for orchestration.
+/// Scope of a Brain decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DecisionType {
-    /// Normal per-session decision (approve, deny, send).
+    /// A tool permission decision for one session.
     Session,
-    /// Cross-session orchestration decision (spawn, route, terminate).
-    Orchestration,
 }
 
 impl DecisionType {
     pub fn label(&self) -> &'static str {
-        match self {
-            DecisionType::Session => "session",
-            DecisionType::Orchestration => "orchestration",
-        }
+        "session"
     }
 
-    pub fn from_label(s: &str) -> Self {
-        match s {
-            "orchestration" => DecisionType::Orchestration,
-            _ => DecisionType::Session,
-        }
+    pub fn from_label(_s: &str) -> Self {
+        DecisionType::Session
     }
 }
 
@@ -80,8 +72,7 @@ pub struct DecisionRecord {
     pub user_action: String, // "accept", "reject", "auto", "deny_rule_override"
     pub context: Option<DecisionContext>,
     pub outcome: Option<DecisionOutcome>,
-    /// Whether this was a session or orchestration decision.
-    /// Defaults to Session for backwards compatibility with old records.
+    /// Decision scope. Historical values are normalized to Session.
     pub decision_type: DecisionType,
     /// Epoch seconds when the brain suggestion was created.
     /// None for old records or observations. Used by time-to-correct analysis.
@@ -502,7 +493,7 @@ fn snapshot_context(session: &crate::session::CodexSession) -> serde_json::Value
 // ────────────────────────────────────────────────────────────────────────────
 
 /// Log a brain decision (suggestion + user response) to the local JSONL file.
-/// `decision_type` distinguishes session-level vs orchestration-level decisions.
+/// `decision_type` is retained in the record format for historical readers.
 #[allow(clippy::too_many_arguments)]
 pub fn log_decision(
     pid: u32,
@@ -1081,30 +1072,6 @@ mod tests {
         }
     }
 
-    fn make_orchestration_decision(tool: &str, project: &str, user_action: &str) -> DecisionRecord {
-        DecisionRecord {
-            timestamp: "0".into(),
-            pid: 0,
-            project: project.into(),
-            tool: Some(tool.into()),
-            command: Some("test cmd".into()),
-            brain_action: "spawn".into(),
-            brain_confidence: 0.85,
-            brain_reasoning: "orchestration test".into(),
-            user_action: user_action.into(),
-            context: None,
-            outcome: None,
-            decision_type: DecisionType::Orchestration,
-            suggested_at: None,
-            resolved_at: None,
-            override_reason: None,
-            decision_id: None,
-            brain_decision_ms: None,
-            cache_hit: None,
-            canonical: None,
-        }
-    }
-
     #[test]
     fn log_and_read_decisions() {
         let dir = tempfile::tempdir().unwrap();
@@ -1534,26 +1501,18 @@ mod tests {
     #[test]
     fn test_decision_type_labels() {
         assert_eq!(DecisionType::Session.label(), "session");
-        assert_eq!(DecisionType::Orchestration.label(), "orchestration");
     }
 
     #[test]
     fn test_decision_type_from_label() {
         assert_eq!(DecisionType::from_label("session"), DecisionType::Session);
+        // Historical and unknown scopes normalize to Session.
         assert_eq!(
             DecisionType::from_label("orchestration"),
-            DecisionType::Orchestration
+            DecisionType::Session
         );
-        // Unknown defaults to Session
         assert_eq!(DecisionType::from_label("unknown"), DecisionType::Session);
         assert_eq!(DecisionType::from_label(""), DecisionType::Session);
-    }
-
-    #[test]
-    fn test_orchestration_decision_tagged() {
-        let d = make_orchestration_decision("Bash", "proj", "accept");
-        assert_eq!(d.decision_type, DecisionType::Orchestration);
-        assert_eq!(d.brain_action, "spawn");
     }
 
     #[test]

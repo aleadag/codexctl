@@ -1,6 +1,7 @@
 //! Bind Brain read contracts to the binary's brain subsystem.
 
 use std::collections::HashMap;
+use std::fs;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -8,13 +9,12 @@ use codexctl_core::brain_activity::{
     ActivityEvent, ActivitySnapshot, CorrectionDisposition, SnapshotLimits,
 };
 use codexctl_core::runtime::{
-    BrainGateMode, BrainSource, BrainView, CacheSummary, CounterfactualSummary, DecisionSummary,
-    EndpointHealth, LatencySummary, ReviewItemSummary, RiskTierSummary, ScorecardSummary,
+    BrainActions, BrainGateMode, BrainSource, CacheSummary, CorrectionInput, CounterfactualSummary,
+    DecisionSummary, EndpointHealth, LatencySummary, ReviewItemSummary, RiskTierSummary,
+    ScorecardSummary,
 };
 
 use crate::{brain, config};
-
-pub struct LiveBrainView;
 
 pub struct LiveBrainSource {
     endpoint_probe: Arc<Mutex<EndpointProbeState>>,
@@ -114,24 +114,6 @@ impl LiveBrainSource {
             }
         }
         visible
-    }
-}
-
-impl BrainView for LiveBrainView {
-    fn gate_mode(&self) -> BrainGateMode {
-        parse_gate_mode(&brain::read_gate_mode())
-    }
-
-    fn recent_decisions(&self, n: usize) -> Vec<DecisionSummary> {
-        let mut all = brain::decisions::read_all_decisions();
-        // brain::decisions::read_all_decisions returns oldest-first; the TUI
-        // wants newest-first.
-        all.reverse();
-        all.into_iter().take(n).map(summary_from_record).collect()
-    }
-
-    fn decision_count(&self) -> usize {
-        brain::decisions::read_all_decisions().len()
     }
 }
 
@@ -302,8 +284,16 @@ fn review_queue_from(
     }
     brain::review::build_queue(&records)
         .into_iter()
-        .map(super::brain_review::item_summary_from)
+        .map(item_summary_from)
         .collect()
+}
+
+fn item_summary_from(item: brain::review::ReviewItem) -> ReviewItemSummary {
+    ReviewItemSummary {
+        decision: DecisionSummary::from(&item.record),
+        reason: item.reason,
+        score: item.score as f64,
+    }
 }
 
 fn latest_corrections(events: &[ActivityEvent]) -> HashMap<&str, CorrectionDisposition> {
@@ -359,8 +349,63 @@ fn parse_gate_mode(raw: &str) -> BrainGateMode {
     }
 }
 
-fn summary_from_record(r: brain::decisions::DecisionRecord) -> DecisionSummary {
-    DecisionSummary::from(&r)
+pub struct LiveBrainActions;
+
+impl BrainActions for LiveBrainActions {
+    fn record_correction(&self, correction: CorrectionInput) -> Result<(), String> {
+        let paths = brain::distill::current_paths().map_err(|error| error.to_string())?;
+        let store = brain::activity::ActivityStore::at(paths.state_root().join("activity.jsonl"));
+        let source = store
+            .read()
+            .map_err(|error| error.to_string())?
+            .events()
+            .iter()
+            .rev()
+            .find(|event| event.activity_id == correction.activity_id)
+            .cloned()
+            .ok_or_else(|| format!("activity {} not found", correction.activity_id))?;
+        store
+            .append(ActivityEvent {
+                schema_version: codexctl_core::brain_activity::ACTIVITY_SCHEMA_VERSION,
+                activity_id: correction.activity_id,
+                recorded_at_ms: epoch_ms(),
+                project: source.project,
+                session: source.session,
+                state: codexctl_core::brain_activity::ActivityState::Correction,
+                tool: None,
+                normalized_command: None,
+                fingerprint: None,
+                rule_id: None,
+                confidence: None,
+                threshold: None,
+                reasoning: None,
+                decision_id: source.decision_id,
+                outcome: None,
+                correction: Some(correction.disposition),
+                note: correction.note,
+                supersedes: None,
+            })
+            .map_err(|error| error.to_string())
+    }
+
+    fn mark_canonical(&self, decision_id: &str, note: Option<String>) -> Result<(), String> {
+        brain::review::mark_by_id(decision_id, note.as_deref())
+    }
+
+    fn set_gate_mode(&self, mode: BrainGateMode) -> Result<(), String> {
+        let path = brain::gate_mode_path();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|error| format!("create gate-mode dir: {error}"))?;
+        }
+        fs::write(path, mode.as_str()).map_err(|error| format!("write gate-mode: {error}"))
+    }
+}
+
+fn epoch_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 #[cfg(test)]

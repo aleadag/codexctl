@@ -35,23 +35,6 @@ pub fn line_or_default(prompt: &str, default: Option<&str>) -> io::Result<Option
     Ok(Some(trimmed.to_string()))
 }
 
-/// Number with a default. Loops until parseable.
-pub fn number_or_default(prompt: &str, default: f64) -> io::Result<f64> {
-    loop {
-        print!("{prompt} [{default}]: ");
-        io::stdout().flush()?;
-        let line = read_line()?;
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            return Ok(default);
-        }
-        match trimmed.parse::<f64>() {
-            Ok(n) => return Ok(n),
-            Err(_) => println!("  (not a number — try again or press enter for {default})"),
-        }
-    }
-}
-
 fn read_line() -> io::Result<String> {
     let mut buf = String::new();
     io::stdin().lock().read_line(&mut buf)?;

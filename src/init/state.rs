@@ -12,8 +12,6 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use crate::config::Config;
-
 use super::hooks;
 
 /// The shape every phase's probe returns.
@@ -54,19 +52,6 @@ impl PhaseStatus {
             Self::Drift { reason } => Some(reason.as_str()),
             _ => None,
         }
-    }
-}
-
-// ---------------- Budget ----------------------------------------------------
-
-/// Budget is "installed" when `config.budget` is set in the layered config.
-pub fn detect_budget() -> PhaseStatus {
-    let cfg = Config::load();
-    match cfg.budget {
-        Some(b) if b > 0.0 => PhaseStatus::Installed {
-            details: format!("${b:.0}/week cap"),
-        },
-        _ => PhaseStatus::NotInstalled,
     }
 }
 
@@ -148,7 +133,6 @@ pub fn detect_skills() -> PhaseStatus {
 /// Full snapshot used by `init --check` and the wizard's opening summary.
 #[derive(Debug, Clone)]
 pub struct EnvironmentReport {
-    pub budget: PhaseStatus,
     pub brain: PhaseStatus,
     pub plugin: PhaseStatus,
     pub skills: PhaseStatus,
@@ -157,7 +141,6 @@ pub struct EnvironmentReport {
 impl EnvironmentReport {
     pub fn detect() -> Self {
         Self {
-            budget: detect_budget(),
             brain: detect_brain(),
             plugin: detect_plugin(),
             skills: detect_skills(),
@@ -179,9 +162,8 @@ impl EnvironmentReport {
         out
     }
 
-    pub fn entries(&self) -> [(&'static str, &PhaseStatus); 4] {
+    pub fn entries(&self) -> [(&'static str, &PhaseStatus); 3] {
         [
-            ("budget", &self.budget),
             ("brain", &self.brain),
             ("plugin", &self.plugin),
             ("skills", &self.skills),
@@ -208,10 +190,10 @@ mod tests {
     }
 
     #[test]
-    fn environment_report_renders_four_lines() {
+    fn environment_report_renders_three_lines() {
         let r = EnvironmentReport::detect();
         let rendered = r.render_human();
-        assert_eq!(rendered.lines().count(), 4);
+        assert_eq!(rendered.lines().count(), 3);
     }
 
     #[test]

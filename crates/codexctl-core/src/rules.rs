@@ -1,21 +1,9 @@
-use crate::session::{ApprovalObservation, CodexSession};
-use crate::terminals;
+use crate::session::CodexSession;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuleAction {
     Approve,
     Deny,
-    Send,
-    Terminate,
-    /// Route summarized output from the current session to another session.
-    Route {
-        target_pid: u32,
-    },
-    /// Spawn a new Codex session with a derived prompt.
-    Spawn {
-        prompt: String,
-        cwd: String,
-    },
 }
 
 impl RuleAction {
@@ -23,8 +11,6 @@ impl RuleAction {
         match s.to_lowercase().as_str() {
             "approve" => Some(Self::Approve),
             "deny" => Some(Self::Deny),
-            "send" => Some(Self::Send),
-            "terminate" | "kill" => Some(Self::Terminate),
             _ => None,
         }
     }
@@ -34,10 +20,6 @@ impl RuleAction {
         match self {
             Self::Approve => "approve",
             Self::Deny => "deny",
-            Self::Send => "send",
-            Self::Terminate => "terminate",
-            Self::Route { .. } => "route",
-            Self::Spawn { .. } => "spawn",
         }
     }
 }
@@ -183,88 +165,6 @@ fn matches_rule(rule: &AutoRule, session: &CodexSession) -> bool {
     }
 
     true
-}
-
-/// Execute a rule action on a session. Returns a human-readable status message.
-pub fn execute(result: &RuleMatch, session: &CodexSession) -> Result<String, String> {
-    let name = session.display_name();
-    match result.action {
-        RuleAction::Approve => {
-            if !matches!(session.approval, ApprovalObservation::Confirmed(_)) {
-                return Err("shell approval is not terminal-confirmed".into());
-            }
-            terminals::approve_shell_permission(session)?;
-            Ok(format!(
-                "Rule '{}': approved {} ({})",
-                result.rule_name,
-                name,
-                session.actionable_tool_name().unwrap_or("?")
-            ))
-        }
-        RuleAction::Deny => Ok(format!(
-            "Rule '{}': denied {} ({})",
-            result.rule_name,
-            name,
-            session.actionable_tool_name().unwrap_or("?")
-        )),
-        RuleAction::Send => {
-            let msg = result.message.as_deref().unwrap_or("continue");
-            terminals::send_input(session, msg)?;
-            Ok(format!(
-                "Rule '{}': sent \"{}\" to {}",
-                result.rule_name, msg, name
-            ))
-        }
-        RuleAction::Terminate => {
-            let pid = session.pid;
-            let output = std::process::Command::new("kill")
-                .arg(pid.to_string())
-                .output()
-                .map_err(|e| format!("kill failed: {e}"))?;
-            if output.status.success() {
-                Ok(format!("Rule '{}': terminated {}", result.rule_name, name))
-            } else {
-                Err(format!("Rule '{}': kill {} failed", result.rule_name, pid))
-            }
-        }
-        RuleAction::Route { .. } => {
-            // Route execution happens in the brain engine.
-            Ok(format!(
-                "Rule '{}': route queued for {}",
-                result.rule_name, name
-            ))
-        }
-        RuleAction::Spawn {
-            ref prompt,
-            ref cwd,
-        } => match terminals::launch_session(cwd, Some(prompt), None) {
-            Ok(msg) => Ok(format!(
-                "Rule '{}': spawned new session for {} — {msg}",
-                result.rule_name, name
-            )),
-            Err(e) => Err(format!(
-                "Rule '{}': spawn failed for {}: {e}",
-                result.rule_name, name
-            )),
-        },
-    }
-}
-
-/// Execute a Route action: summarize source output and send to target session.
-pub fn execute_route(
-    source: &CodexSession,
-    target: &CodexSession,
-    summary: &str,
-    rule_name: &str,
-) -> Result<String, String> {
-    let msg = format!("[From {}] {}", source.display_name(), summary);
-    terminals::send_input(target, &msg)?;
-    Ok(format!(
-        "Rule '{}': routed summary from {} → {}",
-        rule_name,
-        source.display_name(),
-        target.display_name(),
-    ))
 }
 
 #[cfg(test)]
@@ -469,21 +369,6 @@ mod tests {
     }
 
     #[test]
-    fn first_non_deny_wins() {
-        let s = make_session();
-
-        let mut r1 = AutoRule::new("send_continue".into(), RuleAction::Send);
-        r1.message = Some("keep going".into());
-
-        let r2 = approve_rule("approve_all");
-
-        let rules = vec![r1, r2];
-        let m = evaluate(&rules, &s).unwrap();
-        assert_eq!(m.action, RuleAction::Send);
-        assert_eq!(m.message.as_deref(), Some("keep going"));
-    }
-
-    #[test]
     fn multiple_conditions_are_and() {
         let s = make_session(); // Bash + "cargo test" + cost 5.0
 
@@ -502,24 +387,5 @@ mod tests {
         let mut rule = approve_rule("bash");
         rule.match_tool = vec!["Bash".into()];
         assert!(evaluate(&[rule], &s).is_none());
-    }
-
-    #[test]
-    fn request_user_input_cannot_execute_shell_approval() {
-        let mut s = make_session();
-        s.pending_tool_name = Some("request_user_input".into());
-        s.explicit_input_required = true;
-
-        let error = execute(
-            &RuleMatch {
-                rule_name: "approve-all".into(),
-                action: RuleAction::Approve,
-                message: None,
-            },
-            &s,
-        )
-        .unwrap_err();
-
-        assert!(error.contains("not terminal-confirmed"));
     }
 }
