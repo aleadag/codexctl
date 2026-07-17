@@ -17,6 +17,8 @@ path = "src/lib.rs"
 codexctl-core = { path = "../codexctl-core", version = "0.53.0" }
 ratatui = "0.29"
 crossterm = "0.28"
+ctrlc = "3"
+libc = "0.2"
 serde_json = "1"
 
 [dev-dependencies]

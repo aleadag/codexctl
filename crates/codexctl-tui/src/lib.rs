@@ -26,4 +26,5 @@ pub mod brain_app;
 pub mod demo;
 pub mod recorder;
 pub mod session_recorder;
+pub mod terminal_suspend;
 pub mod ui;

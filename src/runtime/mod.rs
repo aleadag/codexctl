@@ -19,6 +19,7 @@ mod brain;
 mod brain_driver;
 mod brain_review;
 mod delivery;
+mod navigation;
 mod sessions;
 
 pub use actions::LiveActions;
@@ -29,6 +30,7 @@ pub use brain::{LiveBrainSource, LiveBrainView};
 pub use brain_driver::LiveBrainDriver;
 pub use brain_review::LiveBrainReviewView;
 pub use delivery::LiveBrainDelivery;
+pub use navigation::LiveSessionNavigation;
 pub use sessions::LiveSessionSource;
 
 /// Assemble the production runtime: each view backed by the corresponding
@@ -50,4 +52,5 @@ pub fn build_runtime() -> Runtime {
 
 pub fn build_brain_runtime() -> BrainRuntime {
     BrainRuntime::new(Arc::new(LiveBrainSource::default()), Arc::new(LiveActions))
+        .with_navigation(Arc::new(LiveSessionNavigation::default()))
 }

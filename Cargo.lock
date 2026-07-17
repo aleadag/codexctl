@@ -212,6 +212,8 @@ version = "0.53.0"
 dependencies = [
  "codexctl-core",
  "crossterm",
+ "ctrlc",
+ "libc",
  "ratatui",
  "serde_json",
  "tempfile",

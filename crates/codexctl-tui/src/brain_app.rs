@@ -11,6 +11,8 @@ use codexctl_core::runtime::{
 use codexctl_core::theme::Theme;
 use crossterm::event::{KeyCode, KeyEvent};
 
+use crate::terminal_suspend::NavigationOutcome;
+
 const REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_NOTE_CHARS: usize = 512;
 
@@ -106,6 +108,29 @@ impl BrainApp {
         if self.refreshed_at.elapsed() >= REFRESH_INTERVAL {
             self.refresh();
         }
+    }
+
+    pub fn complete_navigation(&mut self, result: Result<NavigationOutcome, String>) {
+        let tab = self.tab;
+        let selection = self.selection;
+        self.refresh();
+        self.tab = tab;
+        self.selection = selection;
+        self.clamp_selection();
+        self.status = Some(match result {
+            Ok(NavigationOutcome::Attached) => "Returned from session".into(),
+            Ok(NavigationOutcome::Cancelled {
+                restore_error: None,
+            }) => "Session switch cancelled".into(),
+            Ok(NavigationOutcome::Cancelled {
+                restore_error: Some(error),
+            }) => format!(
+                "Session switch cancelled; terminal restore warning: {}",
+                bounded_status(&error)
+            ),
+            Ok(NavigationOutcome::FocusedFallback) => "Focused session terminal".into(),
+            Err(error) => format!("Could not switch session: {}", bounded_status(&error)),
+        });
     }
 
     pub fn handle_key(&mut self, event: KeyEvent) -> Option<BrainEffect> {
@@ -384,6 +409,13 @@ fn bounded_note(note: &str) -> Option<String> {
     Some(redacted.chars().take(MAX_NOTE_CHARS).collect())
 }
 
+fn bounded_status(status: &str) -> String {
+    redact_activity_text(status.trim())
+        .chars()
+        .take(MAX_NOTE_CHARS)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -424,6 +456,38 @@ mod tests {
 
         assert!(matches!(effect, Some(BrainEffect::SwitchToSession(_))));
         assert!(mock.actions().is_empty());
+    }
+
+    #[test]
+    fn navigation_completion_restores_tab_selection_and_bounded_status() {
+        let mock = Arc::new(MockBrainRuntime {
+            review_queue: vec![
+                ReviewItemSummary {
+                    decision: decision(),
+                    reason: "first".into(),
+                    score: 80.0,
+                },
+                ReviewItemSummary {
+                    decision: DecisionSummary {
+                        id: "decision-2".into(),
+                        ..decision()
+                    },
+                    reason: "second".into(),
+                    score: 70.0,
+                },
+            ],
+            ..MockBrainRuntime::default()
+        });
+        let runtime = BrainRuntime::new(mock.clone(), mock);
+        let mut app = BrainApp::new(runtime, Theme::from_mode(ThemeMode::Dark));
+        app.handle_key(key(KeyCode::Tab));
+        app.handle_key(key(KeyCode::Down));
+
+        app.complete_navigation(Err("x".repeat(700)));
+
+        assert_eq!(app.tab(), BrainTab::Review);
+        assert_eq!(app.selection(), 1);
+        assert!(app.status().unwrap().chars().count() <= 512 + 26);
     }
 
     #[test]

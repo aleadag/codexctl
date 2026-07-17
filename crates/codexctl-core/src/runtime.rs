@@ -38,6 +38,8 @@
 //!   other way around.
 
 use serde::{Deserialize, Serialize};
+use std::ffi::OsString;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::brain_activity::{
@@ -330,11 +332,21 @@ pub trait BrainActions: Send + Sync {
 pub struct BrainRuntime {
     pub source: Arc<dyn BrainSource>,
     pub actions: Arc<dyn BrainActions>,
+    pub navigation: Arc<dyn SessionNavigation>,
 }
 
 impl BrainRuntime {
     pub fn new(source: Arc<dyn BrainSource>, actions: Arc<dyn BrainActions>) -> Self {
-        Self { source, actions }
+        Self {
+            source,
+            actions,
+            navigation: Arc::new(UnavailableSessionNavigation),
+        }
+    }
+
+    pub fn with_navigation(mut self, navigation: Arc<dyn SessionNavigation>) -> Self {
+        self.navigation = navigation;
+        self
     }
 }
 
@@ -342,6 +354,88 @@ impl BrainRuntime {
 pub enum BrainEffect {
     SwitchToSession(SessionTarget),
     Exit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExternalCommand {
+    pub program: PathBuf,
+    pub args: Vec<OsString>,
+}
+
+impl ExternalCommand {
+    pub fn new<P, I, S>(program: P, args: I) -> Self
+    where
+        P: Into<PathBuf>,
+        I: IntoIterator<Item = S>,
+        S: Into<OsString>,
+    {
+        Self {
+            program: program.into(),
+            args: args.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NavigationPlan {
+    External(ExternalCommand),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NavigationError {
+    Unavailable(String),
+    QueryFailed(String),
+    TimedOut,
+    OutputTooLarge { limit: usize },
+    Malformed(String),
+    MissingIdentity { index: usize, field: &'static str },
+    NoMatch,
+    Ambiguous { matches: usize },
+}
+
+impl std::fmt::Display for NavigationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unavailable(detail) => write!(formatter, "Agent Deck unavailable: {detail}"),
+            Self::QueryFailed(detail) => write!(formatter, "Agent Deck query failed: {detail}"),
+            Self::TimedOut => formatter.write_str("Agent Deck query timed out"),
+            Self::OutputTooLarge { limit } => {
+                write!(formatter, "Agent Deck output exceeded {limit} bytes")
+            }
+            Self::Malformed(detail) => write!(formatter, "invalid Agent Deck JSON: {detail}"),
+            Self::MissingIdentity { index, field } => {
+                write!(formatter, "Agent Deck session {index} is missing {field}")
+            }
+            Self::NoMatch => formatter.write_str("no matching Agent Deck session"),
+            Self::Ambiguous { matches } => {
+                write!(
+                    formatter,
+                    "Agent Deck session match is ambiguous ({matches} matches)"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for NavigationError {}
+
+pub trait SessionNavigation: Send + Sync {
+    fn resolve(&self, target: &SessionTarget) -> Result<NavigationPlan, NavigationError>;
+    fn focus_fallback(&self, target: &SessionTarget) -> Result<(), String>;
+}
+
+struct UnavailableSessionNavigation;
+
+impl SessionNavigation for UnavailableSessionNavigation {
+    fn resolve(&self, _target: &SessionTarget) -> Result<NavigationPlan, NavigationError> {
+        Err(NavigationError::Unavailable(
+            "optional navigator is not configured".into(),
+        ))
+    }
+
+    fn focus_fallback(&self, _target: &SessionTarget) -> Result<(), String> {
+        Err("session navigation is not configured".into())
+    }
 }
 
 // ============================================================================
