@@ -1,87 +1,81 @@
-# CLI Reference
+# Command reference
 
-`codexctl --help` is the canonical option list. This page describes the main workflows.
+`coding-brain --help` is the canonical option list. This page groups the main workflows.
 
-## Dashboard and output
-
-```bash
-codexctl
-codexctl --demo
-codexctl --list
-codexctl --json
-codexctl --watch
-codexctl --headless --json
-```
-
-Use status, focus, project, and search filters to narrow the dashboard. Session controls can focus a terminal, send input, approve a prompt, compact context, launch a session, or terminate one.
-
-## Brain
+## TUI and headless runtime
 
 ```bash
-codexctl --brain
-codexctl --brain --auto-run
-codexctl --brain --url <endpoint> --brain-model <model>
-codexctl --brain-query --tool Bash --tool-input "cargo test"
-codexctl --mode on|off|auto|status
+coding-brain
+coding-brain --theme dark
+coding-brain --headless
+coding-brain --headless --json
 ```
 
-Advisory mode leaves execution under operator control. `--auto-run` permits automatic high-confidence actions. The immediate action set is approve, deny, send, terminate, route, and spawn.
+The default command opens the Live, Review, and Scorecard TUI. `--headless` keeps evaluation and context-rot prevention active without taking over a terminal; activity remains visible to a Brain TUI running elsewhere.
 
-## Learning and review
+Session navigation is intentionally narrow: Coding Brain can switch to the selected live session. It may use terminal-native focus or optional Agent Deck attach, but it does not send arbitrary messages, terminate sessions, route work, or spawn workers.
+
+## Brain evaluation
 
 ```bash
-codexctl --brain-review [list]
-codexctl --brain-mark-canonical <decision-id>
-codexctl --brain-stats <report>
-codexctl --brain-outcomes
-codexctl --brain-baseline [--top N]
-codexctl --insights [on|off|status]
-codexctl --brain-garden [--apply]
-codexctl --brain-briefing --project <name>
-codexctl --autopsy [--session <id>]
+coding-brain --brain
+coding-brain --brain --auto-run
+coding-brain --brain --url <endpoint> --brain-model <model>
+coding-brain --brain-query --tool Bash --tool-input "cargo test"
+coding-brain --mode on|off|auto
 ```
 
-Hook-facing outcome flags such as `--record-outcome` and `--reap-outcomes` feed the same local learning store.
+`--brain` enables local-model evaluation. `--auto-run` is a separate opt-in for high-confidence automatic decisions. `--brain-query` is the non-interactive permission-hook path and normally receives structured hook input rather than being typed manually.
 
-## Setup and diagnostics
+## Learning and diagnostics
 
 ```bash
-codexctl init
-codexctl init --plugin-only
-codexctl init --check
-codexctl init --upgrade
-codexctl init --remove
-codexctl init --purge
-codexctl doctor [--json]
-codexctl completions <shell>
-codexctl man
+coding-brain --brain-review [list]
+coding-brain --brain-mark-canonical <decision-id>
+coding-brain --brain-stats <report>
+coding-brain --brain-outcomes
+coding-brain --brain-baseline [--top N]
+coding-brain --insights [on|off|status]
+coding-brain --brain-garden [--apply]
+coding-brain --brain-briefing --project <name>
+coding-brain --autopsy [--session <id>]
 ```
 
-`init --plugin-only` installs or refreshes the eight managed Codex lifecycle definitions without running the rest of the setup wizard. `init --upgrade` refreshes hooks and the onboarding marker without touching legacy state. `init --remove` removes only managed hooks and keeps lifecycle state; `init --purge --yes` is the explicit destructive path.
+Review and Scorecard in the TUI are the primary surfaces. These commands expose the same records for scripts, focused reports, or markdown output.
 
-Hook installation and trust are separate. Restart Codex and review `/hooks` after installing, upgrading, or rebuilding a declarative configuration.
+## Setup and health
 
-## Lifecycle status output
-
-`--json` includes non-sensitive lifecycle provenance for each session:
-
-```json
-"lifecycle": {
-  "available": true,
-  "store_condition": "healthy",
-  "last_event": "PreToolUse",
-  "age_ms": 125,
-  "contributing": true,
-  "ignored_reason": null
-}
+```bash
+coding-brain init
+coding-brain init --plugin-only
+coding-brain init --check
+coding-brain init --upgrade
+coding-brain init --remove
+coding-brain init --purge
+coding-brain doctor [--json]
+coding-brain completions <shell>
+coding-brain man
 ```
 
-The dashboard detail panel shows the same event, age, and contribution state. Lifecycle observations affect status only: they do not expose prompts, tool input or output, paths, agent ids, approval evidence, or terminal targets.
+- `init` runs onboarding and creates stable project identity.
+- `--plugin-only` atomically refreshes exact managed Codex hooks.
+- `--check` compares onboarding records with current state.
+- `--upgrade` refreshes managed hooks and the marker version after reinstalling.
+- `--remove` removes managed hooks and the onboarding marker but preserves data.
+- `--purge` additionally removes the previewed current and legacy global config/state targets after confirmation. It is irreversible.
+- `doctor` checks the executable, hook definitions, trust visibility, project identity, lifecycle state, endpoint privacy, transcript discovery, and terminal integration.
 
-## Configuration compatibility
+## Configuration helpers
 
-Legacy relay, hive, idle-task, and external-agent sections produce warnings and have no runtime effect. codexctl exposes no durable queue, dependency executor, distributed peer transport, or embedded project tracker.
+```bash
+coding-brain --config
+coding-brain --config-template
+coding-brain --config-validate
+coding-brain --hooks
+```
 
-## External coordination
+Current config uses `.coding-brain.toml` and `$XDG_CONFIG_HOME/coding-brain/config.toml`. Old config and state are never read during ordinary operation.
 
-Beads can track durable tasks, dependencies, claims, blockers, gates, and handoffs outside codexctl. It is an optional companion, not a linked library or background service.
+## Product boundary
+
+Coding Brain keeps immediate judgment, learning evidence, review, and navigation local. It has no durable task queue, dependency executor, distributed peer transport, or embedded project tracker. Beads and Agent Deck are optional companion tools for different jobs.

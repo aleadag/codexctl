@@ -1,98 +1,87 @@
-# codexctl
+# Coding Brain
 
-codexctl is a local-brain companion for Codex sessions. It observes active sessions, evaluates pending actions with deterministic rules and a local LLM, learns from operator corrections, and can execute high-confidence decisions when `--auto-run` is enabled.
+Coding Brain is a local TUI for supervising Codex through judgment and learning. It observes hook and transcript evidence, evaluates permission requests with deterministic rules and an optional local LLM, and learns from operator corrections. It does not schedule work or replace a task tracker.
 
-It reads Codex transcripts from your machine and presents session state, health, cost, and context pressure in one terminal dashboard. Advisory mode is the default: the brain recommends an action and leaves control with you.
+The default TUI has three views:
 
-## Install
+- **Live** shows active sessions, current activity, attention state, and the latest Brain decision.
+- **Review** collects denials, corrections, and other decisions worth teaching from.
+- **Scorecard** tracks decision quality and whether the Brain is improving.
+
+From Live or Review, you can switch to the selected session. If [Agent Deck](https://github.com/asheshgoplani/agent-deck) is installed and the session is managed by it, Coding Brain can attach through Agent Deck; this integration is optional.
+
+## Install and activate
+
+The crates.io package is still named `codexctl`, but it installs one executable named `coding-brain`:
 
 ```bash
 cargo install codexctl
-# or, from this repository
-cargo install --path .
+coding-brain init
+coding-brain doctor
+# Restart Codex after doctor reports the new managed hooks.
+coding-brain
 ```
 
-- Nix/Home Manager: import `homeManagerModules.default` (or the equivalent
-  `homeModules.default`) and follow the [declarative configuration guide](docs/configuration.md#home-manager).
+From this repository, use `cargo install --path .`. Nix users can install the default flake package; Home Manager users can enable `programs.coding-brain`.
 
-## Quick start
+`coding-brain init` creates `.coding-brain/project.toml` for stable project identity and installs managed Codex hooks. Review the generated commands with `/hooks` after restarting Codex. Hook events provide the first activity signal; transcript discovery then supplies richer session evidence.
 
-```bash
-codexctl init
-codexctl doctor
-codexctl
-```
-
-Restart Codex after hook installation and review the managed commands with `/hooks`; installation does not imply that Codex trusts them.
-
-To enable the brain with Ollama:
+To enable local-model evaluation with Ollama:
 
 ```bash
 ollama pull gemma4:e4b
 ollama serve
-codexctl --brain
+coding-brain --brain
 ```
 
-Use `codexctl --brain --auto-run` only when you want high-confidence suggestions executed automatically. Without `--auto-run`, suggestions remain advisory.
+Suggestions are advisory by default. `--auto-run` opts into high-confidence automatic actions and requires `--brain`.
 
-## What the brain can do
+## State and configuration
 
-The six immediate actions are:
+Coding Brain uses XDG paths and project-local identity:
 
-- `approve`: allow a pending tool call.
-- `deny`: reject a risky or unwanted tool call.
-- `send`: send text to a waiting session.
-- `terminate`: stop a session.
-- `route`: send summarized context to another live session.
-- `spawn`: open a new Codex session for an immediate subtask.
+- user config: `$XDG_CONFIG_HOME/coding-brain/config.toml`, normally `~/.config/coding-brain/config.toml`
+- user state: `$XDG_STATE_HOME/coding-brain/`, normally `~/.local/state/coding-brain/`
+- project config: `.coding-brain.toml`
+- project identity: `.coding-brain/project.toml`
 
-These are live, best-effort actions. codexctl does not own a durable task ledger, dependency queue, worker pool, or distributed coordinator.
+Project config cannot select `brain.endpoint`; that choice must come from the CLI or user config. A non-loopback endpoint produces a privacy advisory, and remote plaintext HTTP produces a stronger warning because context and credentials may be exposed in transit.
 
-## Learning and review
-
-Brain decisions, outcomes, preferences, prompt overrides, review data, and mailbox state remain under `~/.codexctl/brain/`. Useful commands include:
+Useful non-TUI commands include:
 
 ```bash
-codexctl --brain-review list
-codexctl --brain-review
-codexctl --brain-stats scorecard
-codexctl --brain-baseline
-codexctl --brain-briefing --project my-project
+coding-brain --brain-review list
+coding-brain --brain-stats scorecard
+coding-brain --brain-baseline
+coding-brain --brain-briefing --project my-project
 ```
 
-Prompt overrides live in `~/.codexctl/brain/prompts/`. The session mailbox is local and delivery is best effort: a message is marked delivered only after terminal input succeeds.
+## Product boundary
 
-## Privacy
+Coding Brain owns immediate judgment, learning evidence, review, and session navigation. Durable tasks, dependency graphs, claims, blockers, and cross-session handoffs belong in an external tool such as [Beads](https://github.com/steveyegge/beads). Beads and Agent Deck are both optional; neither is a runtime dependency.
 
-The default brain endpoint is loopback-only. If an enabled brain uses a non-loopback endpoint, codexctl warns that transcript context may leave the machine. Review the endpoint's privacy policy before continuing.
+## Breaking cutover from codexctl
 
-## External coordination with Beads
+There is no automatic data migration or compatibility executable. Normal startup and `coding-brain doctor` diagnose exact stale managed hooks but do not modify old hooks or read old config/state. Run `coding-brain init` to replace those managed hook entries atomically, then restart Codex.
 
-codexctl deliberately keeps durable project coordination outside the process. If you need tasks, dependencies, claims, blockers, gates, or handoffs across sessions, use [Beads](https://github.com/steveyegge/beads) or another external tracker. Beads is optional and is not a codexctl runtime dependency.
+Old data remains available for rollback until you purge it. Before purge, rollback means reinstalling the old build and rerunning its init command. When you no longer need that option, `coding-brain init --purge` removes the documented current and legacy global config/state targets after confirmation. Purge is irreversible and does not delete project `.coding-brain.toml` or `.coding-brain/project.toml` files.
 
-## Compatibility
-
-Configuration stays in `.codexctl.toml` and `~/.config/codexctl/config.toml`; state stays under `~/.codexctl`. Legacy `[relay]`, `[hive]`, `[idle]`, `[agents.*]`, and `lifecycle.retention_days` settings are ignored with warnings.
-
-Normal startup and `codexctl init --upgrade` leave legacy data untouched. `codexctl init --purge` is the explicit destructive cleanup path.
+To make a fork learn independently, remove `.coding-brain/project.toml` in that fork and rerun `coding-brain init`. Do not edit the UUID by hand.
 
 ## Architecture
+
+The repository and Rust crates retain their internal `codexctl` names:
 
 ```text
 codexctl -> codexctl-tui -> codexctl-core
 
 crates/
-├── codexctl-core/    # session types, discovery, monitoring, runtime contracts
-└── codexctl-tui/     # terminal UI, recording, demo fixtures
-src/                   # binary wiring, local brain, configuration, init
+├── codexctl-core/    # session evidence, paths, project identity, runtime contracts
+└── codexctl-tui/     # Live, Review, and Scorecard terminal UI
+src/                   # coding-brain binary wiring, local brain, config, init
 ```
 
-Codex integration uses:
-
-- `~/.codex/sessions/**/rollout-*.jsonl` for session discovery.
-- `.codex/hooks.json` and `~/.codex/hooks.json` for hook installation.
-- `~/.codex/skills`, plugin skills, and project `.codex/skills` for discovery.
-- supported terminal backends for input, focus, launch, and termination.
+Codex integration reads `~/.codex/sessions/**/rollout-*.jsonl`, installs hooks in `.codex/hooks.json` or `~/.codex/hooks.json`, and uses supported terminal backends for session focus. Agent Deck navigation is used only when explicitly requested from the TUI.
 
 ## Build and test
 
@@ -103,4 +92,4 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-See the [documentation](https://aleadag.github.io/codexctl/) for setup, configuration, CLI reference, terminal support, and troubleshooting.
+See the [documentation](https://aleadag.github.io/codexctl/) for configuration, CLI reference, terminal support, and troubleshooting.

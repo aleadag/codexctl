@@ -28,7 +28,7 @@
       in
       {
         packages.default = pkgs.rustPlatform.buildRustPackage {
-          pname = "codexctl";
+          pname = "coding-brain";
           version = cargoToml.package.version;
           src = ./.;
           cargoLock.lockFile = ./Cargo.lock;
@@ -38,7 +38,7 @@
             description = "Orchestrate Codex sessions with a local-LLM brain that learns from you.";
             homepage = "https://github.com/aleadag/codexctl";
             license = licenses.mit;
-            mainProgram = "codexctl";
+            mainProgram = "coding-brain";
             platforms = platforms.unix;
           };
         };

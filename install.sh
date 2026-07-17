@@ -1,5 +1,5 @@
 #!/bin/sh
-# codexctl installer — downloads the latest release binary for your platform.
+# Coding Brain installer — downloads the latest release binary for your platform.
 # Usage: curl -fsSL https://raw.githubusercontent.com/aleadag/codexctl/main/install.sh | sh
 
 set -e
@@ -34,9 +34,9 @@ if [ -z "$LATEST" ]; then
     exit 1
 fi
 
-echo "Installing codexctl ${LATEST} for ${TARGET}..."
+echo "Installing Coding Brain ${LATEST} for ${TARGET}..."
 
-ARCHIVE="codexctl-${LATEST}-${TARGET}.tar.gz"
+ARCHIVE="coding-brain-${LATEST}-${TARGET}.tar.gz"
 URL="https://github.com/${REPO}/releases/download/${LATEST}/${ARCHIVE}"
 CHECKSUM_URL="${URL}.sha256"
 
@@ -61,13 +61,13 @@ fi
 tar xzf "${TMP_DIR}/${ARCHIVE}" -C "$TMP_DIR"
 
 if [ -w "$INSTALL_DIR" ]; then
-    mv "${TMP_DIR}/codexctl" "${INSTALL_DIR}/codexctl"
+    mv "${TMP_DIR}/coding-brain" "${INSTALL_DIR}/coding-brain"
 else
     echo "Installing to ${INSTALL_DIR} (requires sudo)..."
-    sudo mv "${TMP_DIR}/codexctl" "${INSTALL_DIR}/codexctl"
+    sudo mv "${TMP_DIR}/coding-brain" "${INSTALL_DIR}/coding-brain"
 fi
 
-chmod +x "${INSTALL_DIR}/codexctl"
+chmod +x "${INSTALL_DIR}/coding-brain"
 
-echo "codexctl ${LATEST} installed to ${INSTALL_DIR}/codexctl"
-echo "Run 'codexctl --help' to get started."
+echo "Coding Brain ${LATEST} installed to ${INSTALL_DIR}/coding-brain"
+echo "Run 'coding-brain init' to get started."

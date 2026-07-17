@@ -1,77 +1,56 @@
-# Quick Start
+# Quick start
 
-## Install and onboard
+## Install and activate
 
 ```bash
 cargo install codexctl
-codexctl init
-codexctl doctor
+coding-brain init
+coding-brain doctor
+# Restart Codex after doctor reports the new managed hooks.
+coding-brain
 ```
 
-The four onboarding phases cover a weekly budget, local brain detection, Codex hooks, and skill discovery. For automation:
+The package/executable distinction is intentional: crates.io retains the package name `codexctl`, but it installs only `coding-brain`.
+
+During init, Coding Brain detects a local model endpoint, installs managed Codex hooks, offers optional skill suggestions, and creates `.coding-brain/project.toml`. Restart Codex and inspect `/hooks` before trusting the new commands. For non-interactive setup:
 
 ```bash
-codexctl init --non-interactive --budget 25 --skip-brain --skip-skills
+coding-brain init --non-interactive --skip-brain --skip-skills
 ```
 
-Restart Codex after installing or refreshing hooks, then inspect and trust the managed commands with `/hooks`. `codexctl doctor` reports definition health and trust as separate checks because it cannot observe Codex's trust decision.
+## Use the TUI
 
-After upgrading, `codexctl init --upgrade` refreshes hook entries and the onboarding marker. It does not open, migrate, or delete legacy state.
+Run `coding-brain` to open Live. Press the view keys shown in the footer to move between Live, Review, and Scorecard. Live presents active activity and attention; Review concentrates decisions worth correcting or retaining; Scorecard summarizes decision quality.
 
-## Open the dashboard
+Selecting "switch to session" suspends the TUI, focuses or attaches to the selected session, then restores the terminal when you return. If the session belongs to Agent Deck, Coding Brain can use Agent Deck for the attach. Agent Deck is optional and cancellation returns directly to the Brain TUI.
 
-Start one or more Codex sessions, then run:
-
-```bash
-codexctl
-```
-
-Use `codexctl --demo` if you want to explore the dashboard without live sessions.
-
-## Enable the local brain
-
-With Ollama:
+## Add a local model
 
 ```bash
 ollama pull gemma4:e4b
 ollama serve
-codexctl --brain
+coding-brain --brain
 ```
 
-The default mode is advisory. codexctl evaluates pending actions, records the suggestion, and waits for operator control. To execute high-confidence suggestions automatically:
+The default is advisory. Review suggestions and corrections before opting into automatic decisions:
 
 ```bash
-codexctl --brain --auto-run
+coding-brain --brain-review list
+coding-brain --brain-stats scorecard
+coding-brain --brain --auto-run
 ```
 
-`--auto-run` can approve, deny, send input, terminate, route summarized context, or spawn a live session. Start in advisory mode and review `codexctl --brain-review list` before enabling it.
+## Cutover from an older build
 
-## Review what the brain learned
+Coding Brain does not read the old config/state namespace and does not install a `codexctl` compatibility executable. Normal startup and doctor can diagnose exact stale managed hooks, but only init changes them:
 
 ```bash
-codexctl --brain-review list
-codexctl --brain-review
-codexctl --brain-stats scorecard
-codexctl --brain-outcomes
-codexctl --brain-baseline
+cargo install codexctl
+coding-brain init
+coding-brain doctor
+# Restart Codex and review /hooks.
 ```
 
-Brain state is stored under `~/.codexctl/brain/`. A custom prompt can replace a built-in template at `~/.codexctl/brain/prompts/<name>.md`.
+Old global data remains untouched so you can roll back by reinstalling the old build and rerunning its init. Once rollback is no longer needed, `coding-brain init --purge` previews the exact current and legacy global targets and asks for confirmation. Purge is irreversible; it does not remove `.coding-brain.toml` or `.coding-brain/project.toml` from projects.
 
-## Use a remote endpoint carefully
-
-Set an OpenAI-compatible endpoint with:
-
-```bash
-codexctl --brain --url https://brain.example.com/v1/chat/completions
-```
-
-A non-loopback endpoint produces a privacy warning because transcript context may leave the machine.
-
-## Coordinate durable work externally
-
-codexctl's route, spawn, and mailbox actions are live-session helpers. For work that must survive restarts or carry dependencies and handoffs, track it in Beads or another external system, then let each Codex session claim and update that external work.
-
-## Remove codexctl
-
-`codexctl init --remove` removes managed hooks and the onboarding marker while preserving state. `codexctl init --purge` additionally deletes `~/.codexctl` and the global config after confirmation.
+For a fork that should learn independently, remove its `.coding-brain/project.toml` and rerun `coding-brain init`. Do not edit the stored UUID.

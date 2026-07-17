@@ -1,29 +1,18 @@
 # Contributing
 
-codexctl is a three-crate Rust workspace with one dependency direction:
+The repository keeps the internal `codexctl` crate names even though the public executable is `coding-brain`. It is a three-crate Rust workspace with one dependency direction:
 
 ```text
 codexctl -> codexctl-tui -> codexctl-core
 ```
 
-`codexctl-core` owns session types, transcript discovery, health checks, terminal backends, and runtime contracts. `codexctl-tui` owns the dashboard, local skill view, demo fixtures, and recording. The root package wires those crates to the local brain, configuration, onboarding, and CLI.
+- `codexctl-core` owns session evidence, transcript discovery, health checks, Coding Brain paths, project identity, terminal backends, and runtime contracts.
+- `codexctl-tui` owns the Live, Review, and Scorecard application and terminal suspend/restore behavior.
+- the root package owns local Brain evaluation, persistence, config parsing, onboarding, hooks, and the `coding-brain` CLI.
 
-```text
-crates/
-├── codexctl-core/
-└── codexctl-tui/
-src/
-├── brain/
-├── runtime/
-├── config.rs
-├── doctor.rs
-├── init/
-└── main.rs
-```
+Core must not import root-package modules. The TUI communicates with the binary through runtime traits in `codexctl-core`; optional Agent Deck navigation is represented as a navigation plan rather than a direct dependency on binary internals.
 
-The runtime composition exposes sessions, brain views, immediate actions, review data, and brain mailbox delivery. Keep binary-only brain code out of `codexctl-core`.
-
-## Development
+## Build and test
 
 ```bash
 cargo build --workspace
@@ -32,10 +21,17 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-Add tests for status inference, health checks, terminal backends, configuration parsing, and brain behavior when changing those areas. Keep changes surgical and preserve the existing config and state paths unless a task explicitly includes migration.
+Nix and packaging changes should also pass:
 
-## Product boundary
+```bash
+nix flake check
+just check
+```
 
-New work should strengthen the live session dashboard, local brain, deterministic rules, learning/review loop, mailbox delivery, or terminal integration. Durable queues, dependency scheduling, distributed transport, and persistent worker coordination belong in external tools.
+When changing status inference, health checks, activity retention, hooks, paths, or purge behavior, extend the existing focused tests. Purge tests must use injected absolute paths and must prove that symlinks are unlinked rather than followed.
 
-Beads is the repository's task tracker and can also be recommended to users who need durable coordination, but codexctl must not require it at runtime.
+## Product scope
+
+New work should strengthen immediate judgment, the hook-first activity record, preference learning, Live/Review/Scorecard, or reliable session navigation. Durable queues, dependency scheduling, distributed transport, and persistent worker coordination belong in external tools.
+
+Beads is the repository task tracker and an optional user companion. Agent Deck is an optional navigation companion. Neither belongs in Coding Brain's required runtime dependency graph.

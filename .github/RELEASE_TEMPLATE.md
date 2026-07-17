@@ -17,9 +17,12 @@
 ## Install / Upgrade
 
 ```bash
-brew upgrade codexctl                     # Homebrew
-cargo install codexctl                    # Cargo
+brew upgrade coding-brain                 # Homebrew
+cargo install codexctl                    # Cargo package; installs coding-brain
 curl -fsSL https://raw.githubusercontent.com/aleadag/codexctl/main/install.sh | sh
+coding-brain init
+coding-brain doctor
+# Restart Codex after reviewing the new managed hooks.
 ```
 
 ## Changelog

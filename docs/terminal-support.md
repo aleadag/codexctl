@@ -1,25 +1,25 @@
-# Terminal Support
+# Terminal support
 
-Run `codexctl doctor` to check your terminal's capabilities along with the rest of the install (PATH, hooks, plugin files, brain endpoint, and session discovery). The legacy `codexctl --doctor` flag still works for the terminal-only report.
+Run `coding-brain doctor` inside the same terminal family that launches Codex. The report checks session discovery and whether Coding Brain can switch to a selected session.
 
-## Compatibility Matrix
+## Navigation matrix
 
-| Terminal | Launch (`--new` / `n`) | Switch | Input | Approve | Notes |
-|----------|-------------------------|--------|-------|---------|-------|
-| **GNOME Terminal** | Yes | - | - | - | Visible launch via `gnome-terminal --window` on Linux |
-| **Ghostty** | - | Yes | Yes | Yes | Native AppleScript API, no Kitty-style remote control setup |
-| **Kitty** | Yes | Yes | Yes | Yes | `kitty @` remote control |
-| **tmux** | Yes | Yes | Yes | Yes | `tmux` pane/window control |
-| **WezTerm** | Yes | Yes | - | - | `wezterm cli` launch + pane activation |
-| **Windows Terminal (WSL)** | Yes | - | - | - | Visible launch via `cmd.exe /c wt.exe` into a new WSL tab |
-| **Warp** | - | Yes | Yes | Yes | Command Palette + System Events |
-| **iTerm2** | - | Yes | Yes | Yes | AppleScript + System Events |
-| **Terminal.app** | - | Yes | Yes | Yes | AppleScript + System Events |
+| Terminal | Switch to session | Setup |
+| --- | --- | --- |
+| Ghostty | Yes | macOS Automation/Accessibility permission |
+| Kitty | Yes | `allow_remote_control yes` in `kitty.conf` |
+| tmux | Yes | Coding Brain must reach the same tmux server |
+| WezTerm | Yes | Reachable `wezterm cli` mux server |
+| Warp | Yes | macOS Automation/Accessibility permission |
+| iTerm2 | Yes | macOS Automation/Accessibility permission |
+| Terminal.app | Yes | macOS Automation/Accessibility permission |
+| GNOME Terminal | No | Launch-only backend; switch is not exposed |
+| Windows Terminal from WSL | No | Launch-only bridge; remote tab control is not exposed |
 
-## Setup Notes
+Coding Brain restores the terminal before it hands control to an external attach command and re-enters the TUI after that command returns.
 
-- **GNOME Terminal**: Launch support is verified on Linux under Docker/X11. Remote switch/input/approve automation is intentionally unsupported.
-- **Windows Terminal**: WSL-only, currently covers visible launch, not remote tab control.
-- **Kitty**: Requires `allow_remote_control yes` in `~/.config/kitty/kitty.conf`.
-- **Warp, iTerm2, Terminal.app**: Require macOS Automation/Accessibility permission in System Settings > Privacy & Security.
-- **tmux**: Assumes codexctl can reach the same tmux server as the Codex panes.
+## Optional Agent Deck
+
+When a selected session is managed by [Agent Deck](https://github.com/asheshgoplani/agent-deck), the TUI can attach through Agent Deck's tmux workflow. Coding Brain detects this at the time you choose "switch to session"; Agent Deck is optional, and a missing installation or cancelled attach leaves the Brain TUI usable.
+
+Use `coding-brain doctor` for concrete setup advice when a supported terminal cannot be reached.

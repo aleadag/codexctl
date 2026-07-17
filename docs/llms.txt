@@ -1,30 +1,32 @@
-# codexctl
+# Coding Brain
 
-codexctl is a local-brain companion and terminal dashboard for Codex sessions.
+Coding Brain is a local TUI for supervising Codex through judgment and learning.
 
-Primary capabilities:
-- Discover local Codex rollouts under ~/.codex/sessions/**/rollout-*.jsonl.
-- Show status, health, cost, context pressure, and supported terminal actions.
-- Evaluate pending actions with deterministic rules and a local LLM.
-- Keep advisory mode by default; --auto-run executes high-confidence actions.
-- Immediate actions: approve, deny, send, terminate, route, and spawn.
-- Learn from local decisions, outcomes, preferences, and canonical review examples.
-- Deliver best-effort local mailbox messages to live sessions.
+Current product boundary:
+- Live shows normalized activity and attention for active sessions.
+- Review collects denials, corrections, and uncertain decisions worth teaching from.
+- Scorecard reports decision quality and learning progress.
+- Lifecycle and permission hooks record bounded activity before transcript discovery catches up.
+- Session switching uses supported terminal APIs or optional Agent Deck navigation.
+- Coding Brain does not provide a mailbox, scheduler, durable task queue, dependency engine, or distributed coordinator.
 
-Privacy:
-- Brain data remains under ~/.codexctl/brain.
-- Non-loopback endpoints trigger a warning because transcript context may leave the machine.
+Current paths:
+- User config: $XDG_CONFIG_HOME/coding-brain/config.toml
+- User state: $XDG_STATE_HOME/coding-brain/
+- Project config: .coding-brain.toml
+- Stable project identity: .coding-brain/project.toml
 
-Compatibility:
-- Config paths remain .codexctl.toml and ~/.config/codexctl/config.toml.
-- Legacy relay, hive, idle, external-agent, and retention settings are ignored with warnings.
-- Normal upgrade preserves legacy state; codexctl init --purge is destructive.
+Install and activate:
+- cargo install codexctl
+- coding-brain init
+- coding-brain doctor
+- restart Codex and inspect /hooks
+- coding-brain
 
-Durable coordination:
-- codexctl has no durable task queue or distributed coordinator.
-- Beads or another external tracker can manage tasks, dependencies, claims, blockers, gates, and handoffs.
+The crates.io package and internal Rust crates remain named codexctl. Only the executable and public runtime namespace are named coding-brain. There is no automatic migration or compatibility executable. Confirmed purge is irreversible; old global data remains available for rollback until purge.
 
-Docs:
+Documentation:
+- https://aleadag.github.io/codexctl/
 - https://aleadag.github.io/codexctl/quickstart/
 - https://aleadag.github.io/codexctl/configuration/
 - https://aleadag.github.io/codexctl/reference/

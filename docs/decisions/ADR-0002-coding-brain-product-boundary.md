@@ -20,7 +20,7 @@ the intended product is Coding Brain. This is a pre-release project with one
 tester, so compatibility machinery would cost more than a manual reset.
 
 The approved design and its twelve-branch stress test are recorded in the
-[Coding Brain design](../../.internal/specs/2026-07-17-brain-primary-tui-design.md).
+[Coding Brain design](https://github.com/aleadag/codexctl/blob/main/.internal/specs/2026-07-17-brain-primary-tui-design.md).
 
 ## Decision
 

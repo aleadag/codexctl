@@ -6,7 +6,7 @@
 
 let
   inherit (pkgs) lib;
-  testPackage = pkgs.writeShellScriptBin "codexctl" "exit 0";
+  testPackage = pkgs.writeShellScriptBin "coding-brain" "exit 0";
   expectedExe = lib.getExe testPackage;
   existingStop = {
     hooks = [
@@ -29,7 +29,7 @@ let
       {
         programs.codex.enable = true;
         programs.codex.hooks.Stop = [ existingStop ];
-        programs.codexctl = {
+        programs.coding-brain = {
           enable = true;
           package = testPackage;
           settings.brain = {
@@ -50,7 +50,7 @@ let
       self.homeModules.default
       baseHome
       {
-        programs.codexctl = {
+        programs.coding-brain = {
           enable = true;
           package = testPackage;
           codexHooks.enable = false;
@@ -66,7 +66,7 @@ let
       {
         programs.codex.enable = true;
         programs.codex.hooks.Stop = [ existingStop ];
-        programs.codexctl = {
+        programs.coding-brain = {
           enable = true;
           package = testPackage;
           codexHooks.enable = false;
@@ -82,7 +82,7 @@ let
       baseHome
       {
         programs.codex.enable = true;
-        programs.codexctl = {
+        programs.coding-brain = {
           enable = true;
           package = testPackage;
         };
@@ -140,7 +140,7 @@ let
     modules = [
       compatibilityOptions
       self.homeManagerModules.default
-      { programs.codexctl.enable = true; }
+      { programs.coding-brain.enable = true; }
     ];
   };
   unsupportedHooks = lib.evalModules {
@@ -149,7 +149,7 @@ let
       compatibilityOptions
       self.homeManagerModules.default
       {
-        programs.codexctl = {
+        programs.coding-brain = {
           enable = true;
           codexHooks.enable = true;
         };
@@ -164,7 +164,7 @@ let
       self.homeManagerModules.default
       {
         programs.codex.enable = true;
-        programs.codexctl.enable = true;
+        programs.coding-brain.enable = true;
       }
     ];
   };
@@ -179,7 +179,7 @@ let
       self.homeManagerModules.default
       {
         programs.codex.enable = false;
-        programs.codexctl = {
+        programs.coding-brain = {
           enable = true;
           package = testPackage;
           codexHooks.enable = true;
@@ -207,23 +207,23 @@ let
     subagentStop
     managedStop
   ];
-  trustNotice = cfg.home.activation.codexctlHookTrustNotice.data;
+  trustNotice = cfg.home.activation.codingBrainHookTrustNotice.data;
   unsupportedFailures = builtins.filter (item: !item.assertion) unsupportedHooks.config.assertions;
   enableOnlyFailures = builtins.filter (item: !item.assertion) enableOnlyCodex.config.assertions;
   disabledFailures = builtins.filter (item: !item.assertion) disabledCodex.config.assertions;
 in
 assert builtins.elem testPackage cfg.home.packages;
-assert aliasConfigured.config.programs.codexctl.enable;
+assert aliasConfigured.config.programs.coding-brain.enable;
 assert builtins.length dualAliasConfigured.config.programs.codex.hooks.PermissionRequest == 1;
 assert dualAliasConfigured.config.programs.codex.hooks ? PostToolUse;
 assert dualAliasConfigured.config.programs.codex.hooks ? Stop;
-assert packageOnly.config.programs.codexctl.codexHooks.enable == false;
-assert enableOnlyCodex.config.programs.codexctl.codexHooks.enable == false;
+assert packageOnly.config.programs.coding-brain.codexHooks.enable == false;
+assert enableOnlyCodex.config.programs.coding-brain.codexHooks.enable == false;
 assert enableOnlyFailures == [ ];
 assert builtins.length unsupportedFailures == 1;
 assert
   (builtins.head unsupportedFailures).message
-  == "programs.codexctl.codexHooks.enable requires Home Manager programs.codex.hooks; disable it or upgrade Home Manager";
+  == "programs.coding-brain.codexHooks.enable requires Home Manager programs.codex.hooks; disable it or upgrade Home Manager";
 assert builtins.length disabledFailures == 1;
 assert lib.hasInfix "programs.codex.enable = true" (builtins.head disabledFailures).message;
 assert permission.matcher == "*";
@@ -262,34 +262,34 @@ assert !(rollbackConfigured.config.programs.codex.hooks ? SubagentStart);
 assert !(rollbackConfigured.config.programs.codex.hooks ? SubagentStop);
 assert
   trustNotice == ''
-    echo "codexctl hooks use ${expectedExe}; restart Codex and review /hooks after package changes."
+    echo "Coding Brain hooks use ${expectedExe}; restart Codex and review /hooks after package changes."
   '';
 assert
   !(lib.hasAttrByPath [
     "xdg"
     "configFile"
-    "codexctl/config.toml"
+    "coding-brain/config.toml"
   ] aliasConfigured.config);
 assert
   !(lib.hasAttrByPath [
     "systemd"
     "user"
     "services"
-    "codexctl-headless"
+    "coding-brain-headless"
   ] cfg);
-pkgs.runCommand "codexctl-home-manager-module-check" { } ''
+pkgs.runCommand "coding-brain-home-manager-module-check" { } ''
   grep -F 'enabled = true' \
-    ${cfg.xdg.configFile."codexctl/config.toml".source}
+    ${cfg.xdg.configFile."coding-brain/config.toml".source}
   grep -F 'endpoint = "http://localhost:11434/api/generate"' \
-    ${cfg.xdg.configFile."codexctl/config.toml".source}
+    ${cfg.xdg.configFile."coding-brain/config.toml".source}
   grep -F 'model = "gemma4:e4b"' \
-    ${cfg.xdg.configFile."codexctl/config.toml".source}
+    ${cfg.xdg.configFile."coding-brain/config.toml".source}
   grep -F 'auto = false' \
-    ${cfg.xdg.configFile."codexctl/config.toml".source}
+    ${cfg.xdg.configFile."coding-brain/config.toml".source}
   grep -F 'timeout_ms = 25000' \
-    ${cfg.xdg.configFile."codexctl/config.toml".source}
+    ${cfg.xdg.configFile."coding-brain/config.toml".source}
   grep -F 'terminal_auto_approve_fallback = false' \
-    ${cfg.xdg.configFile."codexctl/config.toml".source}
+    ${cfg.xdg.configFile."coding-brain/config.toml".source}
   grep -F 'restart Codex' ${configured.activationPackage}/activate
   grep -F '/hooks' ${configured.activationPackage}/activate
   touch "$out"

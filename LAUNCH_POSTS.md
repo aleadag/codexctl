@@ -1,57 +1,49 @@
-# Launch Posts
+# Launch posts
 
 ## Positioning
 
-codexctl is a local-brain companion for people running several Codex sessions.
-It keeps session state, health, context pressure, and pending actions visible in
-one terminal. Decisions are advisory by default; `--auto-run` is an explicit
-opt-in for high-confidence actions.
+Coding Brain is a local TUI for the judgment and learning loop around Codex. Live shows what needs attention, Review turns corrections into teaching evidence, and Scorecard makes decision quality visible. It can switch to a session through native terminal support or optional Agent Deck navigation.
 
-Durable task tracking and multi-agent coordination are intentionally left to
-external tools such as Beads.
+It does not schedule work or replace a durable tracker. Beads and Agent Deck are optional companions for different jobs.
 
 ## GitHub Discussion
 
 Title:
 
-`codexctl`: a local brain for your Codex sessions
+`coding-brain`: local judgment and learning for Codex
 
 Body:
 
-I kept losing track of which Codex session was blocked, waiting for approval,
-or quietly consuming context, so I built `codexctl`.
+I built Coding Brain because the useful part of supervising Codex is not another session launcher. It is seeing which decision needs attention, correcting it quickly, and retaining that preference for the next session.
 
-It gives me one local dashboard to:
+The TUI has three views:
 
-- see active sessions and their health
-- review pending decisions without tab hunting
-- apply deterministic rules before consulting a local LLM
-- learn from corrections
-- optionally execute high-confidence actions with `--auto-run`
+- Live for current activity and attention
+- Review for denials, corrections, and uncertain decisions
+- Scorecard for decision quality over time
 
-Quick start:
+It reads local Codex hook and transcript evidence. Switching to a session uses the terminal directly or Agent Deck when that optional integration owns the session.
 
 ```bash
-brew install aleadag/tap/codexctl
-codexctl init
-codexctl
+cargo install codexctl
+coding-brain init
+coding-brain doctor
+coding-brain
 ```
 
 Repo: https://github.com/aleadag/codexctl
 
-## Short Post
+## Short post
 
-I built `codexctl` because supervising several Codex sessions should not
-require tab hunting.
+Coding Brain is a local judgment and learning TUI for Codex: Live shows what needs attention, Review captures corrections, and Scorecard tracks whether decisions improve.
 
-It is a local terminal dashboard with a learning brain: it shows session health
-and pending actions, stays advisory by default, and can act on high-confidence
-decisions when you opt in with `--auto-run`.
+It can switch to sessions through native terminal support or optional Agent Deck, but it deliberately leaves durable task tracking to external tools.
 
 ```bash
-brew install aleadag/tap/codexctl
-codexctl init
-codexctl
+cargo install codexctl
+coding-brain init
+coding-brain doctor
+coding-brain
 ```
 
 https://github.com/aleadag/codexctl
@@ -60,19 +52,15 @@ https://github.com/aleadag/codexctl
 
 Title:
 
-Show HN: codexctl – a local brain for supervising Codex sessions
+Show HN: Coding Brain - local judgment and learning for Codex
 
 Body:
 
-If you run several Codex sessions at once, `codexctl` shows which ones are
-blocked, waiting for approval, unhealthy, or approaching context limits.
+Coding Brain is a terminal UI for reviewing the decisions around active Codex sessions. Hook events make activity visible immediately, transcript evidence adds context, and operator corrections become learning evidence.
 
-The brain combines deterministic rules with a local LLM and learns from
-operator corrections. It only advises by default; automatic execution requires
-`--auto-run`.
+The primary views are Live, Review, and Scorecard. The product does not include a scheduler, mailbox, or distributed coordinator. Session switching uses supported terminal APIs, with Agent Deck available as an optional attach path.
 
-The project is local-first and supports macOS and Linux terminals including
-Ghostty, tmux, Kitty, Warp, iTerm2, and GNOME Terminal.
+The default brain endpoint is local, and remote endpoints produce visible privacy advisories.
 
 Repo: https://github.com/aleadag/codexctl
 

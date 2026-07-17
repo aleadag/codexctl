@@ -8,7 +8,7 @@
 }:
 
 let
-  cfg = config.programs.codexctl;
+  cfg = config.programs.coding-brain;
   tomlFormat = pkgs.formats.toml { };
   hasCodexHooks = lib.hasAttrByPath [
     "programs"
@@ -24,16 +24,16 @@ let
 in
 {
   _file = ./home-manager.nix;
-  key = "codexctl-home-manager-module";
+  key = "coding-brain-home-manager-module";
 
-  options.programs.codexctl = {
-    enable = lib.mkEnableOption "codexctl session supervision";
+  options.programs.coding-brain = {
+    enable = lib.mkEnableOption "Coding Brain supervision and learning";
 
     package = lib.mkOption {
       type = lib.types.package;
       default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
       defaultText = lib.literalExpression "inputs.codexctl.packages.\${pkgs.stdenv.hostPlatform.system}.default";
-      description = "The codexctl package used by the CLI and generated hooks.";
+      description = "The Coding Brain package used by the CLI and generated hooks.";
     };
 
     settings = lib.mkOption {
@@ -41,7 +41,7 @@ in
       default = { };
       description = ''
         Non-secret configuration written to
-        {file}`$XDG_CONFIG_HOME/codexctl/config.toml`.
+        {file}`$XDG_CONFIG_HOME/coding-brain/config.toml`.
         Values are copied to the world-readable Nix store; do not put tokens,
         credentials, or token-bearing webhook URLs here.
       '';
@@ -54,7 +54,7 @@ in
         lib.hasAttrByPath [ "programs" "codex" "hooks" ] options
         && config.programs.codex.enable
       '';
-      description = "Whether to merge the codexctl lifecycle and permission hooks into programs.codex.hooks.";
+      description = "Whether to merge the Coding Brain lifecycle and permission hooks into programs.codex.hooks.";
     };
   };
 
@@ -62,17 +62,17 @@ in
     lib.mkMerge [
       {
         home.packages = [ cfg.package ];
-        xdg.configFile."codexctl/config.toml" = lib.mkIf (cfg.settings != { }) {
-          source = tomlFormat.generate "codexctl-config.toml" cfg.settings;
+        xdg.configFile."coding-brain/config.toml" = lib.mkIf (cfg.settings != { }) {
+          source = tomlFormat.generate "coding-brain-config.toml" cfg.settings;
         };
         assertions = [
           {
             assertion = !cfg.codexHooks.enable || hasCodexHooks;
-            message = "programs.codexctl.codexHooks.enable requires Home Manager programs.codex.hooks; disable it or upgrade Home Manager";
+            message = "programs.coding-brain.codexHooks.enable requires Home Manager programs.codex.hooks; disable it or upgrade Home Manager";
           }
           {
             assertion = !cfg.codexHooks.enable || !hasCodexHooks || codexEnabled;
-            message = "programs.codexctl.codexHooks.enable requires programs.codex.enable = true";
+            message = "programs.coding-brain.codexHooks.enable requires programs.codex.enable = true";
           }
         ];
       }
@@ -175,8 +175,8 @@ in
               }
             ];
           };
-          home.activation.codexctlHookTrustNotice = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-            echo "codexctl hooks use ${executable}; restart Codex and review /hooks after package changes."
+          home.activation.codingBrainHookTrustNotice = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+            echo "Coding Brain hooks use ${executable}; restart Codex and review /hooks after package changes."
           '';
         }
       ))

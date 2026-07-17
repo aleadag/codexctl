@@ -1,6 +1,6 @@
-site_name: codexctl
+site_name: Coding Brain
 site_url: https://aleadag.github.io/codexctl/
-site_description: A local-brain companion for supervising Codex sessions.
+site_description: A local brain for supervising and learning from Codex sessions.
 repo_url: https://github.com/aleadag/codexctl
 repo_name: aleadag/codexctl
 

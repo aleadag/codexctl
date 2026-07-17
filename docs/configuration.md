@@ -1,78 +1,20 @@
 # Configuration
 
-codexctl loads global configuration first and project configuration second. CLI flags override both.
+Coding Brain merges configuration in this order, with later values winning:
 
-- Global: `~/.config/codexctl/config.toml`
-- Project: `.codexctl.toml`
+1. user config at `$XDG_CONFIG_HOME/coding-brain/config.toml`
+2. project config at `.coding-brain.toml`
+3. CLI flags
 
-Print the template with `codexctl --config-template`, inspect resolved values with `codexctl --config`, and validate a file with `codexctl --config-validate`.
+On a typical Linux system, the user file is `~/.config/coding-brain/config.toml`. Inspect the effective values with `coding-brain --config`, print a template with `coding-brain --config-template`, and validate known config files with `coding-brain --config-validate`.
 
-## Home Manager
+Project config may tune model behavior, but it cannot select `brain.endpoint`. Endpoint choice is restricted to user config or an explicit CLI flag because it determines where transcript context is sent.
 
-With codexctl declared as a flake input, import its Home Manager module and configure it with your other Home Manager modules:
-
-```nix
-{
-  imports = [ inputs.codexctl.homeManagerModules.default ];
-
-  programs.codex.enable = true;
-  programs.codexctl = {
-    enable = true;
-    codexHooks.enable = true;
-    settings.brain = {
-      enabled = true;
-      endpoint = "http://localhost:11434/api/generate";
-      model = "gemma4:e4b";
-      auto = false;
-      timeout_ms = 25000;
-      terminal_auto_approve_fallback = false;
-    };
-  };
-}
-```
-
-Apply the configuration with your Home Manager configuration name in place of `<profile>`:
-
-```bash
-home-manager switch --flake .#<profile>
-```
-
-The module installs its selected package, writes the settings as TOML, and merges the eight managed lifecycle definitions into `programs.codex.hooks`. Each handler calls the selected codexctl package by its immutable Nix store path rather than relying on `PATH`. Hooks configured by other Home Manager modules remain independent and are preserved.
-
-`programs.codexctl.settings` is visible in the Nix store. Do not put secrets, tokens, credentials, or token-bearing URLs in it.
-
-Changing the codexctl package changes the trusted hook definition. After an upgrade, rebuild Home Manager, restart Codex, and review `/hooks` before trusting the new handlers.
-
-## Codex lifecycle hooks
-
-For a non-Nix installation, install or refresh only the managed hooks with:
-
-```bash
-codexctl init --plugin-only
-```
-
-codexctl merges these definitions into `~/.codex/hooks.json` and preserves unrelated hooks:
-
-| Codex event | Matcher | Handler | Timeout |
-| --- | --- | --- | ---: |
-| `SessionStart` | `startup\|resume\|clear\|compact` | `--lifecycle-hook` | 2s |
-| `UserPromptSubmit` | none | `--lifecycle-hook` | 2s |
-| `PreToolUse` | `*` | `--lifecycle-hook` | 2s |
-| `PermissionRequest` | `*` | `--permission-hook` | 30s |
-| `PostToolUse` | `*` | `--lifecycle-hook` | 2s |
-| `SubagentStart` | `*` | `--lifecycle-hook` | 2s |
-| `SubagentStop` | `*` | `--lifecycle-hook` | 2s |
-| `Stop` | none | `--lifecycle-hook` | 2s |
-
-The lifecycle handlers provide immediate status evidence to the dashboard. They do not copy prompts, commands, tool input, or tool output into lifecycle state, and they cannot approve a tool or send terminal input. `PermissionRequest` contributes status for every tool, but brain allow/deny decisions remain limited to Bash requests.
-
-Lifecycle state is a bounded, reconstructible snapshot at `~/.codexctl/hooks/lifecycle.json`, protected by `~/.codexctl/hooks/lifecycle.lock`. Config remains at `~/.config/codexctl/config.toml`. Removing hooks leaves the snapshot in place; expired evidence is ignored.
-
-Installing a definition does not establish that Codex trusts it. Restart Codex and use `/hooks` to inspect and trust the exact commands after installation, an upgrade, or a Home Manager rebuild.
-
-## Brain
+## Brain settings
 
 ```toml
+theme = "dark"
+
 [brain]
 enabled = true
 endpoint = "http://localhost:11434/api/generate"
@@ -81,58 +23,60 @@ auto = false
 timeout_ms = 5000
 max_context_tokens = 4000
 few_shot_count = 5
-max_sessions = 10
-orchestrate = false
-orchestrate_interval = 30
 test_runners = ["cargo test", "npm test", "pytest", "go test", "bun test"]
 ```
 
-`auto = false` keeps suggestions advisory. The CLI `--auto-run` enables automatic execution for that invocation. `orchestrate` allows periodic cross-session evaluation for immediate route, spawn, terminate, or deny decisions; it is not a durable task runner.
+`auto = false` keeps decisions advisory. CLI `--auto-run` is the explicit runtime opt-in for automatic high-confidence actions.
 
-Loopback endpoints are recommended. When an enabled brain uses another host, codexctl warns that transcript context may leave this machine.
+Loopback endpoints keep model requests on the machine. Coding Brain warns when an endpoint is not loopback and gives plaintext remote HTTP a stronger warning. These advisories do not override an endpoint the user selected in CLI or user config.
 
-## Lifecycle
+## Home Manager
 
-```toml
-[lifecycle]
-auto_restart = false
-restart_threshold_pct = 90.0
-restart_only_when_idle = true
+Import the module from the `codexctl` flake input, then configure the public `programs.coding-brain` option:
+
+```nix
+{
+  imports = [ inputs.codexctl.homeManagerModules.default ];
+
+  programs.coding-brain = {
+    enable = true;
+    settings.brain = {
+      enabled = true;
+      endpoint = "http://localhost:11434/api/generate";
+      model = "gemma4:e4b";
+      auto = false;
+    };
+  };
+}
 ```
 
-Lifecycle restart is local session maintenance. It does not schedule project work.
+The module installs its selected package, writes `coding-brain/config.toml`, and can merge eight managed lifecycle and permission definitions into `programs.codex.hooks`. Each hook uses the package's immutable Nix store executable rather than `PATH`, and unrelated hooks remain independent.
 
-## Rules and file conflicts
+Settings rendered by Nix are world-readable in the Nix store. Do not put tokens, credentials, or token-bearing URLs in `programs.coding-brain.settings`.
 
-```toml
-[orchestrate]
-file_conflicts = true
-auto_deny_file_conflicts = false
+`codexHooks.enable` defaults to true only when Home Manager exposes `programs.codex.hooks` and `programs.codex.enable` is true. After changing the package, rebuild Home Manager, restart Codex, and inspect `/hooks` before trusting the changed executable path.
 
-[rules.approve_reads]
-match_tool = ["Read", "Glob", "Grep"]
-action = "approve"
+## Managed hooks
 
-[rules.deny_destructive]
-match_tool = ["Bash"]
-match_command = ["rm -rf", "push --force"]
-action = "deny"
+Imperative setup uses:
+
+```bash
+coding-brain init --plugin-only
 ```
 
-Rules can use `approve`, `deny`, `send`, or `terminate`. Brain suggestions can additionally route context or spawn a live session.
+Init writes complete lifecycle handlers for `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `SubagentStart`, `SubagentStop`, and `Stop`, plus a `PermissionRequest` handler. It preserves unrelated entries and atomically replaces exact managed entries from the old executable.
 
-## Budgets, health, and hooks
+Hook activity is bounded status evidence, not authorization by itself. Permission decisions still pass through deterministic rules and, when enabled, the Brain evaluator. Transcript discovery supplies richer evidence when the rollout catches up.
 
-Top-level budget, notification, filtering, model-price overrides, health thresholds, and `[hooks.*]` sections remain supported. Run `codexctl --config-template` for the canonical key list.
+## Paths
 
-## Removed configuration
+| Data | Path |
+| --- | --- |
+| User config | `$XDG_CONFIG_HOME/coding-brain/config.toml` |
+| User state | `$XDG_STATE_HOME/coding-brain/` |
+| Lifecycle snapshot | `$XDG_STATE_HOME/coding-brain/hooks/lifecycle.json` |
+| Brain prompts | `$XDG_STATE_HOME/coding-brain/brain/prompts/` |
+| Project config | `.coding-brain.toml` |
+| Project identity | `.coding-brain/project.toml` |
 
-The following legacy settings are ignored and reported as warnings:
-
-- `[relay]`
-- `[hive]`
-- `[idle]`
-- `[agents.*]`
-- `lifecycle.retention_days`
-
-These warnings do not delete data. Normal startup and `codexctl init --upgrade` preserve legacy files under `~/.codexctl`; only `codexctl init --purge` removes them.
+If `XDG_STATE_HOME` is unset, Coding Brain uses `~/.local/state`. Removing `.coding-brain/project.toml` and rerunning init deliberately creates a new project identity; use that only when a fork should learn independently.

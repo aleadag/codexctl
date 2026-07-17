@@ -6,7 +6,7 @@ Unlike Homebrew and the AUR, the actual package definition must land in the
 `nixpkgs` repository, typically at:
 
 ```text
-pkgs/by-name/cl/codexctl/package.nix
+pkgs/by-name/co/coding-brain/package.nix
 ```
 
 ## Suggested package expression
@@ -18,7 +18,7 @@ release in the `nixpkgs` PR:
 { lib, rustPlatform, fetchFromGitHub }:
 
 rustPlatform.buildRustPackage rec {
-  pname = "codexctl";
+  pname = "coding-brain";
   version = "0.16.0";
 
   src = fetchFromGitHub {
@@ -34,7 +34,7 @@ rustPlatform.buildRustPackage rec {
     description = "Supervise Codex sessions with a local brain that learns from you.";
     homepage = "https://github.com/aleadag/codexctl";
     license = lib.licenses.mit;
-    mainProgram = "codexctl";
+    mainProgram = "coding-brain";
     platforms = lib.platforms.unix;
   };
 }
@@ -45,7 +45,7 @@ rustPlatform.buildRustPackage rec {
 1. Copy the package expression into a `nixpkgs` checkout.
 2. Build once with `lib.fakeHash` values to get the real `src.hash` and
    `cargoHash` suggestions from Nix.
-3. Replace the fake hashes, rebuild, and confirm `codexctl --help` runs.
+3. Replace the fake hashes, rebuild, and confirm `coding-brain --help` runs.
 4. Run the normal `nixpkgs` validation tools for the new package.
 5. Open the upstream `nixpkgs` PR and link it from issue `#82`.
 

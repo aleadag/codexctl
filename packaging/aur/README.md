@@ -1,6 +1,6 @@
 # AUR Packaging
 
-This directory contains repo-side templates for the `codexctl-bin` AUR package.
+This directory contains repo-side templates for the `coding-brain-bin` AUR package.
 
 The actual AUR package must live in its own AUR git repository, but these files
 keep the package definition reproducible from the main repo.
@@ -12,8 +12,8 @@ keep the package definition reproducible from the main repo.
 3. Re-render the package files:
 
 ```bash
-./scripts/render-aur-bin-files.sh <version> <linux_x86_64_sha256> <license_sha256> packaging/aur/codexctl-bin
+./scripts/render-aur-bin-files.sh <version> <linux_x86_64_sha256> <license_sha256> packaging/aur/coding-brain-bin
 ```
 
-4. Copy `packaging/aur/codexctl-bin/PKGBUILD` and `.SRCINFO` into the AUR repo.
+4. Copy `packaging/aur/coding-brain-bin/PKGBUILD` and `.SRCINFO` into the AUR repo.
 5. Commit and push the AUR repo update.

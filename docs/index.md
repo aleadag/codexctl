@@ -1,49 +1,45 @@
-# codexctl
+# Coding Brain
 
-codexctl is a local-brain companion for Codex sessions. It observes active sessions, evaluates pending actions with deterministic rules and a local LLM, learns from operator corrections, and can execute high-confidence decisions when `--auto-run` is enabled.
+Coding Brain supervises Codex through local judgment and learning. Hook events make new activity visible immediately, transcript evidence fills in session context, and operator corrections become preference evidence for later decisions.
 
-The dashboard reads local Codex transcripts and shows which sessions are processing, waiting, blocked, finished, unhealthy, or approaching budget and context limits.
+The TUI is organized around three questions:
+
+- **Live:** What are the active sessions doing, and which one needs attention?
+- **Review:** Which denials, corrections, or uncertain decisions should teach the Brain?
+- **Scorecard:** Is decision quality improving?
+
+Coding Brain can switch to a selected terminal session. [Agent Deck](https://github.com/asheshgoplani/agent-deck) navigation is available when Agent Deck is installed and owns that session; it is never required.
 
 ## Start here
 
+The Cargo package is named `codexctl`, while the installed command is `coding-brain`:
+
 ```bash
 cargo install codexctl
-codexctl init
-codexctl doctor
-codexctl
+coding-brain init
+coding-brain doctor
+# Restart Codex after doctor reports the new managed hooks.
+coding-brain
 ```
 
-Enable a local brain with:
+`coding-brain init` installs lifecycle and permission hooks and creates `.coding-brain/project.toml`. Review the commands with `/hooks` after restarting Codex.
+
+## Local model
+
+Deterministic rules work without a model. For local-model evaluation:
 
 ```bash
 ollama pull gemma4:e4b
 ollama serve
-codexctl --brain
+coding-brain --brain
 ```
 
-Advisory mode is the default. Add `--auto-run` only when codexctl should execute high-confidence actions automatically.
+Advisory mode is the default. `--auto-run` explicitly enables high-confidence automatic actions.
 
-## Immediate actions
+## Boundaries and privacy
 
-The brain can approve, deny, send input, terminate a session, route summarized context to another live session, or spawn a new Codex session. These actions operate on live sessions; codexctl does not maintain a durable task queue.
+Coding Brain records immediate activity, decisions, outcomes, corrections, and learned preferences. It does not own durable tasks, dependencies, claims, or handoffs; use Beads or another external tracker when work must survive a session. Beads is optional.
 
-## Local learning
+State lives under `$XDG_STATE_HOME/coding-brain/`, normally `~/.local/state/coding-brain/`. User config lives at `$XDG_CONFIG_HOME/coding-brain/config.toml`. Remote endpoints produce a privacy advisory, with a stronger warning for plaintext HTTP.
 
-Decisions, outcomes, preferences, canonical review examples, prompt overrides, and mailbox state are stored below `~/.codexctl/brain/`. Review the learning loop with `codexctl --brain-review` and inspect metrics with `codexctl --brain-stats scorecard`.
-
-## Privacy
-
-Local loopback endpoints keep transcript context on the machine. codexctl emits an advisory before using a non-loopback brain endpoint because transcript context may leave the machine.
-
-## Durable work
-
-For durable tasks, dependencies, claims, blockers, gates, and handoffs, use [Beads](https://github.com/steveyegge/beads) or another external tracker. Beads is optional; codexctl does not embed or require it.
-
-## Documentation
-
-- [Quick Start](quickstart.md)
-- [Configuration](configuration.md)
-- [CLI Reference](reference.md)
-- [Terminal Support](terminal-support.md)
-- [Troubleshooting](troubleshooting.md)
-- [Contributing](contributing.md)
+There is no automatic migration from the old executable or paths. See the [quick start](quickstart.md#cutover-from-an-older-build) before removing rollback data.

@@ -38,12 +38,14 @@ Codexctl will consume lifecycle hooks as a bounded, status-only overlay:
 - Managed hook definitions and Codex trust are separate diagnostics. Codexctl
   can verify its JSON definitions, but the operator must review trust in Codex
   with `/hooks`.
-- Existing installs retain the compatibility state root under `~/.codexctl`.
-  Moving state to `XDG_STATE_HOME` requires a separate migration.
+- **Superseded by [ADR-0002](ADR-0002-coding-brain-product-boundary.md):**
+  the accepted hook-evidence design originally retained the compatibility state
+  root under `~/.codexctl`; the Coding Brain cutover now writes lifecycle state
+  below `XDG_STATE_HOME/coding-brain` without automatic migration.
 
 The detailed event model, leases, storage bounds, rollout behavior, and test
-matrix live in the [approved design](../../.internal/specs/2026-07-17-codex-lifecycle-hook-status-design.md)
-and [implementation plan](../../.internal/plans/2026-07-17-codex-lifecycle-hook-status.md).
+matrix live in the [approved design](https://github.com/aleadag/codexctl/blob/main/.internal/specs/2026-07-17-codex-lifecycle-hook-status-design.md)
+and [implementation plan](https://github.com/aleadag/codexctl/blob/main/.internal/plans/2026-07-17-codex-lifecycle-hook-status.md).
 
 ## Rationale
 

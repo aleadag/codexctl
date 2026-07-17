@@ -1,4 +1,4 @@
-# codexctl developer shortcuts.
+# Coding Brain developer shortcuts.
 
 # Show available recipes.
 default:
@@ -28,6 +28,6 @@ fmt-check:
 clippy:
     cargo clippy -- -D warnings
 
-# Run codexctl, forwarding optional CLI arguments.
+# Run Coding Brain, forwarding optional CLI arguments.
 run *args:
-    cargo run -- {{args}}
+    cargo run --bin coding-brain -- {{args}}

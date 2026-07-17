@@ -25,7 +25,7 @@ append can also leave a partial tail that corrupts the next otherwise valid
 event.
 
 The implementation plan and its eleven-branch stress test are recorded in the
-[Coding Brain implementation plan](../../.internal/plans/2026-07-17-coding-brain-product-boundary.md).
+[Coding Brain implementation plan](https://github.com/aleadag/codexctl/blob/main/.internal/plans/2026-07-17-coding-brain-product-boundary.md).
 
 ## Decision
 

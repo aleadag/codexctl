@@ -4,15 +4,24 @@ All notable changes to codexctl are documented here.
 
 ## [Unreleased]
 
-### Added
-
-- Codex lifecycle hooks now provide immediate, bounded dashboard status for session, prompt, tool, permission, subagent, and stop events. Run `codexctl init --plugin-only`, restart Codex, and review the managed commands with `/hooks`.
-- Session JSON and the detail panel now show non-sensitive lifecycle provenance: store health, last event, age, contribution, and any ignored reason.
-
 ### Changed
 
-- `codexctl doctor` now reports managed-definition health, unobservable Codex trust, and lifecycle snapshot health as separate checks.
-- Transcript timestamps, process liveness, explicit input, and terminal-confirmed approvals continue to override conflicting hook evidence; lifecycle hooks cannot authorize tools or populate terminal actions.
+- **Breaking:** the installed executable is now `coding-brain`; the crates.io
+  package and internal Rust crates remain named `codexctl`. No compatibility
+  executable is installed.
+- Coding Brain is now the only TUI. Its Live, Review, and Scorecard views focus
+  on immediate judgment, learning, and session navigation; the dashboard,
+  mailbox, and session-management commands have been removed.
+- Config moved to `~/.config/coding-brain/config.toml`, state moved to
+  `~/.local/state/coding-brain/`, project config is `.coding-brain.toml`, and
+  stable project identity lives in `.coding-brain/project.toml`.
+- Lifecycle and permission hooks now record bounded activity before transcript
+  discovery catches up. `coding-brain doctor` reports stale managed hooks,
+  project identity health, lifecycle state, and endpoint privacy advisories.
+- Existing codexctl data is not migrated or read. Run `coding-brain init` to
+  replace exact managed hooks, restart Codex, and use confirmed
+  `coding-brain init --purge` only after the old data is no longer needed for
+  rollback.
 
 ## [0.58.0] - 2026-07-15
 

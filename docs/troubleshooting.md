@@ -3,77 +3,54 @@
 Start with:
 
 ```bash
-codexctl doctor
+coding-brain doctor
 ```
 
-It checks the binary on `PATH`, Codex hooks, brain endpoint, session discovery, and terminal integration. Advisories do not make the command fail.
+Doctor separates hard failures from advisories. Missing executables or unusable managed definitions fail the check; an unreachable optional local model, no active session, unverified Codex trust, or a remote endpoint is advisory.
 
-Lifecycle reporting is split into three checks:
-
-- `Codex hooks` checks whether all eight managed definitions are present, current, enabled, and executable.
-- `Codex hook trust` is always advisory when definitions are enabled because codexctl cannot observe Codex's trust decision. Restart Codex and inspect `/hooks`.
-- `lifecycle state` checks whether `~/.codexctl/hooks/lifecycle.json` is missing, readable, corrupt, or from a newer schema.
-
-Passing the definition check does not mean the trust check is satisfied.
-
-## Lifecycle status is unavailable or stale
-
-Run `codexctl doctor`, then use the matching recovery:
-
-| Doctor result | Recovery |
-| --- | --- |
-| Managed definitions missing | Run `codexctl init --plugin-only`, restart Codex, then review `/hooks`. |
-| Definition stale | Refresh it with `codexctl init --plugin-only`, restart Codex, and review the changed command. |
-| Definition disabled | Enable it in Codex and review it through `/hooks`. |
-| Definitions duplicated | Keep the managed set in either global or project scope, not both. |
-| Executable unavailable | Reinstall codexctl or rebuild Home Manager so the configured executable exists. |
-| Trust unverified | Inspect `/hooks`; codexctl cannot confirm this decision itself. |
-| State missing | Run a Codex turn after the hooks are enabled and trusted. |
-| State unavailable | Check ownership and permissions for `~/.codexctl/hooks/`. A transient lock or I/O error retains only still-fresh evidence. |
-| State corrupt | Let the next lifecycle event quarantine and rebuild the snapshot, or remove only the corrupt snapshot. |
-| Newer schema | Upgrade codexctl. An older binary will not write the newer snapshot. |
-
-If the dashboard reports an identity mismatch, let normal transcript discovery resolve the session. codexctl deliberately rejects cwd-only matching, null or missing transcript paths, stale `SessionStart` hints, and ambiguous same-cwd processes.
-
-## No sessions appear
-
-Confirm a Codex session is running and that rollout files exist under `~/.codex/sessions/`. Run `codexctl --list` to separate discovery problems from terminal rendering problems.
-
-## The brain is unavailable
-
-Check the configured endpoint directly and verify the model name. For Ollama:
+## Hooks are missing or stale
 
 ```bash
-curl http://localhost:11434/api/tags
-ollama list
+coding-brain init --plugin-only
+coding-brain doctor
 ```
 
-Brain support is optional; the dashboard and deterministic rules still work without it.
+Restart Codex and inspect `/hooks`. Coding Brain cannot observe whether Codex trusts a command, so trust remains advisory even when every definition is current.
 
-## Non-loopback privacy advisory
+Init removes only exact managed `coding-brain` entries and exact legacy managed hook commands. Lookalike and unrelated commands remain in place. The hook file is written to a complete sibling file, flushed, and atomically replaced; a failed pre-replace write leaves the original intact.
 
-This warning means the configured brain host is not `localhost`, `127.0.0.1`, or `::1`. Transcript context may leave the machine. Use a loopback endpoint or confirm the remote provider's data handling before enabling the brain.
+## Project identity is missing or malformed
 
-## Legacy configuration warnings
+`coding-brain init` creates `.coding-brain/project.toml`. If it is missing, activity can still use a temporary identity, but learning will not have a stable project UUID.
 
-`[relay]`, `[hive]`, `[idle]`, `[agents.*]`, and `lifecycle.retention_days` are no longer supported. Remove those entries when convenient. The warning is informational and does not delete legacy data.
+Fix malformed TOML rather than editing the UUID. If a fork should intentionally learn as a separate project, remove `.coding-brain/project.toml` in that fork and rerun `coding-brain init`.
 
-## Upgrade, rollback, or removal
+## No sessions appear in Live
 
-`codexctl init --upgrade` refreshes hooks and preserves `~/.codexctl`. `codexctl init --remove` removes managed hooks but keeps data. `codexctl init --purge` deletes brain data and legacy codexctl state after confirmation.
+Confirm a Codex session is running and that rollout files exist under `~/.codex/sessions/`. Hook events may appear before transcript discovery has enough evidence to attach a rollout; once it does, the richer transcript identity wins.
 
-For an imperative downgrade, remove the newer definitions before replacing the binary:
+Run doctor from the same terminal environment that owns the Codex session. For terminal-specific setup, see the [navigation matrix](terminal-support.md#navigation-matrix).
 
-```bash
-codexctl init --remove     # run with the newer binary
-# downgrade codexctl
-codexctl init              # reinstall the older managed hooks if wanted
-```
+## Brain endpoint warnings
 
-For Home Manager, set `programs.codexctl.codexHooks.enable = false` or revert the configuration that emitted the lifecycle definitions, then rebuild and switch. Confirm the definitions are gone before downgrading the selected `programs.codexctl.package`; rebuild again after changing the package. Do not use imperative `init --remove` as the primary rollback for declaratively managed hooks.
+The default endpoint is loopback. A remote HTTPS endpoint produces an advisory that transcript context may leave the machine. Remote plaintext HTTP adds a stronger warning because context and credentials may be exposed in transit.
 
-If the binary was downgraded first, restore the newer binary and run `codexctl init --remove`. The manual fallback is to remove only handlers whose bare or absolute executable resolves to codexctl and whose exact argument is `--lifecycle-hook` or `--permission-hook`. Preserve lookalike commands and neighboring user hooks.
+Project `.coding-brain.toml` cannot change the endpoint. Set it in `$XDG_CONFIG_HOME/coding-brain/config.toml` or pass `--url` explicitly.
 
-## Terminal input or focus fails
+## State is unavailable or corrupt
 
-Run `codexctl --doctor` for the legacy terminal-specific report and compare your terminal with the [support matrix](terminal-support.md). tmux and native terminal APIs may need to be enabled in the terminal itself.
+Coding Brain state is under `$XDG_STATE_HOME/coding-brain/`, normally `~/.local/state/coding-brain/`. Check ownership and permissions for that directory. A newer-schema advisory means the state was written by a newer build; upgrade before writing it again.
+
+Activity and preference files use bounded, repair-aware writes. If doctor reports corrupt lifecycle state, let the next hook event quarantine and rebuild the snapshot, or remove only that snapshot after inspecting it.
+
+## Agent Deck attach fails
+
+Agent Deck is optional. Confirm its command is on `PATH` and that it can reach the tmux session itself. Cancelling or failing an attach should restore Coding Brain; use the terminal-native switch path when Agent Deck does not own the selected session.
+
+## Rollback and purge
+
+Normal startup and doctor do not modify old data. Before purge, reinstall the old build and rerun its init command if you need to roll back.
+
+`coding-brain init --remove` removes managed hooks and the onboarding marker while preserving data. `coding-brain init --purge` previews the documented current and legacy global config/state targets, rechecks each target after confirmation, and deletes them. Purge is irreversible. It preserves project `.coding-brain.toml`, `.coding-brain/project.toml`, unrelated hooks, and sibling XDG files.
+
+For declarative Home Manager hooks, disable `programs.coding-brain.codexHooks.enable` or revert the module configuration and rebuild. Do not use imperative removal as the primary rollback for declaratively managed definitions.
