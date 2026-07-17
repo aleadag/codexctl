@@ -1,4 +1,5 @@
 use serde_json::Value;
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CodexEvent {
@@ -74,9 +75,24 @@ pub struct CodexResponseItem {
     pub output: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TimedCodexEvent {
+    pub event: CodexEvent,
+    pub timestamp_ms: Option<u64>,
+}
+
 pub fn parse_line(line: &str) -> Option<CodexEvent> {
+    parse_timed_line(line).map(|timed| timed.event)
+}
+
+pub fn parse_timed_line(line: &str) -> Option<TimedCodexEvent> {
     let entry: Value = serde_json::from_str(line).ok()?;
-    match entry.get("type").and_then(|v| v.as_str())? {
+    let timestamp_ms = entry
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .and_then(|value| OffsetDateTime::parse(value, &Rfc3339).ok())
+        .and_then(|timestamp| u64::try_from(timestamp.unix_timestamp_nanos() / 1_000_000).ok());
+    let event = match entry.get("type").and_then(|v| v.as_str())? {
         "session_meta" => parse_session_meta(entry.get("payload")?).map(CodexEvent::SessionMeta),
         "turn_context" => Some(CodexEvent::TurnContext(parse_turn_context(
             entry.get("payload")?,
@@ -84,7 +100,11 @@ pub fn parse_line(line: &str) -> Option<CodexEvent> {
         "event_msg" => parse_event_msg(entry.get("payload")?),
         "response_item" => parse_response_item(entry.get("payload")?).map(CodexEvent::ResponseItem),
         _ => None,
-    }
+    }?;
+    Some(TimedCodexEvent {
+        event,
+        timestamp_ms,
+    })
 }
 
 fn parse_session_meta(payload: &Value) -> Option<CodexSessionMeta> {
@@ -301,6 +321,37 @@ mod tests {
             parse_line(complete),
             Some(CodexEvent::Lifecycle(CodexLifecycleEvent::TaskComplete))
         );
+    }
+
+    #[test]
+    fn timed_parser_preserves_events_and_parses_top_level_rfc3339() {
+        let cases = [
+            r#"{"timestamp":"2026-07-17T01:02:03.456Z","type":"event_msg","payload":{"type":"task_started"}}"#,
+            r#"{"timestamp":"2026-07-17T01:02:03.456Z","type":"event_msg","payload":{"type":"task_complete"}}"#,
+            r#"{"timestamp":"2026-07-17T01:02:03.456Z","type":"event_msg","payload":{"type":"user_message"}}"#,
+            r#"{"timestamp":"2026-07-17T01:02:03.456Z","type":"response_item","payload":{"type":"function_call","name":"request_user_input","arguments":"{}","call_id":"call-1"}}"#,
+            r#"{"timestamp":"2026-07-17T01:02:03.456Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call-1","output":"ok"}}"#,
+        ];
+        for line in cases {
+            let timed = parse_timed_line(line).unwrap();
+            assert_eq!(timed.timestamp_ms, Some(1_784_250_123_456));
+            assert_eq!(parse_line(line), Some(timed.event));
+        }
+    }
+
+    #[test]
+    fn missing_or_malformed_timestamp_does_not_discard_event() {
+        for line in [
+            r#"{"type":"event_msg","payload":{"type":"task_started"}}"#,
+            r#"{"timestamp":"not-a-time","type":"event_msg","payload":{"type":"task_started"}}"#,
+        ] {
+            let timed = parse_timed_line(line).unwrap();
+            assert_eq!(timed.timestamp_ms, None);
+            assert_eq!(
+                timed.event,
+                CodexEvent::Lifecycle(CodexLifecycleEvent::TaskStarted)
+            );
+        }
     }
 
     #[test]

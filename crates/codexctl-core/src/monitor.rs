@@ -5,8 +5,9 @@ use serde_json::Value;
 
 use crate::codex_transcript::{
     CodexEvent, CodexLifecycleEvent, CodexResponseItem, CodexResponseKind, CodexTokenCount,
-    CodexTokenUsage, parse_line as parse_codex_line,
+    CodexTokenUsage, parse_timed_line as parse_codex_line,
 };
+use crate::lifecycle::{TranscriptEvidence, contributing_status};
 use crate::models;
 use crate::session::{
     ApprovalObservation, CodexSession, CodexTaskState, SessionStatus, SubagentRollup,
@@ -324,6 +325,7 @@ fn update_codex_tokens(session: &mut CodexSession) {
                     last_type.clear();
                     last_stop_reason.clear();
                     session.task_state = CodexTaskState::Unknown;
+                    session.transcript_evidence = None;
                     session.explicit_input_required = false;
                     clear_pending_tool(session);
                 }
@@ -349,12 +351,13 @@ fn update_codex_tokens(session: &mut CodexSession) {
                         }
                         saw_non_empty_line = true;
 
-                        let Some(event) = parse_codex_line(&line) else {
+                        let Some(timed) = parse_codex_line(&line) else {
                             continue;
                         };
                         recognized_events += 1;
+                        update_transcript_evidence(session, &timed.event, timed.timestamp_ms);
 
-                        match event {
+                        match timed.event {
                             CodexEvent::SessionMeta(meta) => {
                                 if session.cwd.is_empty() {
                                     session.cwd = meta.cwd;
@@ -477,6 +480,48 @@ fn update_codex_tokens(session: &mut CodexSession) {
         session.context_max = max;
     } else if previous_context_max > 0 && session.context_tokens > 0 {
         session.context_max = previous_context_max;
+    }
+}
+
+fn update_transcript_evidence(
+    session: &mut CodexSession,
+    event: &CodexEvent,
+    observed_at_ms: Option<u64>,
+) {
+    let evidence = match event {
+        CodexEvent::Lifecycle(
+            CodexLifecycleEvent::TaskStarted
+            | CodexLifecycleEvent::UserMessage
+            | CodexLifecycleEvent::AgentMessage,
+        ) => Some(TranscriptEvidence::progress(observed_at_ms)),
+        CodexEvent::Lifecycle(
+            CodexLifecycleEvent::TaskComplete | CodexLifecycleEvent::TurnAborted,
+        ) => Some(TranscriptEvidence::complete(observed_at_ms)),
+        CodexEvent::ResponseItem(item)
+            if matches!(
+                item.kind,
+                CodexResponseKind::Message
+                    | CodexResponseKind::FunctionCall
+                    | CodexResponseKind::FunctionCallOutput
+                    | CodexResponseKind::CustomToolCall
+                    | CodexResponseKind::CustomToolCallOutput
+                    | CodexResponseKind::Reasoning
+            ) =>
+        {
+            if matches!(
+                item.kind,
+                CodexResponseKind::FunctionCall | CodexResponseKind::CustomToolCall
+            ) && item.name.as_deref() == Some("request_user_input")
+            {
+                Some(TranscriptEvidence::explicit_input(observed_at_ms))
+            } else {
+                Some(TranscriptEvidence::progress(observed_at_ms))
+            }
+        }
+        _ => None,
+    };
+    if let Some(evidence) = evidence {
+        session.transcript_evidence = Some(evidence);
     }
 }
 
@@ -656,6 +701,26 @@ pub fn infer_status(
     last_stop_reason: &str,
     is_waiting_for_task: bool,
 ) {
+    infer_status_at(
+        session,
+        last_msg_type,
+        last_stop_reason,
+        is_waiting_for_task,
+        epoch_ms(),
+    );
+}
+
+pub fn infer_status_at(
+    session: &mut CodexSession,
+    last_msg_type: &str,
+    last_stop_reason: &str,
+    is_waiting_for_task: bool,
+    now_ms: u64,
+) {
+    if session.status == SessionStatus::Finished {
+        return;
+    }
+
     if matches!(session.approval, ApprovalObservation::Confirmed(_)) {
         session.status = SessionStatus::NeedsInput;
         return;
@@ -663,6 +728,11 @@ pub fn infer_status(
 
     if session.explicit_input_required {
         session.status = SessionStatus::NeedsInput;
+        return;
+    }
+
+    if let Some(status) = contributing_status(session, now_ms) {
+        session.status = status;
         return;
     }
 
@@ -711,6 +781,13 @@ pub fn infer_status(
     }
 
     session.status = SessionStatus::Idle;
+}
+
+fn epoch_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 fn recent_waiting_or_idle(last_message_ts: u64) -> SessionStatus {
@@ -1040,10 +1117,117 @@ mod tests {
     fn confirmed_terminal_prompt_precedes_processing_lifecycle() {
         let mut session = session();
         session.approval = ApprovalObservation::Confirmed(evidence());
+        session.lifecycle_evidence = Some(crate::lifecycle::LifecycleEvidence {
+            projected_status: crate::lifecycle::ProjectedStatus::Processing,
+            status_event: crate::lifecycle::LifecycleEventName::PreToolUse,
+            status_received_at_ms: 1_000,
+            latest_event: crate::lifecycle::LifecycleEventName::PreToolUse,
+            latest_received_at_ms: 1_000,
+        });
 
-        refresh_status(&mut session);
+        infer_status_at(&mut session, "assistant", "tool_use", false, 2_000);
 
         assert_eq!(session.status, SessionStatus::NeedsInput);
+    }
+
+    #[test]
+    fn explicit_input_precedes_processing_lifecycle() {
+        let mut session = session();
+        session.explicit_input_required = true;
+        session.lifecycle_evidence = Some(crate::lifecycle::LifecycleEvidence {
+            projected_status: crate::lifecycle::ProjectedStatus::Processing,
+            status_event: crate::lifecycle::LifecycleEventName::PreToolUse,
+            status_received_at_ms: 1_000,
+            latest_event: crate::lifecycle::LifecycleEventName::PreToolUse,
+            latest_received_at_ms: 1_000,
+        });
+
+        infer_status_at(&mut session, "assistant", "tool_use", false, 2_000);
+
+        assert_eq!(session.status, SessionStatus::NeedsInput);
+    }
+
+    #[test]
+    fn transcript_events_capture_reconciliation_semantics() {
+        let mut session = session();
+        let cases = [
+            (
+                CodexEvent::Lifecycle(CodexLifecycleEvent::TaskStarted),
+                crate::lifecycle::TranscriptEvidence::progress(Some(1_000)),
+            ),
+            (
+                CodexEvent::Lifecycle(CodexLifecycleEvent::TaskComplete),
+                crate::lifecycle::TranscriptEvidence::complete(Some(2_000)),
+            ),
+            (
+                CodexEvent::ResponseItem(CodexResponseItem {
+                    kind: CodexResponseKind::FunctionCall,
+                    role: None,
+                    text: None,
+                    name: Some("request_user_input".into()),
+                    arguments: Some("{}".into()),
+                    call_id: Some("question-1".into()),
+                    output: None,
+                }),
+                crate::lifecycle::TranscriptEvidence::explicit_input(Some(3_000)),
+            ),
+        ];
+
+        for (event, expected) in cases {
+            update_transcript_evidence(&mut session, &event, expected.observed_at_ms);
+            assert_eq!(session.transcript_evidence, Some(expected));
+        }
+    }
+
+    #[test]
+    fn newer_transcript_progress_overrides_hook_stop() {
+        let mut session = session();
+        session.task_state = CodexTaskState::Processing;
+        session.lifecycle_evidence = Some(crate::lifecycle::LifecycleEvidence {
+            projected_status: crate::lifecycle::ProjectedStatus::Idle,
+            status_event: crate::lifecycle::LifecycleEventName::Stop,
+            status_received_at_ms: 1_000,
+            latest_event: crate::lifecycle::LifecycleEventName::Stop,
+            latest_received_at_ms: 1_000,
+        });
+        session.transcript_evidence =
+            Some(crate::lifecycle::TranscriptEvidence::progress(Some(2_000)));
+
+        infer_status_at(&mut session, "assistant", "", false, 3_000);
+
+        assert_eq!(session.status, SessionStatus::Processing);
+        assert!(!session.lifecycle_diagnostic.contributing);
+    }
+
+    #[test]
+    fn finished_status_bypasses_live_evidence() {
+        let mut session = session();
+        session.status = SessionStatus::Finished;
+
+        infer_status_at(&mut session, "user", "tool_use", false, 3_000);
+
+        assert_eq!(session.status, SessionStatus::Finished);
+    }
+
+    #[test]
+    fn expired_hook_falls_through_to_cpu_and_legacy_inference() {
+        let mut session = session();
+        session.task_state = CodexTaskState::Unknown;
+        session.lifecycle_evidence = Some(crate::lifecycle::LifecycleEvidence {
+            projected_status: crate::lifecycle::ProjectedStatus::Idle,
+            status_event: crate::lifecycle::LifecycleEventName::Stop,
+            status_received_at_ms: 1_000,
+            latest_event: crate::lifecycle::LifecycleEventName::Stop,
+            latest_received_at_ms: 1_000,
+        });
+        session.cpu_percent = 6.0;
+
+        infer_status_at(&mut session, "", "", false, 601_000);
+        assert_eq!(session.status, SessionStatus::Processing);
+
+        session.cpu_percent = 0.0;
+        infer_status_at(&mut session, "assistant", "tool_use", false, 601_000);
+        assert_eq!(session.status, SessionStatus::Processing);
     }
 
     #[test]

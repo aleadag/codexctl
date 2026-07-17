@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
+use crate::lifecycle::{LifecycleDiagnostic, LifecycleEvidence, TranscriptEvidence};
 use crate::terminals::Terminal;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -176,6 +177,9 @@ pub struct CodexSession {
     pub last_stop_reason: String,
     pub is_waiting_for_task: bool,
     pub task_state: CodexTaskState,
+    pub transcript_evidence: Option<TranscriptEvidence>,
+    pub lifecycle_evidence: Option<LifecycleEvidence>,
+    pub lifecycle_diagnostic: LifecycleDiagnostic,
     pub explicit_input_required: bool,
     pub approval: ApprovalObservation,
     pub approval_checked_at_ms: u64,
@@ -390,6 +394,9 @@ impl CodexSession {
             last_stop_reason: String::new(),
             is_waiting_for_task: false,
             task_state: CodexTaskState::Unknown,
+            transcript_evidence: None,
+            lifecycle_evidence: None,
+            lifecycle_diagnostic: LifecycleDiagnostic::default(),
             explicit_input_required: false,
             approval: ApprovalObservation::NotChecked,
             approval_checked_at_ms: 0,
