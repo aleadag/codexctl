@@ -18,6 +18,7 @@ With codexctl declared as a flake input, import its Home Manager module and conf
   programs.codex.enable = true;
   programs.codexctl = {
     enable = true;
+    codexHooks.enable = true;
     settings.brain = {
       enabled = true;
       endpoint = "http://localhost:11434/api/generate";
@@ -36,11 +37,38 @@ Apply the configuration with your Home Manager configuration name in place of `<
 home-manager switch --flake .#<profile>
 ```
 
-The module installs its selected package, writes the settings as TOML, and merges a `PermissionRequest` handler into `programs.codex.hooks`. The handler calls the selected codexctl package by its immutable Nix store path rather than relying on `PATH`. Hooks configured by other Home Manager modules remain independent and are preserved.
+The module installs its selected package, writes the settings as TOML, and merges the eight managed lifecycle definitions into `programs.codex.hooks`. Each handler calls the selected codexctl package by its immutable Nix store path rather than relying on `PATH`. Hooks configured by other Home Manager modules remain independent and are preserved.
 
 `programs.codexctl.settings` is visible in the Nix store. Do not put secrets, tokens, credentials, or token-bearing URLs in it.
 
 Changing the codexctl package changes the trusted hook definition. After an upgrade, rebuild Home Manager, restart Codex, and review `/hooks` before trusting the new handlers.
+
+## Codex lifecycle hooks
+
+For a non-Nix installation, install or refresh only the managed hooks with:
+
+```bash
+codexctl init --plugin-only
+```
+
+codexctl merges these definitions into `~/.codex/hooks.json` and preserves unrelated hooks:
+
+| Codex event | Matcher | Handler | Timeout |
+| --- | --- | --- | ---: |
+| `SessionStart` | `startup\|resume\|clear\|compact` | `--lifecycle-hook` | 2s |
+| `UserPromptSubmit` | none | `--lifecycle-hook` | 2s |
+| `PreToolUse` | `*` | `--lifecycle-hook` | 2s |
+| `PermissionRequest` | `*` | `--permission-hook` | 30s |
+| `PostToolUse` | `*` | `--lifecycle-hook` | 2s |
+| `SubagentStart` | `*` | `--lifecycle-hook` | 2s |
+| `SubagentStop` | `*` | `--lifecycle-hook` | 2s |
+| `Stop` | none | `--lifecycle-hook` | 2s |
+
+The lifecycle handlers provide immediate status evidence to the dashboard. They do not copy prompts, commands, tool input, or tool output into lifecycle state, and they cannot approve a tool or send terminal input. `PermissionRequest` contributes status for every tool, but brain allow/deny decisions remain limited to Bash requests.
+
+Lifecycle state is a bounded, reconstructible snapshot at `~/.codexctl/hooks/lifecycle.json`, protected by `~/.codexctl/hooks/lifecycle.lock`. Config remains at `~/.config/codexctl/config.toml`. Removing hooks leaves the snapshot in place; expired evidence is ignored.
+
+Installing a definition does not establish that Codex trusts it. Restart Codex and use `/hooks` to inspect and trust the exact commands after installation, an upgrade, or a Home Manager rebuild.
 
 ## Brain
 

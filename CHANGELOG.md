@@ -2,6 +2,18 @@
 
 All notable changes to codexctl are documented here.
 
+## [Unreleased]
+
+### Added
+
+- Codex lifecycle hooks now provide immediate, bounded dashboard status for session, prompt, tool, permission, subagent, and stop events. Run `codexctl init --plugin-only`, restart Codex, and review the managed commands with `/hooks`.
+- Session JSON and the detail panel now show non-sensitive lifecycle provenance: store health, last event, age, contribution, and any ignored reason.
+
+### Changed
+
+- `codexctl doctor` now reports managed-definition health, unobservable Codex trust, and lifecycle snapshot health as separate checks.
+- Transcript timestamps, process liveness, explicit input, and terminal-confirmed approvals continue to override conflicting hook evidence; lifecycle hooks cannot authorize tools or populate terminal actions.
+
 ## [0.58.0] - 2026-07-15
 
 ### Changed

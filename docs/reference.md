@@ -47,6 +47,7 @@ Hook-facing outcome flags such as `--record-outcome` and `--reap-outcomes` feed 
 
 ```bash
 codexctl init
+codexctl init --plugin-only
 codexctl init --check
 codexctl init --upgrade
 codexctl init --remove
@@ -56,7 +57,26 @@ codexctl completions <shell>
 codexctl man
 ```
 
-`init --upgrade` refreshes hooks and the onboarding marker without touching legacy state. `init --purge` is the explicit destructive path.
+`init --plugin-only` installs or refreshes the eight managed Codex lifecycle definitions without running the rest of the setup wizard. `init --upgrade` refreshes hooks and the onboarding marker without touching legacy state. `init --remove` removes only managed hooks and keeps lifecycle state; `init --purge --yes` is the explicit destructive path.
+
+Hook installation and trust are separate. Restart Codex and review `/hooks` after installing, upgrading, or rebuilding a declarative configuration.
+
+## Lifecycle status output
+
+`--json` includes non-sensitive lifecycle provenance for each session:
+
+```json
+"lifecycle": {
+  "available": true,
+  "store_condition": "healthy",
+  "last_event": "PreToolUse",
+  "age_ms": 125,
+  "contributing": true,
+  "ignored_reason": null
+}
+```
+
+The dashboard detail panel shows the same event, age, and contribution state. Lifecycle observations affect status only: they do not expose prompts, tool input or output, paths, agent ids, approval evidence, or terminal targets.
 
 ## Configuration compatibility
 

@@ -23,6 +23,8 @@ codexctl doctor
 codexctl
 ```
 
+Restart Codex after hook installation and review the managed commands with `/hooks`; installation does not imply that Codex trusts them.
+
 To enable the brain with Ollama:
 
 ```bash

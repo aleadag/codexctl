@@ -1,6 +1,7 @@
 use std::fs;
 use std::io::Write;
 use std::process::{Command, Output, Stdio};
+use std::time::Instant;
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -21,6 +22,21 @@ fn run_hook(home: &std::path::Path, input: &[u8]) -> Output {
         .unwrap();
     child.stdin.take().unwrap().write_all(input).unwrap();
     child.wait_with_output().unwrap()
+}
+
+fn run_cli(home: &std::path::Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_codexctl"))
+        .args(args)
+        .env("HOME", home)
+        .current_dir(home)
+        .output()
+        .unwrap()
+}
+
+fn prompt_payload(index: usize) -> Vec<u8> {
+    let mut payload: serde_json::Value = serde_json::from_slice(PROMPT).unwrap();
+    payload["turn_id"] = serde_json::json!(format!("turn-{index}"));
+    serde_json::to_vec(&payload).unwrap()
 }
 
 #[cfg(unix)]
@@ -134,4 +150,134 @@ fn permission_response_is_stable_across_lifecycle_failure() {
     );
     assert!(!healthy.path().join(".codexctl/.star-prompted").exists());
     assert!(!blocked.path().join(".codexctl/.star-prompted").exists());
+}
+
+#[test]
+#[ignore = "local warm hook latency smoke; not a CI timing gate"]
+#[cfg(unix)]
+fn warm_lifecycle_hook_latency_and_roundtrip() {
+    let home = tempfile::tempdir().unwrap();
+    let hooks_path = home.path().join(".codex/hooks.json");
+    fs::create_dir_all(hooks_path.parent().unwrap()).unwrap();
+    let unrelated = serde_json::json!({
+        "allowedTools": ["Read"],
+        "hooks": {
+            "Stop": [{
+                "hooks": [{
+                    "type": "command",
+                    "command": "echo keep-me",
+                    "timeout": 9
+                }]
+            }]
+        }
+    });
+    fs::write(
+        &hooks_path,
+        format!("{}\n", serde_json::to_string_pretty(&unrelated).unwrap()),
+    )
+    .unwrap();
+
+    let init = run_cli(home.path(), &["init", "--plugin-only"]);
+    assert!(
+        init.status.success(),
+        "{}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+    let installed: serde_json::Value =
+        serde_json::from_slice(&fs::read(&hooks_path).unwrap()).unwrap();
+    let expected = [
+        (
+            "SessionStart",
+            Some("startup|resume|clear|compact"),
+            "--lifecycle-hook",
+            2,
+        ),
+        ("UserPromptSubmit", None, "--lifecycle-hook", 2),
+        ("PreToolUse", Some("*"), "--lifecycle-hook", 2),
+        ("PermissionRequest", Some("*"), "--permission-hook", 30),
+        ("PostToolUse", Some("*"), "--lifecycle-hook", 2),
+        ("SubagentStart", Some("*"), "--lifecycle-hook", 2),
+        ("SubagentStop", Some("*"), "--lifecycle-hook", 2),
+        ("Stop", None, "--lifecycle-hook", 2),
+    ];
+    for (event, matcher, argument, timeout) in expected {
+        let expected_command = format!("codexctl {argument}");
+        let groups = installed["hooks"][event].as_array().unwrap();
+        let (group, handler) = groups
+            .iter()
+            .flat_map(|group| {
+                group["hooks"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(move |handler| (group, handler))
+            })
+            .find(|(_, handler)| handler["command"].as_str() == Some(expected_command.as_str()))
+            .unwrap_or_else(|| panic!("missing managed {event} handler"));
+        assert_eq!(
+            group.get("matcher").and_then(|value| value.as_str()),
+            matcher
+        );
+        assert_eq!(handler["timeout"], timeout);
+    }
+
+    let mut samples = Vec::new();
+    for index in 0..101 {
+        let started = Instant::now();
+        let output = run_hook(home.path(), &prompt_payload(index));
+        assert!(output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(output.stderr.is_empty());
+        if index > 0 {
+            samples.push(started.elapsed());
+        }
+    }
+    samples.sort_unstable();
+    let p50 = samples[samples.len() / 2];
+    let p95 = samples[samples.len() * 95 / 100];
+    eprintln!("warm lifecycle hook latency: p50={p50:?} p95={p95:?}; target <50ms");
+
+    write_brain_config(home.path());
+    let permission = serde_json::json!({
+        "session_id": "session-1",
+        "turn_id": "turn-100",
+        "transcript_path": "/tmp/rollout-1.jsonl",
+        "cwd": "/work/codexctl",
+        "hook_event_name": "PermissionRequest",
+        "tool_name": "Bash",
+        "tool_input": { "command": "cargo test" }
+    });
+    let permission_output = run_permission_hook(
+        home.path(),
+        serde_json::to_string(&permission).unwrap().as_bytes(),
+    );
+    assert!(permission_output.status.success());
+    let response: serde_json::Value = serde_json::from_slice(&permission_output.stdout).unwrap();
+    assert_eq!(
+        response["hookSpecificOutput"]["decision"]["behavior"],
+        "allow"
+    );
+    let store = LifecycleStore::at(home.path().join(".codexctl"));
+    let view = store.read().unwrap();
+    assert_eq!(
+        view.condition,
+        codexctl_core::lifecycle::StoreCondition::Healthy
+    );
+    let state = &view.snapshot.unwrap().sessions["session-1"];
+    assert_eq!(
+        state.latest_event,
+        Some(codexctl_core::lifecycle::LifecycleEventName::PermissionRequest)
+    );
+    assert_eq!(state.projected_status, Some(ProjectedStatus::Processing));
+
+    let remove = run_cli(home.path(), &["init", "--remove"]);
+    assert!(
+        remove.status.success(),
+        "{}",
+        String::from_utf8_lossy(&remove.stderr)
+    );
+    let removed: serde_json::Value =
+        serde_json::from_slice(&fs::read(&hooks_path).unwrap()).unwrap();
+    assert_eq!(removed, unrelated);
+    assert!(store.snapshot_path().exists());
 }

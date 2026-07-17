@@ -14,6 +14,8 @@ The four onboarding phases cover a weekly budget, local brain detection, Codex h
 codexctl init --non-interactive --budget 25 --skip-brain --skip-skills
 ```
 
+Restart Codex after installing or refreshing hooks, then inspect and trust the managed commands with `/hooks`. `codexctl doctor` reports definition health and trust as separate checks because it cannot observe Codex's trust decision.
+
 After upgrading, `codexctl init --upgrade` refreshes hook entries and the onboarding marker. It does not open, migrate, or delete legacy state.
 
 ## Open the dashboard
