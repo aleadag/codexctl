@@ -1,0 +1,83 @@
+use std::io::{BufRead, BufReader};
+use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::time::Duration;
+
+use codexctl_core::brain_activity::{
+    ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityState, ProjectEvidence,
+};
+use codexctl_core::project::ProjectId;
+
+#[test]
+fn headless_emits_activity_without_a_session_roster() {
+    let home = tempfile::tempdir().unwrap();
+    let state = home.path().join("state");
+    let activity_dir = state.join("coding-brain");
+    std::fs::create_dir_all(&activity_dir).unwrap();
+    let event = ActivityEvent {
+        schema_version: ACTIVITY_SCHEMA_VERSION,
+        activity_id: "activity-process-fixture".into(),
+        recorded_at_ms: 1,
+        project: ProjectEvidence {
+            project_id: ProjectId::Stable("project-1".into()),
+            cwd: "/work/project".into(),
+            label: Some("project".into()),
+        },
+        session: None,
+        state: ActivityState::Denied,
+        tool: Some("Bash".into()),
+        normalized_command: Some("cargo test".into()),
+        fingerprint: Some("fixture".into()),
+        rule_id: None,
+        confidence: Some(0.9),
+        threshold: Some(0.8),
+        reasoning: Some("fixture".into()),
+        decision_id: Some("decision-1".into()),
+        outcome: None,
+        correction: None,
+        note: None,
+        supersedes: None,
+    };
+    std::fs::write(
+        activity_dir.join("activity.jsonl"),
+        format!("{}\n", serde_json::to_string(&event).unwrap()),
+    )
+    .unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_codexctl"))
+        .args(["--headless", "--json"])
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path().join("config"))
+        .env("XDG_STATE_HOME", &state)
+        .env("CODEXCTL_SKIP_FIRST_RUN", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let (send, receive) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        let result = BufReader::new(stdout).read_line(&mut line).map(|_| line);
+        let _ = send.send(result);
+    });
+    let line = match receive.recv_timeout(Duration::from_secs(5)) {
+        Ok(result) => result.unwrap(),
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("headless produced no activity within five seconds: {error}");
+        }
+    };
+    child.kill().unwrap();
+    child.wait().unwrap();
+
+    let output: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(output["type"], "activity");
+    assert_eq!(output["activity_id"], "activity-process-fixture");
+    assert_eq!(output["state"], "denied");
+    assert!(output.get("sessions").is_none());
+    assert!(output.get("session").is_none());
+    assert!(output.get("terminal").is_none());
+    assert!(output.get("normalized_command").is_none());
+}

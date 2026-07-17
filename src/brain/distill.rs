@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
@@ -110,7 +110,18 @@ pub fn run_once(paths: &CodingBrainPaths) -> Result<DistillOutcome, DistillError
     let (cursor_decisions, learning_decisions) = read_distillation_decisions();
     finish_locked(
         &lock,
-        run_locked(paths, &cursor_decisions, &learning_decisions, None),
+        run_locked(paths, &cursor_decisions, &learning_decisions, None, false),
+    )
+}
+
+pub fn run_after_outcome_change(paths: &CodingBrainPaths) -> Result<DistillOutcome, DistillError> {
+    let Some(lock) = try_acquire_lock(paths)? else {
+        return Ok(DistillOutcome::AlreadyRunning);
+    };
+    let (cursor_decisions, learning_decisions) = read_distillation_decisions();
+    finish_locked(
+        &lock,
+        run_locked(paths, &cursor_decisions, &learning_decisions, None, true),
     )
 }
 
@@ -132,7 +143,10 @@ fn run_once_with_decisions(
     let Some(lock) = try_acquire_lock(paths)? else {
         return Ok(DistillOutcome::AlreadyRunning);
     };
-    finish_locked(&lock, run_locked(paths, decisions, decisions, fail_stage))
+    finish_locked(
+        &lock,
+        run_locked(paths, decisions, decisions, fail_stage, false),
+    )
 }
 
 #[cfg(test)]
@@ -146,7 +160,22 @@ fn run_once_with_inputs(
     };
     finish_locked(
         &lock,
-        run_locked(paths, cursor_decisions, learning_decisions, None),
+        run_locked(paths, cursor_decisions, learning_decisions, None, false),
+    )
+}
+
+#[cfg(test)]
+fn run_after_outcomes_with_inputs(
+    paths: &CodingBrainPaths,
+    cursor_decisions: &[DecisionRecord],
+    learning_decisions: &[DecisionRecord],
+) -> Result<DistillOutcome, DistillError> {
+    let Some(lock) = try_acquire_lock(paths)? else {
+        return Ok(DistillOutcome::AlreadyRunning);
+    };
+    finish_locked(
+        &lock,
+        run_locked(paths, cursor_decisions, learning_decisions, None, true),
     )
 }
 
@@ -183,6 +212,7 @@ fn run_locked(
     cursor_decisions: &[DecisionRecord],
     learning_decisions: &[DecisionRecord],
     fail_stage: Option<FailStage>,
+    force: bool,
 ) -> Result<DistillOutcome, DistillError> {
     let root = brain_root(paths);
     let previous = read_watermark(paths)?;
@@ -195,18 +225,44 @@ fn run_locked(
         None => 0,
     };
     let pending = cursor_decisions.len().saturating_sub(start);
-    if pending < DISTILL_INTERVAL {
+    let rebuild_existing = force && pending < DISTILL_INTERVAL && previous.generation_id.is_some();
+    if pending < DISTILL_INTERVAL && !rebuild_existing {
         return Ok(DistillOutcome::NotDue { pending });
     }
-    let through_decision_id = cursor_decisions[start..]
+    if cursor_decisions.is_empty() {
+        return Ok(DistillOutcome::NotDue { pending: 0 });
+    }
+    let candidates = if rebuild_existing {
+        &cursor_decisions[..start]
+    } else {
+        &cursor_decisions[start..]
+    };
+    let through_decision_id = candidates
         .iter()
         .rev()
         .find_map(|decision| decision.decision_id.clone())
         .ok_or(DistillError::NoStableDecisionId)?;
 
-    let global = distill_preferences(learning_decisions);
+    let scoped_learning = rebuild_existing.then(|| {
+        let included = cursor_decisions[..start]
+            .iter()
+            .filter_map(|decision| decision.decision_id.clone())
+            .collect::<HashSet<_>>();
+        learning_decisions
+            .iter()
+            .filter(|decision| {
+                decision
+                    .decision_id
+                    .as_ref()
+                    .is_some_and(|id| included.contains(id))
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+    });
+    let generation_decisions = scoped_learning.as_deref().unwrap_or(learning_decisions);
+    let global = distill_preferences(generation_decisions);
     let mut projects = HashMap::<String, Vec<DecisionRecord>>::new();
-    for decision in learning_decisions {
+    for decision in generation_decisions {
         projects
             .entry(decision.project.to_lowercase())
             .or_default()
@@ -228,7 +284,7 @@ fn run_locked(
     sync_directory(&root)?;
     cleanup_generations(paths, &generation_id, previous.generation_id.as_deref());
     Ok(DistillOutcome::Updated {
-        processed: pending,
+        processed: if rebuild_existing { 0 } else { pending },
         generation_id,
     })
 }
@@ -596,6 +652,64 @@ mod tests {
             DistillOutcome::NotDue { pending: 9 }
         );
         assert!(read_watermark(&paths).unwrap().generation_id.is_none());
+    }
+
+    #[test]
+    fn outcome_change_rebuilds_learning_with_no_new_raw_decision() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = paths(&temp);
+        let cursor = decisions(10);
+        run_once_with_decisions(&paths, &cursor, None).unwrap();
+        let previous = read_watermark(&paths).unwrap().generation_id.unwrap();
+        let mut learning = cursor.clone();
+        learning[0].user_action = "reject".into();
+
+        let outcome = run_after_outcomes_with_inputs(&paths, &cursor, &learning).unwrap();
+
+        assert!(matches!(
+            outcome,
+            DistillOutcome::Updated { processed: 0, .. }
+        ));
+        assert_ne!(
+            read_watermark(&paths).unwrap().generation_id.unwrap(),
+            previous
+        );
+    }
+
+    #[test]
+    fn outcome_change_does_not_publish_an_undersized_first_generation() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = paths(&temp);
+        let cursor = decisions(9);
+
+        assert_eq!(
+            run_after_outcomes_with_inputs(&paths, &cursor, &cursor).unwrap(),
+            DistillOutcome::NotDue { pending: 9 }
+        );
+        assert!(read_watermark(&paths).unwrap().generation_id.is_none());
+    }
+
+    #[test]
+    fn outcome_rebuild_does_not_consume_new_subthreshold_decisions() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = paths(&temp);
+        run_once_with_decisions(&paths, &decisions(10), None).unwrap();
+        let cursor = decisions(15);
+
+        let outcome = run_after_outcomes_with_inputs(&paths, &cursor, &cursor).unwrap();
+
+        assert!(matches!(
+            outcome,
+            DistillOutcome::Updated { processed: 0, .. }
+        ));
+        assert_eq!(
+            read_watermark(&paths)
+                .unwrap()
+                .through_decision_id
+                .as_deref(),
+            Some("dec_10")
+        );
+        assert_eq!(load_global(&paths).unwrap().total_decisions, 10);
     }
 
     #[test]

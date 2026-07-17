@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use codexctl_core::brain_activity::{
@@ -6,7 +7,7 @@ use codexctl_core::brain_activity::{
 };
 use codexctl_core::runtime::{
     BrainEffect, BrainGateMode, BrainRuntime, CorrectionInput, EndpointHealth, ReviewItemSummary,
-    ScorecardSummary,
+    ScorecardSummary, SessionNavigation,
 };
 use codexctl_core::theme::Theme;
 use crossterm::event::{KeyCode, KeyEvent};
@@ -108,6 +109,10 @@ impl BrainApp {
         if self.refreshed_at.elapsed() >= REFRESH_INTERVAL {
             self.refresh();
         }
+    }
+
+    pub fn navigation(&self) -> Arc<dyn SessionNavigation> {
+        self.runtime.navigation.clone()
     }
 
     pub fn complete_navigation(&mut self, result: Result<NavigationOutcome, String>) {

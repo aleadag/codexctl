@@ -15,9 +15,10 @@ use codexctl_core::{
 // peripheral modules are imported here so existing `app::App`, `ui::table`,
 // `demo::*`, `recorder::*`, `session_recorder::*` paths in main.rs resolve
 // unchanged.
-use codexctl_tui::{app, demo, recorder, session_recorder, ui};
+use codexctl_tui::{app, demo, session_recorder, ui};
 
 mod brain;
+#[allow(dead_code)]
 mod brain_screen;
 mod commands;
 mod config;
@@ -178,7 +179,7 @@ pub(crate) struct Cli {
     pub(crate) watch: bool,
 
     /// Run headless with brain evaluation and context rot prevention active (no TUI).
-    /// Attach a dashboard with `codexctl` in another terminal.
+    /// Activity remains available to the Brain TUI in another terminal.
     #[arg(long, help_heading = "Output Modes")]
     pub(crate) headless: bool,
 
@@ -489,6 +490,20 @@ pub(crate) struct Cli {
     pub(crate) scope: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RunMode {
+    BrainTui,
+    Headless { json: bool },
+}
+
+fn select_mode(cli: &Cli) -> RunMode {
+    if cli.headless {
+        RunMode::Headless { json: cli.json }
+    } else {
+        RunMode::BrainTui
+    }
+}
+
 fn main() -> io::Result<()> {
     let cli = Cli::parse();
     let is_demo = cli.demo;
@@ -539,7 +554,7 @@ fn is_first_run() -> bool {
     !onboarded && !hooked
 }
 
-/// One-screen banner shown above the empty TUI when the user hasn't
+/// One-screen banner shown above Brain when the user hasn't
 /// onboarded yet (#322). Goes to stderr so it doesn't pollute stdout
 /// piping; appears before the alt-screen swap.
 fn print_first_run_banner() {
@@ -547,11 +562,10 @@ fn print_first_run_banner() {
     eprintln!("┌─────────────────────────────────────────────────────────────────┐");
     eprintln!("│  Welcome to codexctl.                                           │");
     eprintln!("│                                                                 │");
-    eprintln!("│  You haven't onboarded yet — the dashboard will be empty until  │");
-    eprintln!("│  Codex hooks are installed. Quit and run one of:                │");
+    eprintln!("│  Brain activity will be empty until Codex hooks are installed.  │");
+    eprintln!("│  Quit and run:                                                   │");
     eprintln!("│                                                                 │");
-    eprintln!("│    codexctl init        Interactive 4-phase wizard (preferred)  │");
-    eprintln!("│    codexctl --demo      Explore with fake sessions              │");
+    eprintln!("│    codexctl init        Interactive setup wizard                │");
     eprintln!("│                                                                 │");
     eprintln!("│  Silence this with CODEXCTL_SKIP_FIRST_RUN=1.                  │");
     eprintln!("└─────────────────────────────────────────────────────────────────┘");
@@ -930,9 +944,8 @@ fn run_main(cli: Cli) -> io::Result<()> {
         return commands::print_summary(&cli.since);
     }
 
-    if cli.headless {
-        catch_up_distillation();
-        return commands::run_headless(Duration::from_millis(cfg.interval), &cfg, cli.json);
+    if let RunMode::Headless { json } = select_mode(&cli) {
+        return commands::run_headless(Duration::from_millis(cfg.interval), &cfg, json);
     }
 
     if cli.json && !cli.watch {
@@ -953,86 +966,79 @@ fn run_main(cli: Cli) -> io::Result<()> {
     }
 
     catch_up_distillation();
-    let tick_rate = Duration::from_millis(cfg.interval);
     let theme_mode = theme::ThemeMode::detect(cli.theme.as_deref());
     let app_theme = theme::Theme::from_mode(theme_mode);
 
     // #322 — first-run nudge. If the user has neither onboarded nor
     // installed hooks, drop a hint above the TUI before launching so
-    // they understand why the dashboard is going to be empty. Skipped in
+    // they understand why Brain activity is going to be empty. Skipped in
     // --demo (the wizard's whole point is moot there) and when the
     // operator opts out via env.
     if !cli.demo && std::env::var("CODEXCTL_SKIP_FIRST_RUN").is_err() && is_first_run() {
         print_first_run_banner();
     }
 
-    if let Some(ref record_path) = cli.record {
-        // Recording mode: use TeeWriter to capture exact ANSI output
-        let term_size = crossterm::terminal::size().unwrap_or((120, 40));
-        let mut rec = recorder::Recorder::new(record_path, term_size.0, term_size.1)?;
-        let rec_ptr: *mut recorder::Recorder = &mut rec;
+    debug_assert_eq!(select_mode(&cli), RunMode::BrainTui);
+    launch_brain_tui(app_theme, cli.duration.map(Duration::from_secs))
+}
 
-        enable_raw_mode()?;
-        // SAFETY: rec outlives tee_writer and terminal (both dropped before rec)
-        let tee_writer = unsafe { recorder::TeeWriter::new(rec_ptr) };
-        execute!(io::stdout(), EnterAlternateScreen)?;
-        let backend = CrosstermBackend::new(tee_writer);
-        let mut terminal = Terminal::new(backend)?;
+fn launch_brain_tui(theme: theme::Theme, max_duration: Option<Duration>) -> io::Result<()> {
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    if let Err(error) = execute!(stdout, EnterAlternateScreen) {
+        let _ = disable_raw_mode();
+        return Err(error);
+    }
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = match Terminal::new(backend) {
+        Ok(terminal) => terminal,
+        Err(error) => {
+            let _ = disable_raw_mode();
+            let _ = execute!(io::stdout(), LeaveAlternateScreen);
+            return Err(error);
+        }
+    };
+    let app = codexctl_tui::brain_app::BrainApp::new(runtime::build_brain_runtime(), theme);
+    let result = run_brain_tui(&mut terminal, app, max_duration);
+    let raw_result = disable_raw_mode();
+    let screen_result = execute!(terminal.backend_mut(), LeaveAlternateScreen);
+    let cursor_result = terminal.show_cursor();
+    result.and(raw_result).and(screen_result).and(cursor_result)
+}
 
-        let max_dur = cli.duration.map(Duration::from_secs);
+fn run_brain_tui<W: io::Write>(
+    terminal: &mut Terminal<CrosstermBackend<W>>,
+    mut app: codexctl_tui::brain_app::BrainApp,
+    max_duration: Option<Duration>,
+) -> io::Result<()> {
+    use codexctl_core::runtime::BrainEffect;
+    use codexctl_tui::terminal_suspend::{CrosstermTerminalControl, navigate_to_session};
 
-        let result = run_tui(
-            &mut terminal,
-            tick_rate,
-            &cfg,
-            app_theme,
-            hook_registry,
-            cli.demo,
-            &filters,
-            max_dur,
-        );
-
-        disable_raw_mode()?;
-        execute!(io::stdout(), LeaveAlternateScreen)?;
-        terminal.show_cursor()?;
-
-        match rec.finish() {
-            Ok(()) => {
-                eprintln!("Saved to {record_path}");
-            }
-            Err(e) => {
-                // For GIF conversion failures, the error message contains instructions
-                eprintln!("{e}");
+    let started = Instant::now();
+    loop {
+        terminal.draw(|frame| ui::brain::render(frame, &app))?;
+        if max_duration.is_some_and(|duration| started.elapsed() >= duration) {
+            return Ok(());
+        }
+        if event::poll(Duration::from_millis(100))?
+            && let Event::Key(key) = event::read()?
+            && let Some(effect) = app.handle_key(key)
+        {
+            match effect {
+                BrainEffect::Exit => return Ok(()),
+                BrainEffect::SwitchToSession(target) => {
+                    let navigation = app.navigation();
+                    let result = navigate_to_session(
+                        &CrosstermTerminalControl,
+                        navigation.as_ref(),
+                        &target,
+                    );
+                    app.complete_navigation(result);
+                    terminal.clear()?;
+                }
             }
         }
-
-        result
-    } else {
-        // Normal mode: plain stdout
-        enable_raw_mode()?;
-        let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen)?;
-        let backend = CrosstermBackend::new(stdout);
-        let mut terminal = Terminal::new(backend)?;
-
-        let max_dur = cli.duration.map(Duration::from_secs);
-
-        let result = run_tui(
-            &mut terminal,
-            tick_rate,
-            &cfg,
-            app_theme,
-            hook_registry,
-            cli.demo,
-            &filters,
-            max_dur,
-        );
-
-        disable_raw_mode()?;
-        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-        terminal.show_cursor()?;
-
-        result
+        app.refresh_if_due();
     }
 }
 
@@ -1045,7 +1051,7 @@ fn catch_up_distillation() {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(dead_code, clippy::too_many_arguments)]
 fn run_tui<W: io::Write>(
     terminal: &mut Terminal<CrosstermBackend<W>>,
     tick_rate: Duration,
@@ -1233,6 +1239,25 @@ fn run_tui<W: io::Write>(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod default_brain_cli_tests {
+    use super::*;
+
+    #[test]
+    fn no_mode_selects_brain_tui() {
+        let cli = Cli::try_parse_from(["codexctl"]).unwrap();
+
+        assert_eq!(select_mode(&cli), RunMode::BrainTui);
+    }
+
+    #[test]
+    fn headless_is_the_only_continuous_non_tui_mode() {
+        let cli = Cli::try_parse_from(["codexctl", "--headless", "--json"]).unwrap();
+
+        assert_eq!(select_mode(&cli), RunMode::Headless { json: true });
     }
 }
 

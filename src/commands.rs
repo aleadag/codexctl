@@ -862,165 +862,107 @@ pub(crate) fn run_watch(
     }
 }
 
-#[derive(Debug)]
-struct HeadlessEvent {
-    kind: &'static str,
-    data: serde_json::Value,
+fn activity_envelope(event: &codexctl_core::brain_activity::ActivityEvent) -> serde_json::Value {
+    serde_json::json!({
+        "type": "activity",
+        "activity_id": event.activity_id,
+        "recorded_at_ms": event.recorded_at_ms,
+        "state": event.state,
+        "project_id": event.project.project_id,
+        "tool": event.tool,
+        "fingerprint": event.fingerprint,
+        "rule_id": event.rule_id,
+        "confidence": event.confidence,
+        "threshold": event.threshold,
+        "decision_id": event.decision_id,
+        "outcome": event.outcome,
+        "correction": event.correction,
+        "supersedes": event.supersedes,
+    })
 }
 
-fn headless_tick_events(
-    app: &App,
-    previous: &std::collections::HashMap<u32, crate::session::SessionStatus>,
-) -> Vec<HeadlessEvent> {
-    let mut events = app
-        .sessions
-        .iter()
-        .filter(|session| {
-            previous
-                .get(&session.pid)
-                .is_none_or(|old| *old != session.status)
-        })
-        .map(|session| HeadlessEvent {
-            kind: "status_change",
-            data: serde_json::json!({
-                "pid": session.pid,
-                "project": session.display_name(),
-                "old_status": previous.get(&session.pid).map(ToString::to_string),
-                "new_status": session.status.to_string(),
-                "cost_usd": session.cost_usd,
-                "context_pct": session.context_percent(),
-                "decay_score": session.decay_score,
-            }),
-        })
-        .collect::<Vec<_>>();
+#[derive(Default)]
+struct HeadlessActivityCursor {
+    emitted: std::collections::HashSet<(String, usize)>,
+}
 
-    if !app.status_msg.is_empty()
-        && (app.status_msg.starts_with("Brain:") || app.status_msg.starts_with("MAILBOX"))
-    {
-        events.push(HeadlessEvent {
-            kind: "action",
-            data: serde_json::json!({"detail": app.status_msg}),
-        });
+impl HeadlessActivityCursor {
+    fn take_unseen(
+        &mut self,
+        events: &[codexctl_core::brain_activity::ActivityEvent],
+    ) -> Result<Vec<codexctl_core::brain_activity::ActivityEvent>, serde_json::Error> {
+        let mut occurrences = std::collections::HashMap::<String, usize>::new();
+        let mut current = std::collections::HashSet::new();
+        let mut unseen = Vec::new();
+        for event in events {
+            let encoded = serde_json::to_string(event)?;
+            let occurrence = occurrences.entry(encoded.clone()).or_default();
+            *occurrence += 1;
+            let key = (encoded, *occurrence);
+            if !self.emitted.contains(&key) {
+                unseen.push(event.clone());
+            }
+            current.insert(key);
+        }
+        self.emitted = current;
+        Ok(unseen)
     }
-    events
 }
 
-/// Run headless with the same session and brain behavior as the TUI.
+/// Continuously emit normalized activity recorded by the hook/evaluation path.
 pub(crate) fn run_headless(
     tick_rate: Duration,
     cfg: &crate::config::Config,
     json_mode: bool,
 ) -> io::Result<()> {
-    use crate::session::SessionStatus;
-    use std::collections::HashMap;
-
-    let mut app = App::new();
-
-    // Configure the full stack (same as TUI setup in main.rs)
-    app.hooks = crate::config::load_hooks();
-    app.rules = cfg.rules.clone();
-    app.health_thresholds = cfg.health.clone();
-    app.file_conflicts_enabled = cfg.file_conflicts;
-    app.auto_deny_file_conflicts = cfg.auto_deny_file_conflicts;
-    app.brain_config = cfg.brain.clone();
-    app.budget_usd = cfg.budget;
-    app.kill_on_budget = cfg.kill_on_budget;
-    app.notify = cfg.notify;
-    app.context_warn_threshold = cfg.context_warn_threshold;
-    app.daily_limit = cfg.daily_limit;
-    app.weekly_limit = cfg.weekly_limit;
-
-    // Initialize brain engine
-    if let Some(ref brain_cfg) = cfg.brain {
-        if brain_cfg.enabled {
-            if check_brain_endpoint(&brain_cfg.endpoint, brain_cfg.timeout_ms) {
-                let engine = headless_brain_engine(brain_cfg.clone());
-                app.brain_driver = Some(Box::new(crate::runtime::LiveBrainDriver::new(engine)));
-                emit_headless_event(
-                    "startup",
-                    serde_json::json!({
-                        "brain": true,
-                        "endpoint": brain_cfg.endpoint,
-                        "model": brain_cfg.model,
-                        "auto_mode": brain_cfg.auto_mode,
-                    }),
-                    json_mode,
-                );
-            } else {
-                eprintln!(
-                    "Warning: brain endpoint {} not reachable -- running without brain",
-                    brain_cfg.endpoint
-                );
-                emit_headless_event(
-                    "startup",
-                    serde_json::json!({"brain": false, "reason": "endpoint not reachable"}),
-                    json_mode,
-                );
-            }
-        }
-    } else {
-        emit_headless_event(
-            "startup",
-            serde_json::json!({"brain": false, "reason": "not configured"}),
-            json_mode,
-        );
-    }
-
-    emit_headless_event(
-        "startup",
-        serde_json::json!({
-            "rules": app.rules.len(),
-            "sessions": app.sessions.len(),
-            "interval_ms": tick_rate.as_millis(),
-        }),
-        json_mode,
-    );
-
-    let mut prev_statuses: HashMap<u32, SessionStatus> =
-        app.sessions.iter().map(|s| (s.pid, s.status)).collect();
+    let paths = crate::brain::distill::current_paths()?;
+    let activity =
+        crate::brain::activity::ActivityStore::at(paths.state_root().join("activity.jsonl"));
+    let test_runners = cfg
+        .brain
+        .as_ref()
+        .map(|brain| brain.test_runners.clone())
+        .unwrap_or_else(crate::config::default_test_runners);
+    let mut cursor = HeadlessActivityCursor::default();
 
     loop {
-        std::thread::sleep(tick_rate);
-        app.tick();
-
-        for event in headless_tick_events(&app, &prev_statuses) {
-            emit_headless_event(event.kind, event.data, json_mode);
+        let reaped = crate::brain::outcomes::reap_with_runners(&test_runners);
+        let distillation = if reaped.attributed > 0 || reaped.test_failures_attributed > 0 {
+            crate::brain::distill::run_after_outcome_change(&paths)
+        } else {
+            crate::brain::distill::run_once(&paths)
+        };
+        if let Err(error) = distillation {
+            eprintln!("Warning: Coding Brain preference catch-up failed: {error}");
         }
-
-        prev_statuses = app.sessions.iter().map(|s| (s.pid, s.status)).collect();
+        let log = match activity.read() {
+            Ok(log) => log,
+            Err(crate::brain::activity::ActivityStoreError::LockTimeout) => {
+                std::thread::sleep(tick_rate);
+                continue;
+            }
+            Err(error) => return Err(io::Error::other(error)),
+        };
+        for event in cursor.take_unseen(log.events()).map_err(io::Error::other)? {
+            emit_activity(&event, json_mode);
+        }
+        let _ = activity.compact_if_needed();
+        std::thread::sleep(tick_rate);
     }
 }
 
-fn headless_brain_engine(config: crate::config::BrainConfig) -> crate::brain::engine::BrainEngine {
-    let mut engine = crate::brain::engine::BrainEngine::new(config);
-    engine.set_terminal_fallback_blocker(|cwd| {
-        crate::init::hooks::discover_permission_hooks(cwd).blocks_terminal_fallback()
-    });
-    engine
-}
-
-fn emit_headless_event(event: &str, data: serde_json::Value, json_mode: bool) {
-    let ts = crate::logger::timestamp_now();
+fn emit_activity(event: &codexctl_core::brain_activity::ActivityEvent, json_mode: bool) {
+    let envelope = activity_envelope(event);
     if json_mode {
-        let obj = serde_json::json!({"ts": ts, "event": event, "data": data});
-        println!("{}", serde_json::to_string(&obj).unwrap_or_default());
+        println!("{}", serde_json::to_string(&envelope).unwrap_or_default());
     } else {
-        // Compact human-readable format
-        let detail = if let Some(obj) = data.as_object() {
-            obj.iter()
-                .map(|(k, v)| {
-                    let val = match v {
-                        serde_json::Value::String(s) => s.clone(),
-                        other => other.to_string(),
-                    };
-                    format!("{k}={val}")
-                })
-                .collect::<Vec<_>>()
-                .join(" ")
-        } else {
-            data.to_string()
-        };
-        println!("[{ts}] {event}: {detail}");
+        println!(
+            "[{}] activity={} state={:?} project={:?}",
+            crate::logger::timestamp_now(),
+            event.activity_id,
+            event.state,
+            event.project.project_id
+        );
     }
 }
 
@@ -1482,61 +1424,70 @@ mod headless_tests {
     use super::*;
 
     #[test]
-    fn headless_tick_emits_brain_state_without_coordination_events() {
-        let mut app = App::new();
-        app.status_msg = "Brain: approved Bash".into();
-        let events = headless_tick_events(&app, &std::collections::HashMap::new());
+    fn headless_json_is_normalized_activity_not_a_session_roster() {
+        let envelope = activity_envelope(&event("activity-1", 1));
 
-        assert!(events.iter().any(|event| event.kind == "action"));
-        assert!(events.iter().all(|event| {
-            !matches!(
-                event.kind,
-                "supervisor_tick" | "coord_summary" | "loop_outcome"
-            )
-        }));
+        assert_eq!(envelope["type"], "activity");
+        assert_eq!(envelope["activity_id"], "activity-1");
+        assert_eq!(envelope["state"], "denied");
+        assert_eq!(envelope["project_id"]["kind"], "stable");
+        assert!(envelope.get("sessions").is_none());
+        assert!(envelope.get("session").is_none());
     }
 
     #[test]
-    fn headless_engine_resolves_managed_hooks_for_the_session_project() {
-        let _guard = crate::config::HOME_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let home = tempfile::tempdir().unwrap();
-        let project = tempfile::tempdir().unwrap();
-        let clean_project = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(project.path().join(".codex")).unwrap();
-        std::fs::create_dir_all(project.path().join(".git")).unwrap();
-        std::fs::create_dir_all(clean_project.path().join(".git")).unwrap();
-        std::fs::write(
-            project.path().join(".codex/hooks.json"),
-            r#"{"hooks":{"PermissionRequest":[{"matcher":"Bash","hooks":[{"type":"command","command":"codexctl --permission-hook"}]}]}}"#,
-        )
-        .unwrap();
-        let original_home = std::env::var_os("HOME");
-        // SAFETY: HOME reads in config-sensitive tests are serialized by HOME_ENV_LOCK.
-        unsafe { std::env::set_var("HOME", home.path()) };
-        let engine = headless_brain_engine(crate::config::BrainConfig::default());
-        let hooked_session = crate::session::CodexSession::from_raw(crate::session::RawSession {
-            pid: 1,
-            session_id: "session-1".into(),
-            cwd: project.path().display().to_string(),
-            started_at: 0,
-        });
-        let clean_session = crate::session::CodexSession::from_raw(crate::session::RawSession {
-            pid: 2,
-            session_id: "session-2".into(),
-            cwd: clean_project.path().display().to_string(),
-            started_at: 0,
-        });
+    fn headless_cursor_survives_compaction_rewrites_without_replay_or_skip() {
+        let mut cursor = HeadlessActivityCursor::default();
+        let first = event("first", 1);
+        let retained = event("retained", 2);
+        let added = event("added", 3);
 
-        assert!(engine.terminal_fallback_blocked_for(&hooked_session));
-        assert!(!engine.terminal_fallback_blocked_for(&clean_session));
-        // SAFETY: restore HOME before releasing HOME_ENV_LOCK.
-        unsafe {
-            match original_home {
-                Some(home) => std::env::set_var("HOME", home),
-                None => std::env::remove_var("HOME"),
-            }
+        assert_eq!(
+            cursor
+                .take_unseen(&[first, retained.clone()])
+                .unwrap()
+                .len(),
+            2
+        );
+        let after_same_length_rewrite = cursor
+            .take_unseen(&[retained.clone(), added.clone()])
+            .unwrap();
+        assert_eq!(after_same_length_rewrite, vec![added.clone()]);
+        assert!(cursor.take_unseen(&[added]).unwrap().is_empty());
+    }
+
+    fn event(
+        activity_id: &str,
+        recorded_at_ms: u64,
+    ) -> codexctl_core::brain_activity::ActivityEvent {
+        use codexctl_core::brain_activity::{
+            ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityState, ProjectEvidence,
+        };
+        use codexctl_core::project::ProjectId;
+
+        ActivityEvent {
+            schema_version: ACTIVITY_SCHEMA_VERSION,
+            activity_id: activity_id.into(),
+            recorded_at_ms,
+            project: ProjectEvidence {
+                project_id: ProjectId::Stable("project-1".into()),
+                cwd: "/work/project".into(),
+                label: Some("project".into()),
+            },
+            session: None,
+            state: ActivityState::Denied,
+            tool: Some("Bash".into()),
+            normalized_command: Some("cargo test".into()),
+            fingerprint: Some("fixture".into()),
+            rule_id: None,
+            confidence: Some(0.9),
+            threshold: Some(0.8),
+            reasoning: Some("fixture".into()),
+            decision_id: Some("decision-1".into()),
+            outcome: None,
+            correction: None,
+            note: None,
+            supersedes: None,
         }
     }
 }
