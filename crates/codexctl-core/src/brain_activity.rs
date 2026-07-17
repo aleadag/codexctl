@@ -22,6 +22,10 @@ pub struct ProjectEvidence {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionTarget {
     pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_use_id: Option<String>,
     pub project_id: ProjectId,
     #[serde(with = "path_serde")]
     pub cwd: PathBuf,
@@ -121,6 +125,11 @@ impl ActivityEvent {
         self.project.label = self.project.label.map(|value| bounded(&value, true));
         if let Some(session) = &mut self.session {
             session.session_id = bounded(&session.session_id, false);
+            session.turn_id = session.turn_id.take().map(|value| bounded(&value, false));
+            session.tool_use_id = session
+                .tool_use_id
+                .take()
+                .map(|value| bounded(&value, false));
             normalize_project_id(&mut session.project_id);
             session.provider_hints.truncate(MAX_PROVIDER_HINTS);
             session.provider_hints = session
@@ -160,7 +169,7 @@ fn normalize_project_id(project_id: &mut ProjectId) {
 
 fn bounded(value: &str, redact: bool) -> String {
     let value = if redact {
-        redact_secret_shaped_values(value)
+        redact_activity_text(value)
     } else {
         value.to_owned()
     };
@@ -174,7 +183,7 @@ fn bounded(value: &str, redact: bool) -> String {
     value[..end].to_owned()
 }
 
-fn redact_secret_shaped_values(value: &str) -> String {
+pub fn redact_activity_text(value: &str) -> String {
     let mut redact_next = false;
     value
         .split_whitespace()
@@ -472,6 +481,8 @@ mod tests {
         activity.project.cwd = PathBuf::from(format!("/{}", "c".repeat(5_000)));
         activity.session = Some(SessionTarget {
             session_id: "s".repeat(5_000),
+            turn_id: Some("t".repeat(5_000)),
+            tool_use_id: Some("u".repeat(5_000)),
             project_id: ProjectId::Temporary("q".repeat(5_000)),
             cwd: PathBuf::from(format!("/{}", "d".repeat(5_000))),
             provider_hints: (0..100).map(|index| format!("hint-{index}")).collect(),
@@ -525,6 +536,8 @@ mod tests {
         activity.project.cwd = opaque.clone();
         activity.session = Some(SessionTarget {
             session_id: "session".into(),
+            turn_id: Some("turn".into()),
+            tool_use_id: Some("tool-use".into()),
             project_id: ProjectId::Temporary("project".into()),
             cwd: opaque.clone(),
             provider_hints: Vec::new(),

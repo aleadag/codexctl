@@ -2,6 +2,8 @@
 
 use serde_json::Value;
 
+use codexctl_core::brain_activity::redact_activity_text;
+
 use super::client::{self, BrainSuggestion};
 use super::decisions::{
     DecisionType, adaptive_threshold, format_few_shot_examples, format_preference_summary,
@@ -9,6 +11,8 @@ use super::decisions::{
 };
 use super::diff_digest::DiffDigest;
 use crate::config::BrainConfig;
+
+const MAX_DYNAMIC_PROMPT_BYTES: usize = 48 * 1024;
 
 #[derive(Debug, Clone)]
 pub(crate) struct BrainDecisionRequest {
@@ -96,14 +100,14 @@ where
             format_few_shot_examples(&similar)
         )
     };
+    let dynamic_context = redact_activity_text(&format!(
+        "## Session\n{session_summary}{diff_section}{pref_section}{few_shot_section}\n\
+         \n## Decision subject\nThe session wants to run [{tool_display}]."
+    ));
+    let dynamic_context = truncate_utf8(&dynamic_context, MAX_DYNAMIC_PROMPT_BYTES);
     let prompt = format!(
-        "You are a session supervisor deciding whether to approve or deny a tool call.\n\
-         \n## Session\n{session_summary}\
-         {diff_section}\
-         {pref_section}\
-         {few_shot_section}\n\
-         \n## Decision\n\
-         The session wants to run [{tool_display}]. \
+        "You are a session supervisor deciding whether to approve or deny a tool call.\n\n\
+         {dynamic_context}\n\n\
          Weigh the proposed change against the learned preferences and past \
          decisions. Be more cautious when sensitive paths or risky tokens are \
          present. Respond with JSON: {{\"action\": \"approve\"|\"deny\", \
@@ -135,6 +139,17 @@ where
             diff_digest: None,
         },
     }
+}
+
+fn truncate_utf8(value: &str, limit: usize) -> &str {
+    if value.len() <= limit {
+        return value;
+    }
+    let mut end = limit;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    &value[..end]
 }
 
 #[cfg(test)]
@@ -215,6 +230,24 @@ mod tests {
         assert_eq!(decision.source, "error");
         assert_eq!(decision.threshold, None);
         assert_eq!(decision.below_threshold, None);
+    }
+
+    #[test]
+    fn model_context_is_redacted_and_bounded() {
+        let mut request = request();
+        request.tool_input = format!("TOKEN=private-value {}", "x".repeat(80 * 1024));
+
+        let decision = evaluate_with(&request, &BrainConfig::default(), "on", |_, prompt| {
+            assert!(!prompt.contains("private-value"));
+            assert!(
+                prompt.len() <= 50 * 1024,
+                "prompt was {} bytes",
+                prompt.len()
+            );
+            Ok(suggestion(RuleAction::Approve, 0.9))
+        });
+
+        assert_eq!(decision.action, "approve");
     }
 
     #[test]

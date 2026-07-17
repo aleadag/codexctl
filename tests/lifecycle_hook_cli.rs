@@ -11,6 +11,12 @@ use codexctl_core::lifecycle::{LifecycleStore, ProjectedStatus};
 const PROMPT: &[u8] = include_bytes!("fixtures/hooks/user-prompt-submit.json");
 
 fn run_hook(home: &std::path::Path, input: &[u8]) -> Output {
+    let normalized_input = serde_json::from_slice::<serde_json::Value>(input)
+        .map(|mut value| {
+            value["cwd"] = serde_json::json!(home);
+            serde_json::to_vec(&value).unwrap()
+        })
+        .unwrap_or_else(|_| input.to_vec());
     let mut child = Command::new(env!("CARGO_BIN_EXE_codexctl"))
         .arg("--lifecycle-hook")
         .env("HOME", home)
@@ -20,7 +26,12 @@ fn run_hook(home: &std::path::Path, input: &[u8]) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    child.stdin.take().unwrap().write_all(input).unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(&normalized_input)
+        .unwrap();
     child.wait_with_output().unwrap()
 }
 
@@ -114,25 +125,29 @@ fn lifecycle_hook_binary_fails_open_with_empty_stdout() {
 #[test]
 #[cfg(unix)]
 fn permission_response_is_stable_across_lifecycle_failure() {
-    let request = serde_json::json!({
-        "session_id": "session-1",
-        "turn_id": "turn-1",
-        "transcript_path": "/tmp/rollout-1.jsonl",
-        "cwd": "/work/codexctl",
-        "hook_event_name": "PermissionRequest",
-        "tool_name": "Bash",
-        "tool_input": { "command": "cargo test" }
-    })
-    .to_string();
+    let request = |cwd: &std::path::Path| {
+        serde_json::json!({
+            "session_id": "session-1",
+            "turn_id": "turn-1",
+            "transcript_path": "/tmp/rollout-1.jsonl",
+            "cwd": cwd,
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Bash",
+            "tool_input": { "command": "cargo test" }
+        })
+        .to_string()
+    };
     let healthy = tempfile::tempdir().unwrap();
     write_brain_config(healthy.path());
-    let healthy_output = run_permission_hook(healthy.path(), request.as_bytes());
+    let healthy_request = request(healthy.path());
+    let healthy_output = run_permission_hook(healthy.path(), healthy_request.as_bytes());
 
     let blocked = tempfile::tempdir().unwrap();
     write_brain_config(blocked.path());
     fs::create_dir_all(blocked.path().join(".codexctl")).unwrap();
     fs::write(blocked.path().join(".codexctl/hooks"), b"occupied").unwrap();
-    let blocked_output = run_permission_hook(blocked.path(), request.as_bytes());
+    let blocked_request = request(blocked.path());
+    let blocked_output = run_permission_hook(blocked.path(), blocked_request.as_bytes());
 
     assert!(healthy_output.status.success());
     assert!(blocked_output.status.success());

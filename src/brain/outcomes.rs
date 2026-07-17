@@ -11,11 +11,18 @@
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
+use codexctl_core::brain_activity::{
+    ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityOutcome, ActivityState, ProjectEvidence,
+};
+use codexctl_core::paths::{CodingBrainPaths, PathEnvironment};
+use codexctl_core::project::ProjectId;
+
+use super::activity::ActivityStore;
 use super::decisions::{DecisionRecord, decisions_dir, read_all_decisions};
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -539,7 +546,7 @@ pub fn reap() -> ReapStats {
 
 /// `reap()` with explicit test-runner patterns. Exposed for tests so they
 /// don't depend on a Config layered TOML load.
-pub fn reap_with_runners(test_runners: &[String]) -> ReapStats {
+pub fn reap_with_runners(_test_runners: &[String]) -> ReapStats {
     let mut stats = ReapStats::default();
     let pending = list_pending();
     if pending.is_empty() {
@@ -552,10 +559,8 @@ pub fn reap_with_runners(test_runners: &[String]) -> ReapStats {
     let decisions = read_all_decisions();
     let resolved = load_resolved_map();
     let now = epoch_secs();
+    let activity = current_activity_store();
 
-    // #238: fan failing test runs out to recent brain-approved edits before
-    // we mutate the pending list. Idempotent — re-running is safe.
-    stats.test_failures_attributed = fanout_test_failures(&pending, &decisions, test_runners);
     // Track decisions claimed within this reap pass so a single decision
     // doesn't get attributed to two pending outcomes when we run before
     // the resolved map is reloaded.
@@ -564,49 +569,52 @@ pub fn reap_with_runners(test_runners: &[String]) -> ReapStats {
     for (path, p) in pending {
         stats.scanned += 1;
 
-        // Try attribution
-        let p_cmd_norm = p.command.as_deref().map(normalize_command);
-        let mut best: Option<(usize, u64)> = None; // (index, ts) — pick most recent
-
-        for (i, d) in decisions.iter().enumerate() {
-            let Some(decision_id) = d.decision_id.as_deref() else {
-                continue;
-            };
-            if resolved.contains_key(decision_id) || claimed.contains(decision_id) {
-                continue;
-            }
-            let Some(d_tool) = d.tool.as_deref() else {
-                continue;
-            };
-            if d_tool != p.tool {
-                continue;
-            }
-            if !d.project.eq_ignore_ascii_case(&p.project) {
-                continue;
-            }
-            // Command match (only enforced if both sides present)
-            if let (Some(pc), Some(dc)) = (&p_cmd_norm, &d.command) {
-                if normalize_command(dc) != *pc {
+        let strict_decision_id = match activity.as_ref() {
+            Some(activity) => match append_activity_outcome(activity, &p) {
+                Ok(Some(decision_id)) => decision_id,
+                Ok(None) => {
+                    if now.saturating_sub(p.ts) > ORPHAN_AFTER_SECS {
+                        let dest = orphaned_dir().join(
+                            path.file_name()
+                                .map(|name| name.to_owned())
+                                .unwrap_or_else(|| std::ffi::OsString::from("orphan.json")),
+                        );
+                        if fs::rename(&path, &dest).is_ok() {
+                            stats.orphaned += 1;
+                        } else {
+                            stats.errors += 1;
+                        }
+                    } else {
+                        stats.still_pending += 1;
+                    }
                     continue;
                 }
-            }
-            let Some(d_ts) = parse_ts(&d.timestamp) else {
+                Err(_) => {
+                    stats.errors += 1;
+                    continue;
+                }
+            },
+            None => {
+                stats.errors += 1;
                 continue;
-            };
-            if d_ts > p.ts {
-                continue; // decision must precede outcome
             }
-            if p.ts.saturating_sub(d_ts) > ATTRIBUTION_WINDOW_SECS {
-                continue;
+        };
+
+        if resolved.contains_key(&strict_decision_id) {
+            if fs::remove_file(&path).is_ok() {
+                stats.attributed += 1;
+            } else {
+                stats.errors += 1;
             }
-            match best {
-                None => best = Some((i, d_ts)),
-                Some((_, prev_ts)) if d_ts > prev_ts => best = Some((i, d_ts)),
-                _ => {}
-            }
+            continue;
         }
 
-        if let Some((idx, _)) = best {
+        let best = decisions.iter().position(|decision| {
+            decision.decision_id.as_deref() == Some(strict_decision_id.as_str())
+                && !claimed.contains(&strict_decision_id)
+        });
+
+        if let Some(idx) = best {
             let d = &decisions[idx];
             let decision_id = d.decision_id.clone().unwrap();
             let resolved = ResolvedOutcome {
@@ -646,6 +654,130 @@ pub fn reap_with_runners(test_runners: &[String]) -> ReapStats {
     }
 
     stats
+}
+
+fn current_activity_store() -> Option<ActivityStore> {
+    let environment = PathEnvironment::new(
+        std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+        std::env::var_os("XDG_STATE_HOME").map(PathBuf::from),
+        std::env::var_os("HOME").map(PathBuf::from),
+    );
+    let paths = CodingBrainPaths::resolve(&environment).ok()?;
+    let path = paths.state_root().join("activity.jsonl");
+    Some(ActivityStore::at(path))
+}
+
+fn append_activity_outcome(
+    activity: &ActivityStore,
+    pending: &PendingOutcome,
+) -> Result<Option<String>, String> {
+    let log = activity.read().map_err(|error| error.to_string())?;
+    let matched = pending.session_id.as_deref().and_then(|session_id| {
+        let tool_use_id = pending.tool_use_id.as_deref()?;
+        log.events().iter().rev().find(|event| {
+            event.state.is_terminal()
+                && event.session.as_ref().is_some_and(|session| {
+                    session.session_id == session_id
+                        && session.tool_use_id.as_deref() == Some(tool_use_id)
+                })
+        })
+    });
+    let Some(matched) = matched else {
+        append_orphan_activity(
+            activity,
+            pending,
+            "orphan outcome: stable hook IDs did not match",
+        )?;
+        return Ok(None);
+    };
+    let decision_id = matched
+        .decision_id
+        .clone()
+        .ok_or_else(|| "matched activity has no decision ID".to_string())?;
+    if log.events().iter().any(|event| {
+        event.activity_id == matched.activity_id
+            && event.state == ActivityState::Outcome
+            && event.decision_id.as_deref() == Some(&decision_id)
+    }) {
+        return Ok(Some(decision_id));
+    }
+    activity
+        .append(ActivityEvent {
+            schema_version: ACTIVITY_SCHEMA_VERSION,
+            activity_id: matched.activity_id.clone(),
+            recorded_at_ms: pending.ts.saturating_mul(1_000),
+            project: matched.project.clone(),
+            session: matched.session.clone(),
+            state: ActivityState::Outcome,
+            tool: matched.tool.clone(),
+            normalized_command: None,
+            fingerprint: None,
+            rule_id: None,
+            confidence: None,
+            threshold: None,
+            reasoning: None,
+            decision_id: Some(decision_id.clone()),
+            outcome: Some(if pending.exit_code == Some(0) {
+                ActivityOutcome::Succeeded
+            } else if pending.exit_code.is_some() || pending.stderr_tail.is_some() {
+                ActivityOutcome::Failed
+            } else {
+                ActivityOutcome::Succeeded
+            }),
+            correction: None,
+            note: None,
+            supersedes: None,
+        })
+        .map_err(|error| error.to_string())?;
+    Ok(Some(decision_id))
+}
+
+fn append_orphan_activity(
+    activity: &ActivityStore,
+    pending: &PendingOutcome,
+    diagnostic: &str,
+) -> Result<(), String> {
+    let activity_id = format!(
+        "orphan_outcome_{}_{}_{}",
+        pending.ts,
+        pending.session_id.as_deref().unwrap_or("missing-session"),
+        pending.tool_use_id.as_deref().unwrap_or("missing-tool-use")
+    );
+    if activity
+        .read()
+        .map_err(|error| error.to_string())?
+        .events()
+        .iter()
+        .any(|event| event.activity_id == activity_id)
+    {
+        return Ok(());
+    }
+    activity
+        .append(ActivityEvent {
+            schema_version: ACTIVITY_SCHEMA_VERSION,
+            activity_id,
+            recorded_at_ms: pending.ts.saturating_mul(1_000),
+            project: ProjectEvidence {
+                project_id: ProjectId::Temporary("orphan-outcome".into()),
+                cwd: std::env::current_dir().unwrap_or_else(|_| Path::new("/").to_path_buf()),
+                label: None,
+            },
+            session: None,
+            state: ActivityState::Error,
+            tool: Some(pending.tool.clone()),
+            normalized_command: None,
+            fingerprint: None,
+            rule_id: None,
+            confidence: None,
+            threshold: None,
+            reasoning: Some(diagnostic.into()),
+            decision_id: None,
+            outcome: None,
+            correction: None,
+            note: None,
+            supersedes: None,
+        })
+        .map_err(|error| error.to_string())
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -806,6 +938,66 @@ mod tests {
         assert_eq!(p.tool, "Bash");
         assert!(p.command.is_none());
         assert!(p.exit_code.is_none());
+    }
+
+    #[test]
+    fn stable_hook_ids_append_outcome_without_copying_command() {
+        let temp = tempfile::tempdir().unwrap();
+        let activity = ActivityStore::at(temp.path().join("activity.jsonl"));
+        let project_id = ProjectId::Temporary("project".into());
+        activity
+            .append(ActivityEvent {
+                schema_version: ACTIVITY_SCHEMA_VERSION,
+                activity_id: "activity-1".into(),
+                recorded_at_ms: 1,
+                project: ProjectEvidence {
+                    project_id: project_id.clone(),
+                    cwd: temp.path().to_path_buf(),
+                    label: None,
+                },
+                session: Some(codexctl_core::brain_activity::SessionTarget {
+                    session_id: "session-1".into(),
+                    turn_id: Some("turn-1".into()),
+                    tool_use_id: Some("call-1".into()),
+                    project_id,
+                    cwd: temp.path().to_path_buf(),
+                    provider_hints: Vec::new(),
+                }),
+                state: ActivityState::Allowed,
+                tool: Some("Bash".into()),
+                normalized_command: Some("cargo test".into()),
+                fingerprint: None,
+                rule_id: None,
+                confidence: None,
+                threshold: None,
+                reasoning: None,
+                decision_id: Some("decision-1".into()),
+                outcome: None,
+                correction: None,
+                note: None,
+                supersedes: None,
+            })
+            .unwrap();
+        let pending = PendingOutcome {
+            tool: "Bash".into(),
+            command: Some("cargo test".into()),
+            project: "wrong-project-name-must-not-matter".into(),
+            session_id: Some("session-1".into()),
+            tool_use_id: Some("call-1".into()),
+            exit_code: Some(0),
+            duration_ms: None,
+            stderr_tail: None,
+            ts: 2,
+        };
+
+        assert_eq!(
+            append_activity_outcome(&activity, &pending).unwrap(),
+            Some("decision-1".into())
+        );
+        let events = activity.read().unwrap().events().to_vec();
+        assert_eq!(events[1].state, ActivityState::Outcome);
+        assert_eq!(events[1].outcome, Some(ActivityOutcome::Succeeded));
+        assert!(events[1].normalized_command.is_none());
     }
 
     #[test]

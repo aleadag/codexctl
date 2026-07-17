@@ -2,7 +2,7 @@
 
 use std::fs;
 
-use super::decisions::{DecisionRecord, decisions_dir, project_slug, read_all_decisions};
+use super::decisions::{DecisionRecord, decisions_dir, project_slug, read_learning_decisions};
 use super::preferences::{
     DistilledPreferences, PreferenceCondition, PreferencePattern, TemporalPattern, ToolAccuracy,
     distill_preferences,
@@ -200,7 +200,7 @@ pub fn load_preferences_for_project(project: &str) -> Option<DistilledPreference
     }
 
     // Try distilling on-the-fly from project-specific decisions
-    let all = read_all_decisions();
+    let all = read_learning_decisions();
     let project_decisions: Vec<DecisionRecord> = all
         .into_iter()
         .filter(|d| d.project.to_lowercase() == project.to_lowercase())

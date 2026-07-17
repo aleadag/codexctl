@@ -3,27 +3,39 @@
 use std::fmt;
 use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use codexctl_core::brain_activity::{
+    ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityState, MAX_ACTIVITY_FIELD_BYTES,
+    ProjectEvidence, SessionTarget, redact_activity_text,
+};
 use codexctl_core::lifecycle::{
     LifecycleEvent, LifecycleIdentity, LifecycleStore, PermissionDisposition,
     compatibility_state_root,
 };
+use codexctl_core::paths::{CodingBrainPaths, PathEnvironment};
+use codexctl_core::project::ProjectIdentity;
 
+use super::activity::ActivityStore;
 use super::client::BrainSuggestion;
-use super::decisions::{HookDecisionAudit, log_hook_decision};
+use super::decisions::{HookDecisionAudit, append_deterministic, append_hook_proposal};
 use super::query::{self, BrainDecision, BrainDecisionRequest};
+use super::safety::SafetyDeny;
 use crate::config::BrainConfig;
 use crate::lifecycle_hook::read_bounded_hook_input;
 
 const HOOK_INFERENCE_TIMEOUT_MS: u64 = 25_000;
+static ACTIVITY_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Debug, Deserialize)]
 struct PermissionRequestInput {
     session_id: String,
     turn_id: Option<String>,
+    tool_use_id: Option<String>,
     transcript_path: Option<PathBuf>,
     cwd: String,
     hook_event_name: String,
@@ -37,6 +49,7 @@ struct PermissionRequest {
     project: String,
     tool_name: String,
     command: Option<String>,
+    tool_use_id: Option<String>,
 }
 
 #[derive(Debug)]
@@ -71,10 +84,208 @@ impl PermissionBehavior {
 }
 
 #[derive(Debug)]
-struct HookDecision {
-    request: PermissionRequest,
-    brain: BrainDecision,
-    behavior: PermissionBehavior,
+pub(crate) enum HookEvaluation {
+    Allow {
+        brain: BrainDecision,
+        terminal_state: ActivityState,
+    },
+    Deny {
+        brain: Option<BrainDecision>,
+        deterministic: bool,
+        safety: Option<SafetyDeny>,
+        terminal_state: ActivityState,
+    },
+    Abstain {
+        brain: Option<BrainDecision>,
+        reason: String,
+        terminal_state: ActivityState,
+    },
+}
+
+#[derive(Debug, Clone)]
+struct HookActivity {
+    activity_id: String,
+    project: ProjectEvidence,
+    session: SessionTarget,
+    tool: String,
+    command: Option<String>,
+}
+
+impl HookActivity {
+    fn from_request(
+        request: &PermissionRequest,
+        paths: &CodingBrainPaths,
+    ) -> Result<Self, HookDiagnostic> {
+        let identity = ProjectIdentity::load(request.lifecycle.cwd(), paths).map_err(|error| {
+            HookDiagnostic::new(format!("could not resolve project identity: {error}"))
+        })?;
+        let project = ProjectEvidence {
+            project_id: identity.id().clone(),
+            cwd: request.lifecycle.cwd().to_path_buf(),
+            label: Some(request.project.clone()),
+        };
+        let session = SessionTarget {
+            session_id: request.lifecycle.session_id().to_string(),
+            turn_id: request.lifecycle.turn_id().map(str::to_string),
+            tool_use_id: request.tool_use_id.clone(),
+            project_id: identity.id().clone(),
+            cwd: request.lifecycle.cwd().to_path_buf(),
+            provider_hints: Vec::new(),
+        };
+        Ok(Self {
+            activity_id: gen_activity_id(),
+            project,
+            session,
+            tool: request.tool_name.clone(),
+            command: request.command.as_deref().map(bounded_redacted),
+        })
+    }
+
+    fn event(&self, state: ActivityState) -> ActivityEvent {
+        ActivityEvent {
+            schema_version: ACTIVITY_SCHEMA_VERSION,
+            activity_id: self.activity_id.clone(),
+            recorded_at_ms: epoch_ms(),
+            project: self.project.clone(),
+            session: Some(self.session.clone()),
+            state,
+            tool: Some(self.tool.clone()),
+            normalized_command: self.command.clone(),
+            fingerprint: None,
+            rule_id: None,
+            confidence: None,
+            threshold: None,
+            reasoning: None,
+            decision_id: None,
+            outcome: None,
+            correction: None,
+            note: None,
+            supersedes: None,
+        }
+    }
+}
+
+fn gen_activity_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let sequence = ACTIVITY_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("activity_{nanos}_{}_{sequence}", std::process::id())
+}
+
+fn epoch_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
+
+fn bounded_redacted(value: &str) -> String {
+    let value = redact_activity_text(value);
+    if value.len() <= MAX_ACTIVITY_FIELD_BYTES {
+        return value;
+    }
+    let mut end = MAX_ACTIVITY_FIELD_BYTES;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    value[..end].to_string()
+}
+
+fn current_paths() -> Result<CodingBrainPaths, HookDiagnostic> {
+    let environment = PathEnvironment::new(
+        std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+        std::env::var_os("XDG_STATE_HOME").map(PathBuf::from),
+        std::env::var_os("HOME").map(PathBuf::from),
+    );
+    CodingBrainPaths::resolve(&environment).map_err(|error| {
+        HookDiagnostic::new(format!("could not resolve Coding Brain paths: {error:?}"))
+    })
+}
+
+pub(crate) fn evaluate_request<F>(
+    request: &BrainDecisionRequest,
+    config: Option<&BrainConfig>,
+    gate_mode: &str,
+    persistence_ready: bool,
+    supported: bool,
+    infer: F,
+) -> HookEvaluation
+where
+    F: FnOnce(&BrainConfig, &str) -> Result<BrainSuggestion, String>,
+{
+    if let Some(safety) = super::safety::evaluate(request) {
+        return HookEvaluation::Deny {
+            brain: None,
+            deterministic: true,
+            safety: Some(safety),
+            terminal_state: ActivityState::Denied,
+        };
+    }
+    if !persistence_ready {
+        return HookEvaluation::Abstain {
+            brain: None,
+            reason: "initial activity persistence failed".into(),
+            terminal_state: ActivityState::Error,
+        };
+    }
+    if !supported {
+        return HookEvaluation::Abstain {
+            brain: None,
+            reason: "unsupported permission tool".into(),
+            terminal_state: ActivityState::Abstained,
+        };
+    }
+    let Some(config) = config.filter(|config| config.enabled) else {
+        return HookEvaluation::Abstain {
+            brain: None,
+            reason: "Brain is disabled".into(),
+            terminal_state: ActivityState::Abstained,
+        };
+    };
+    if gate_mode == "off" {
+        return HookEvaluation::Abstain {
+            brain: None,
+            reason: "Brain gate mode is off".into(),
+            terminal_state: ActivityState::Abstained,
+        };
+    }
+
+    let mut hook_config = config.clone();
+    hook_config.timeout_ms = hook_config.timeout_ms.min(HOOK_INFERENCE_TIMEOUT_MS);
+    let brain = query::evaluate_with(request, &hook_config, gate_mode, infer);
+    if brain.source == "brain" && brain.below_threshold == Some(false) {
+        return match brain.action.as_str() {
+            "approve" => HookEvaluation::Allow {
+                brain,
+                terminal_state: ActivityState::Allowed,
+            },
+            "deny" => HookEvaluation::Deny {
+                brain: Some(brain),
+                deterministic: false,
+                safety: None,
+                terminal_state: ActivityState::Denied,
+            },
+            _ => HookEvaluation::Abstain {
+                reason: "model returned a non-executable action".into(),
+                brain: Some(brain),
+                terminal_state: ActivityState::Abstained,
+            },
+        };
+    }
+    let reason = brain.reasoning.clone();
+    HookEvaluation::Abstain {
+        terminal_state: if brain.source == "error" {
+            ActivityState::Error
+        } else {
+            ActivityState::Abstained
+        },
+        brain: Some(brain),
+        reason,
+    }
 }
 
 #[derive(Serialize)]
@@ -119,6 +330,15 @@ fn parse_request(input: &str) -> Result<PermissionRequest, HookDiagnostic> {
             "PermissionRequest field tool_name must not be empty",
         ));
     }
+    if parsed
+        .tool_use_id
+        .as_deref()
+        .is_some_and(|tool_use_id| tool_use_id.trim().is_empty())
+    {
+        return Err(HookDiagnostic::new(
+            "PermissionRequest field tool_use_id must not be empty",
+        ));
+    }
     let lifecycle = LifecycleIdentity::try_new(
         parsed.session_id,
         parsed.turn_id,
@@ -156,10 +376,12 @@ fn parse_request(input: &str) -> Result<PermissionRequest, HookDiagnostic> {
         project,
         tool_name: parsed.tool_name,
         command,
+        tool_use_id: parsed.tool_use_id,
     })
 }
 
 fn write_diagnostic(stderr: &mut impl Write, diagnostic: impl fmt::Display) {
+    let diagnostic = bounded_redacted(&diagnostic.to_string());
     let _ = writeln!(stderr, "codexctl permission hook: {diagnostic}");
 }
 
@@ -178,11 +400,40 @@ fn record_permission(
 
 fn run_with_gate_and_store<R, W, E, F>(
     stdin: R,
+    stdout: W,
+    stderr: E,
+    config: Option<&BrainConfig>,
+    gate_mode: &str,
+    store: &LifecycleStore,
+    infer: F,
+) where
+    R: Read,
+    W: Write,
+    E: Write,
+    F: FnOnce(&BrainConfig, &str) -> Result<BrainSuggestion, String>,
+{
+    let activity = ActivityStore::at(store.hooks_dir().join("activity.jsonl"));
+    run_with_gate_and_stores(
+        stdin,
+        stdout,
+        stderr,
+        config,
+        gate_mode,
+        store,
+        Some(&activity),
+        infer,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_with_gate_and_stores<R, W, E, F>(
+    stdin: R,
     mut stdout: W,
     mut stderr: E,
     config: Option<&BrainConfig>,
     gate_mode: &str,
-    store: &LifecycleStore,
+    lifecycle_store: &LifecycleStore,
+    activity_store: Option<&ActivityStore>,
     infer: F,
 ) where
     R: Read,
@@ -212,113 +463,271 @@ fn run_with_gate_and_store<R, W, E, F>(
         }
     };
     let needs_input = |stderr: &mut E| {
-        if let Err(error) =
-            record_permission(store, &request.lifecycle, PermissionDisposition::NeedsInput)
-        {
+        if let Err(error) = record_permission(
+            lifecycle_store,
+            &request.lifecycle,
+            PermissionDisposition::NeedsInput,
+        ) {
             write_diagnostic(stderr, error);
         }
     };
-    let Some(command) = request.command.as_deref() else {
-        needs_input(&mut stderr);
-        return;
+    let activity_context =
+        current_paths().and_then(|paths| HookActivity::from_request(&request, &paths));
+    let mut persistence_error = match (&activity_context, activity_store) {
+        (Err(error), _) => Some(error.to_string()),
+        (_, None) => Some("activity store unavailable".into()),
+        (Ok(context), Some(activity_store)) => {
+            let observed = activity_store
+                .append(context.event(ActivityState::Observed))
+                .err();
+            let evaluating = activity_store
+                .append(context.event(ActivityState::Evaluating))
+                .err();
+            observed.or(evaluating).map(|error| error.to_string())
+        }
     };
-    let Some(config) = config.filter(|config| config.enabled) else {
-        needs_input(&mut stderr);
-        return;
+    let brain_request = BrainDecisionRequest {
+        project: request.project.clone(),
+        tool_name: request.tool_name.clone(),
+        tool_input: request.command.clone().unwrap_or_default(),
+        diff_digest: None,
     };
-    if gate_mode == "off" {
-        needs_input(&mut stderr);
-        return;
-    }
-
-    let mut hook_config = config.clone();
-    hook_config.timeout_ms = hook_config.timeout_ms.min(HOOK_INFERENCE_TIMEOUT_MS);
-    let brain = query::evaluate_with(
-        &BrainDecisionRequest {
-            project: request.project.clone(),
-            tool_name: request.tool_name.clone(),
-            tool_input: command.to_string(),
-            diff_digest: None,
-        },
-        &hook_config,
+    let evaluation = evaluate_request(
+        &brain_request,
+        config,
         gate_mode,
+        persistence_error.is_none(),
+        request.command.is_some(),
         infer,
     );
-    if brain.source == "error" {
-        write_diagnostic(&mut stderr, &brain.reasoning);
-        needs_input(&mut stderr);
+    if let HookEvaluation::Deny {
+        deterministic: true,
+        safety: Some(deny),
+        terminal_state,
+        ..
+    } = &evaluation
+    {
+        let response = HookResponse {
+            hook_specific_output: HookSpecificOutput {
+                hook_event_name: "PermissionRequest",
+                decision: HookResponseDecision {
+                    behavior: PermissionBehavior::Deny,
+                    message: Some(&deny.reason),
+                },
+            },
+        };
+        let serialized = match serde_json::to_vec(&response) {
+            Ok(serialized) => serialized,
+            Err(error) => {
+                write_diagnostic(
+                    &mut stderr,
+                    format!("could not serialize response: {error}"),
+                );
+                return;
+            }
+        };
+        let audit = HookDecisionAudit {
+            project: &request.project,
+            tool: &request.tool_name,
+            command: activity_context
+                .as_ref()
+                .ok()
+                .and_then(|context| context.command.as_deref())
+                .unwrap_or_default(),
+            brain_action: "deny",
+            brain_confidence: 1.0,
+            brain_reasoning: &deny.reason,
+            brain_source: "deterministic",
+            brain_threshold: None,
+            session_id: request.lifecycle.session_id(),
+            turn_id: request.lifecycle.turn_id().unwrap_or_default(),
+        };
+        let decision_id = match append_deterministic(&audit) {
+            Ok(decision_id) => Some(decision_id),
+            Err(error) => {
+                persistence_error.get_or_insert_with(|| error.to_string());
+                None
+            }
+        };
+        if let (Ok(context), Some(activity_store)) = (&activity_context, activity_store) {
+            let mut terminal = context.event(*terminal_state);
+            terminal.rule_id = Some(deny.rule_id.into());
+            terminal.reasoning = Some(deny.reason.clone());
+            terminal.decision_id.clone_from(&decision_id);
+            if let Err(error) = activity_store.append(terminal) {
+                persistence_error.get_or_insert_with(|| error.to_string());
+            }
+        }
+        if let Some(error) = &persistence_error {
+            write_diagnostic(&mut stderr, format!("deterministic deny audit: {error}"));
+        }
+        if let Err(error) = record_permission(
+            lifecycle_store,
+            &request.lifecycle,
+            PermissionDisposition::Decided,
+        ) {
+            write_diagnostic(&mut stderr, error);
+        }
+        let delivery = match write_response(&mut stdout, &serialized) {
+            Ok(()) => ActivityState::Delivered,
+            Err(error) => {
+                write_diagnostic(&mut stderr, format!("could not write response: {error}"));
+                ActivityState::DeliveryFailed
+            }
+        };
+        if let (Ok(context), Some(activity_store)) = (&activity_context, activity_store) {
+            let mut event = context.event(delivery);
+            event.decision_id = decision_id;
+            event.reasoning = (delivery == ActivityState::DeliveryFailed)
+                .then(|| "hook response write failed".into());
+            let _ = activity_store.append(event);
+            let _ = activity_store.compact_if_needed();
+        }
         return;
     }
-    if brain.source != "brain" || brain.below_threshold != Some(false) {
-        needs_input(&mut stderr);
-        return;
-    }
-    let behavior = match brain.action.as_str() {
-        "approve" => PermissionBehavior::Allow,
-        "deny" => PermissionBehavior::Deny,
-        _ => {
+    let (brain, behavior, terminal_state) = match evaluation {
+        HookEvaluation::Allow {
+            brain,
+            terminal_state,
+        } => (brain, Some(PermissionBehavior::Allow), terminal_state),
+        HookEvaluation::Deny {
+            brain: Some(brain),
+            deterministic: false,
+            safety: None,
+            terminal_state,
+        } => (brain, Some(PermissionBehavior::Deny), terminal_state),
+        HookEvaluation::Abstain {
+            brain: Some(brain),
+            terminal_state,
+            ..
+        } => (brain, None, terminal_state),
+        HookEvaluation::Abstain {
+            brain: None,
+            reason,
+            terminal_state,
+        } => {
+            if let Some(error) = persistence_error {
+                write_diagnostic(
+                    &mut stderr,
+                    format!("could not persist hook activity: {error}"),
+                );
+            }
+            if let (Ok(context), Some(activity_store)) = (&activity_context, activity_store) {
+                let mut event = context.event(terminal_state);
+                event.reasoning = Some(reason);
+                let _ = activity_store.append(event);
+                let _ = activity_store.compact_if_needed();
+            }
             needs_input(&mut stderr);
             return;
         }
-    };
-    let decision = HookDecision {
-        request,
-        brain,
-        behavior,
+        _ => unreachable!("deterministic deny was handled before model persistence"),
     };
 
     // Serialize first so a serialization error can never leave a prepared
     // audit record without a response ready to write.
-    let response = HookResponse {
-        hook_specific_output: HookSpecificOutput {
-            hook_event_name: "PermissionRequest",
-            decision: HookResponseDecision {
-                behavior: decision.behavior,
-                message: decision.brain.message.as_deref(),
+    let serialized = if let Some(behavior) = behavior {
+        let response = HookResponse {
+            hook_specific_output: HookSpecificOutput {
+                hook_event_name: "PermissionRequest",
+                decision: HookResponseDecision {
+                    behavior,
+                    message: brain.message.as_deref(),
+                },
             },
-        },
-    };
-    let serialized = match serde_json::to_vec(&response) {
-        Ok(serialized) => serialized,
-        Err(error) => {
-            write_diagnostic(
-                &mut stderr,
-                format!("could not serialize response: {error}"),
-            );
-            return;
+        };
+        match serde_json::to_vec(&response) {
+            Ok(serialized) => Some(serialized),
+            Err(error) => {
+                write_diagnostic(
+                    &mut stderr,
+                    format!("could not serialize response: {error}"),
+                );
+                return;
+            }
         }
+    } else {
+        None
     };
 
     let audit = HookDecisionAudit {
-        project: &decision.request.project,
-        tool: &decision.request.tool_name,
-        command: decision.request.command.as_deref().unwrap_or_default(),
-        brain_action: &decision.brain.action,
-        brain_confidence: decision.brain.confidence,
-        brain_reasoning: &decision.brain.reasoning,
-        brain_source: decision.brain.source,
-        brain_threshold: decision.brain.threshold,
-        user_action: decision.behavior.user_action(),
-        session_id: decision.request.lifecycle.session_id(),
-        turn_id: decision.request.lifecycle.turn_id().unwrap_or_default(),
+        project: &request.project,
+        tool: &request.tool_name,
+        command: activity_context
+            .as_ref()
+            .ok()
+            .and_then(|context| context.command.as_deref())
+            .unwrap_or_default(),
+        brain_action: &brain.action,
+        brain_confidence: brain.confidence,
+        brain_reasoning: &bounded_redacted(&brain.reasoning),
+        brain_source: brain.source,
+        brain_threshold: brain.threshold,
+        session_id: request.lifecycle.session_id(),
+        turn_id: request.lifecycle.turn_id().unwrap_or_default(),
     };
-    if let Err(error) = log_hook_decision(&audit) {
+    let decision_id = match append_hook_proposal(&audit) {
+        Ok(decision_id) => decision_id,
+        Err(error) => {
+            write_diagnostic(
+                &mut stderr,
+                format!("could not persist decision proposal: {error}"),
+            );
+            needs_input(&mut stderr);
+            return;
+        }
+    };
+    let mut terminal = activity_context.as_ref().unwrap().event(terminal_state);
+    terminal.confidence = Some(brain.confidence);
+    terminal.threshold = brain.threshold;
+    terminal.reasoning = Some(bounded_redacted(&brain.reasoning));
+    terminal.decision_id = Some(decision_id.clone());
+    if let Err(error) = activity_store.unwrap().append(terminal) {
         write_diagnostic(
             &mut stderr,
-            format!("could not persist prepared decision: {error}"),
+            format!("could not persist terminal activity: {error}"),
         );
+        needs_input(&mut stderr);
         return;
     }
+    let Some(serialized) = serialized else {
+        let _ = activity_store.unwrap().compact_if_needed();
+        if brain.source == "error" {
+            write_diagnostic(&mut stderr, &brain.reasoning);
+        }
+        needs_input(&mut stderr);
+        return;
+    };
     if let Err(error) = record_permission(
-        store,
-        &decision.request.lifecycle,
+        lifecycle_store,
+        &request.lifecycle,
         PermissionDisposition::Decided,
     ) {
         write_diagnostic(&mut stderr, error);
     }
-    if let Err(error) = stdout.write_all(&serialized) {
-        write_diagnostic(&mut stderr, format!("could not write response: {error}"));
+    let (delivery, failure) = match write_response(&mut stdout, &serialized) {
+        Ok(()) => (ActivityState::Delivered, None),
+        Err(error) => {
+            let message = format!("could not write response: {error}");
+            write_diagnostic(&mut stderr, &message);
+            (ActivityState::DeliveryFailed, Some(message))
+        }
+    };
+    let mut event = activity_context.as_ref().unwrap().event(delivery);
+    event.decision_id = Some(decision_id);
+    event.reasoning = failure;
+    if let Err(error) = activity_store.unwrap().append(event) {
+        write_diagnostic(
+            &mut stderr,
+            format!("could not persist delivery activity: {error}"),
+        );
     }
+    let _ = activity_store.unwrap().compact_if_needed();
+}
+
+fn write_response(stdout: &mut impl Write, serialized: &[u8]) -> std::io::Result<()> {
+    stdout.write_all(serialized)?;
+    stdout.flush()
 }
 
 fn run_with_gate<R, W, E, F>(
@@ -334,8 +743,20 @@ fn run_with_gate<R, W, E, F>(
     E: Write,
     F: FnOnce(&BrainConfig, &str) -> Result<BrainSuggestion, String>,
 {
-    let store = LifecycleStore::at(compatibility_state_root());
-    run_with_gate_and_store(stdin, stdout, stderr, config, gate_mode, &store, infer);
+    let lifecycle_store = LifecycleStore::at(compatibility_state_root());
+    let activity_store = current_paths()
+        .ok()
+        .map(|paths| ActivityStore::at(paths.state_root().join("activity.jsonl")));
+    run_with_gate_and_stores(
+        stdin,
+        stdout,
+        stderr,
+        config,
+        gate_mode,
+        &lifecycle_store,
+        activity_store.as_ref(),
+        infer,
+    );
 }
 
 fn run_with<R, W, E, F>(stdin: R, stdout: W, stderr: E, config: Option<&BrainConfig>, infer: F)
@@ -376,11 +797,43 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
+    use crate::brain::activity::ActivityStore;
     use crate::brain::client::BrainSuggestion;
     use crate::brain::decisions::decisions_dir;
     use crate::config::BrainConfig;
     use crate::rules::RuleAction;
+    use codexctl_core::brain_activity::ActivityState;
     use codexctl_core::lifecycle::{LifecycleStore, ProjectedStatus};
+
+    struct FailingWriter;
+
+    impl Write for FailingWriter {
+        fn write(&mut self, _buffer: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "fixture closed",
+            ))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct FailingFlushWriter;
+
+    impl Write for FailingFlushWriter {
+        fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "fixture flush failed",
+            ))
+        }
+    }
 
     struct RestoreHome(Option<OsString>);
 
@@ -404,13 +857,18 @@ mod tests {
     }
 
     fn payload() -> String {
+        payload_with_command("cargo test")
+    }
+
+    fn payload_with_command(command: &str) -> String {
+        let cwd = std::env::current_dir().unwrap();
         serde_json::json!({
             "session_id": "session-1",
             "turn_id": "turn-1",
-            "cwd": "/work/codexctl",
+            "cwd": cwd,
             "hook_event_name": "PermissionRequest",
             "tool_name": "Bash",
-            "tool_input": { "command": "cargo test" }
+            "tool_input": { "command": command }
         })
         .to_string()
     }
@@ -470,7 +928,7 @@ mod tests {
         let request = parse_request(&payload()).unwrap();
         assert_eq!(request.lifecycle.session_id(), "session-1");
         assert_eq!(request.lifecycle.turn_id(), Some("turn-1"));
-        assert_eq!(request.lifecycle.cwd(), Path::new("/work/codexctl"));
+        assert_eq!(request.lifecycle.cwd(), std::env::current_dir().unwrap());
         assert_eq!(request.tool_name, "Bash");
         assert_eq!(request.command.as_deref(), Some("cargo test"));
         assert_eq!(request.project, "codexctl");
@@ -543,30 +1001,34 @@ mod tests {
     fn lifecycle_failure_does_not_change_valid_decision_bytes() {
         let temp = tempfile::tempdir().unwrap();
         let healthy = LifecycleStore::at(temp.path().join("healthy"));
+        let healthy_activity = ActivityStore::at(temp.path().join("healthy-activity.jsonl"));
         let blocked_root = temp.path().join("blocked");
         std::fs::write(&blocked_root, b"occupied").unwrap();
         let blocked = LifecycleStore::at(blocked_root);
+        let blocked_activity = ActivityStore::at(temp.path().join("blocked-activity.jsonl"));
 
         let mut healthy_stdout = Vec::new();
         let mut healthy_stderr = Vec::new();
-        run_with_gate_and_store(
+        run_with_gate_and_stores(
             Cursor::new(payload()),
             &mut healthy_stdout,
             &mut healthy_stderr,
             Some(&enabled_config()),
             "on",
             &healthy,
+            Some(&healthy_activity),
             |_, _| Ok(suggestion(RuleAction::Approve, 0.9)),
         );
         let mut failed_stdout = Vec::new();
         let mut failed_stderr = Vec::new();
-        run_with_gate_and_store(
+        run_with_gate_and_stores(
             Cursor::new(payload()),
             &mut failed_stdout,
             &mut failed_stderr,
             Some(&enabled_config()),
             "on",
             &blocked,
+            Some(&blocked_activity),
             |_, _| Ok(suggestion(RuleAction::Approve, 0.9)),
         );
 
@@ -661,10 +1123,31 @@ mod tests {
         assert_eq!(record["command"], "cargo test");
         assert_eq!(record["brain_action"], "approve");
         assert_eq!(record["brain_source"], "brain");
-        assert_eq!(record["user_action"], "hook_allow");
+        assert_eq!(record["user_action"], "hook_proposal");
         assert_eq!(record["session_id"], "session-1");
         assert_eq!(record["turn_id"], "turn-1");
         assert_eq!(projected_status(&store), Some(ProjectedStatus::Processing));
+        let activity = ActivityStore::at(store.hooks_dir().join("activity.jsonl"));
+        let events = activity.read().unwrap().events().to_vec();
+        assert_eq!(
+            events.iter().map(|event| event.state).collect::<Vec<_>>(),
+            [
+                ActivityState::Observed,
+                ActivityState::Evaluating,
+                ActivityState::Allowed,
+                ActivityState::Delivered,
+            ]
+        );
+        assert!(
+            events
+                .iter()
+                .all(|event| event.activity_id == events[0].activity_id)
+        );
+        assert!(events[2].decision_id.is_some());
+        assert_eq!(
+            events[0].session.as_ref().unwrap().turn_id.as_deref(),
+            Some("turn-1")
+        );
     }
 
     #[test]
@@ -688,8 +1171,30 @@ mod tests {
         assert_eq!(output["hookSpecificOutput"]["decision"]["behavior"], "deny");
         let log = std::fs::read_to_string(decisions_dir().join("decisions.jsonl")).unwrap();
         let record: serde_json::Value = serde_json::from_str(log.trim()).unwrap();
-        assert_eq!(record["user_action"], "hook_deny");
+        assert_eq!(record["user_action"], "hook_proposal");
         assert_eq!(projected_status(&store), Some(ProjectedStatus::Processing));
+    }
+
+    #[test]
+    fn deterministic_deny_precedes_inference() {
+        let calls = AtomicUsize::new(0);
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        run_test(
+            Cursor::new(payload_with_command("rm -rf /")),
+            &mut stdout,
+            &mut stderr,
+            Some(&enabled_config()),
+            |_, _| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                panic!("deterministic deny must not invoke the model")
+            },
+        );
+
+        let output: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
+        assert_eq!(output["hookSpecificOutput"]["decision"]["behavior"], "deny");
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
     #[test]
@@ -788,6 +1293,99 @@ mod tests {
 
         assert!(stdout.is_empty());
         assert!(String::from_utf8(stderr).unwrap().contains("persist"));
+    }
+
+    #[test]
+    fn deterministic_deny_survives_audit_failure() {
+        let brain_dir = decisions_dir();
+        std::fs::create_dir_all(brain_dir.parent().unwrap()).unwrap();
+        std::fs::write(&brain_dir, "occupied").unwrap();
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        run_test(
+            Cursor::new(payload_with_command("rm -rf /")),
+            &mut stdout,
+            &mut stderr,
+            Some(&enabled_config()),
+            |_, _| panic!("deterministic deny must not infer"),
+        );
+
+        let output: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
+        assert_eq!(output["hookSpecificOutput"]["decision"]["behavior"], "deny");
+        assert!(String::from_utf8(stderr).unwrap().contains("audit"));
+    }
+
+    #[test]
+    fn failed_stdout_write_records_delivery_failed_without_execution_claim() {
+        let temp = tempfile::tempdir().unwrap();
+        let lifecycle = LifecycleStore::at(temp.path().join("lifecycle"));
+        let activity = ActivityStore::at(temp.path().join("activity.jsonl"));
+        let mut stderr = Vec::new();
+
+        run_with_gate_and_stores(
+            Cursor::new(payload()),
+            FailingWriter,
+            &mut stderr,
+            Some(&enabled_config()),
+            "on",
+            &lifecycle,
+            Some(&activity),
+            |_, _| Ok(suggestion(RuleAction::Approve, 0.9)),
+        );
+
+        let events = activity.read().unwrap().events().to_vec();
+        assert_eq!(events[2].state, ActivityState::Allowed);
+        assert_eq!(events[3].state, ActivityState::DeliveryFailed);
+        let snapshot = activity.snapshot(Default::default()).unwrap();
+        assert!(!snapshot.attention[0].tool_execution_confirmed);
+    }
+
+    #[test]
+    fn failed_stdout_flush_records_delivery_failed_without_execution_claim() {
+        let temp = tempfile::tempdir().unwrap();
+        let lifecycle = LifecycleStore::at(temp.path().join("lifecycle"));
+        let activity = ActivityStore::at(temp.path().join("activity.jsonl"));
+        let mut stderr = Vec::new();
+
+        run_with_gate_and_stores(
+            Cursor::new(payload()),
+            FailingFlushWriter,
+            &mut stderr,
+            Some(&enabled_config()),
+            "on",
+            &lifecycle,
+            Some(&activity),
+            |_, _| Ok(suggestion(RuleAction::Approve, 0.9)),
+        );
+
+        let events = activity.read().unwrap().events().to_vec();
+        assert_eq!(events[2].state, ActivityState::Allowed);
+        assert_eq!(events[3].state, ActivityState::DeliveryFailed);
+        assert!(String::from_utf8(stderr).unwrap().contains("flush failed"));
+        assert!(
+            !activity.snapshot(Default::default()).unwrap().attention[0].tool_execution_confirmed
+        );
+    }
+
+    #[test]
+    fn inference_diagnostic_is_redacted_and_bounded() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        run_test(
+            Cursor::new(payload()),
+            &mut stdout,
+            &mut stderr,
+            Some(&enabled_config()),
+            |_, _| Err(format!("token sk-secret-value {}", "x".repeat(16_000))),
+        );
+
+        assert!(stdout.is_empty());
+        let diagnostic = String::from_utf8(stderr).unwrap();
+        assert!(!diagnostic.contains("sk-secret-value"));
+        assert!(diagnostic.contains("[REDACTED]"));
+        assert!(diagnostic.len() <= MAX_ACTIVITY_FIELD_BYTES + 64);
     }
 
     #[test]

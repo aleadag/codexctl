@@ -22,6 +22,7 @@ pub mod query;
 pub mod retrieval;
 pub mod review;
 pub mod risk;
+pub mod safety;
 pub mod sequences;
 
 use std::path::PathBuf;

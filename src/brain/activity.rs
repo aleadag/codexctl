@@ -1056,6 +1056,8 @@ mod tests {
         let mut large = event("large", ActivityState::Denied);
         large.session = Some(codexctl_core::brain_activity::SessionTarget {
             session_id: "session".into(),
+            turn_id: None,
+            tool_use_id: None,
             project_id: ProjectId::Temporary("project".into()),
             cwd: PathBuf::from("/work/project"),
             provider_hints: (0..10).map(|_| "h".repeat(4_000)).collect(),
@@ -1283,6 +1285,8 @@ mod tests {
         oversized.reasoning = Some("r".repeat(5_000));
         oversized.session = Some(codexctl_core::brain_activity::SessionTarget {
             session_id: "s".repeat(5_000),
+            turn_id: None,
+            tool_use_id: None,
             project_id: ProjectId::Temporary("p".repeat(5_000)),
             cwd: PathBuf::from(format!("/{}", "d".repeat(5_000))),
             provider_hints: (0..16).map(|_| "h".repeat(5_000)).collect(),

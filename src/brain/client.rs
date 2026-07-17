@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 
-use std::process::Command;
+use std::io::{Read, Write};
+use std::path::Path;
+use std::process::{Command, Stdio};
 
 use crate::config::BrainConfig;
 use crate::rules::RuleAction;
@@ -19,6 +21,14 @@ pub struct BrainSuggestion {
 
 /// Call the local LLM endpoint via curl and parse the response.
 pub fn infer(config: &BrainConfig, prompt: &str) -> Result<BrainSuggestion, String> {
+    infer_with_program(config, prompt, Path::new("curl"))
+}
+
+fn infer_with_program(
+    config: &BrainConfig,
+    prompt: &str,
+    program: &Path,
+) -> Result<BrainSuggestion, String> {
     let is_openai = is_openai_compatible(&config.endpoint);
 
     let payload = if is_openai {
@@ -42,35 +52,96 @@ pub fn infer(config: &BrainConfig, prompt: &str) -> Result<BrainSuggestion, Stri
     };
 
     let body = serde_json::to_string(&payload).map_err(|e| format!("json error: {e}"))?;
-    let timeout_secs = (config.timeout_ms / 1000).max(1);
-
-    let output = Command::new("curl")
-        .args([
-            "-s",
-            "-X",
-            "POST",
-            "-H",
-            "Content-Type: application/json",
-            "-d",
-            &body,
-            "--max-time",
-            &timeout_secs.to_string(),
-            &config.endpoint,
-        ])
-        .output()
-        .map_err(|e| format!("curl failed: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("curl error (exit {}): {stderr}", output.status));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = curl_post(program, config, &body)?;
+    let stdout = String::from_utf8_lossy(&stdout);
     if is_openai {
         parse_openai_response(&stdout)
     } else {
         parse_ollama_response(&stdout)
     }
+}
+
+fn curl_post(program: &Path, config: &BrainConfig, body: &str) -> Result<Vec<u8>, String> {
+    let timeout_secs = ((config.timeout_ms / 1000).max(1)).to_string();
+    let mut child = Command::new(program)
+        .args([
+            "--silent",
+            "--show-error",
+            "--request",
+            "POST",
+            "--header",
+            "Content-Type: application/json",
+            "--max-redirs",
+            "0",
+            "--max-filesize",
+            "1048576",
+            "--data-binary",
+            "@-",
+            "--max-time",
+            &timeout_secs,
+            &config.endpoint,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("curl failed: {e}"))?;
+
+    let stdout = child.stdout.take().expect("piped curl stdout");
+    let stderr = child.stderr.take().expect("piped curl stderr");
+    let stdout_reader = std::thread::spawn(move || read_bounded_draining(stdout, 1024 * 1024));
+    let stderr_reader = std::thread::spawn(move || read_bounded_draining(stderr, 64 * 1024));
+    let write_result = child
+        .stdin
+        .take()
+        .expect("piped curl stdin")
+        .write_all(body.as_bytes());
+    if let Err(error) = write_result {
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = stdout_reader.join();
+        let _ = stderr_reader.join();
+        return Err(format!("curl stdin failed: {error}"));
+    }
+    let status = child
+        .wait()
+        .map_err(|error| format!("curl wait failed: {error}"))?;
+    let (stdout, stdout_exceeded) = stdout_reader
+        .join()
+        .map_err(|_| "curl stdout reader panicked".to_string())?
+        .map_err(|error| format!("curl stdout failed: {error}"))?;
+    let (stderr, _) = stderr_reader
+        .join()
+        .map_err(|_| "curl stderr reader panicked".to_string())?
+        .map_err(|error| format!("curl stderr failed: {error}"))?;
+
+    if stdout_exceeded {
+        return Err("curl response exceeds 1 MiB".into());
+    }
+
+    if !status.success() {
+        let stderr = String::from_utf8_lossy(&stderr);
+        return Err(format!("curl error (exit {status}): {stderr}"));
+    }
+
+    Ok(stdout)
+}
+
+fn read_bounded_draining(mut reader: impl Read, limit: usize) -> std::io::Result<(Vec<u8>, bool)> {
+    let mut retained = Vec::with_capacity(limit.min(8 * 1024));
+    let mut exceeded = false;
+    let mut buffer = [0_u8; 8 * 1024];
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        let remaining = limit.saturating_sub(retained.len());
+        let keep = read.min(remaining);
+        retained.extend_from_slice(&buffer[..keep]);
+        exceeded |= keep < read;
+    }
+    Ok((retained, exceeded))
 }
 
 /// Detect if the endpoint is OpenAI-compatible based on URL path.
@@ -124,32 +195,8 @@ fn call_llm(config: &BrainConfig, prompt: &str) -> Result<String, String> {
     };
 
     let body = serde_json::to_string(&payload).map_err(|e| format!("json error: {e}"))?;
-    let timeout_secs = (config.timeout_ms / 1000).max(1);
-
-    let output = Command::new("curl")
-        .args([
-            "-s",
-            "-X",
-            "POST",
-            "-H",
-            "Content-Type: application/json",
-            "-d",
-            &body,
-            "--max-time",
-            &timeout_secs.to_string(),
-            &config.endpoint,
-        ])
-        .output()
-        .map_err(|e| format!("curl failed: {e}"))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "curl error: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = curl_post(Path::new("curl"), config, &body)?;
+    let stdout = String::from_utf8_lossy(&stdout);
     let json: serde_json::Value =
         serde_json::from_str(&stdout).map_err(|e| format!("invalid response: {e}"))?;
 
@@ -276,7 +323,54 @@ fn epoch_secs() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
     use super::*;
+
+    #[cfg(unix)]
+    fn fake_curl(script: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("curl");
+        std::fs::write(&path, format!("#!/bin/sh\nset -eu\n{script}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        (temp, path)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn inference_sends_prompt_only_over_stdin_and_disables_redirects() {
+        let (temp, curl) = fake_curl(
+            r#"printf '%s\n' "$@" > "${0}.args"
+dd of="${0}.stdin" 2>/dev/null
+printf '%s' '{"response":"{\"action\":\"approve\",\"reasoning\":\"safe\",\"confidence\":0.9}"}'"#,
+        );
+        let config = BrainConfig {
+            endpoint: "http://brain.example.test/api/generate".into(),
+            ..BrainConfig::default()
+        };
+        let secret_prompt = "unique prompt fragment";
+
+        let suggestion = infer_with_program(&config, secret_prompt, &curl).unwrap();
+
+        assert_eq!(suggestion.action, RuleAction::Approve);
+        let args = std::fs::read_to_string(temp.path().join("curl.args")).unwrap();
+        assert!(!args.contains(secret_prompt));
+        assert!(args.contains("--data-binary\n@-"));
+        assert!(args.contains("--max-redirs\n0"));
+        assert!(args.contains("--max-filesize\n1048576"));
+        assert!(args.contains(&config.endpoint));
+        let stdin = std::fs::read_to_string(temp.path().join("curl.stdin")).unwrap();
+        assert!(stdin.contains(secret_prompt));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn oversized_inference_response_abstains() {
+        let (_temp, curl) = fake_curl("dd if=/dev/zero bs=1048577 count=1 2>/dev/null");
+        let error = infer_with_program(&BrainConfig::default(), "prompt", &curl).unwrap_err();
+        assert!(error.contains("exceeds 1 MiB"), "{error}");
+    }
 
     #[test]
     fn parse_approve_suggestion() {

@@ -1152,7 +1152,6 @@ pub(crate) fn run_insights(cfg: &config::Config, cli: &Cli, arg: &str) -> io::Re
 /// Used by the Codex PostToolUse hook for #220 baselining.
 pub(crate) fn run_record_outcome(cli: &Cli) -> io::Result<()> {
     use brain::outcomes::{PendingOutcome, truncate_stderr, write_pending};
-    use std::io::Read;
 
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1160,9 +1159,20 @@ pub(crate) fn run_record_outcome(cli: &Cli) -> io::Result<()> {
         .unwrap_or(0);
 
     // Try stdin first — hook scripts pipe a JSON blob in.
-    let mut stdin_buf = String::new();
-    let stdin_has_data =
-        std::io::stdin().read_to_string(&mut stdin_buf).is_ok() && !stdin_buf.trim().is_empty();
+    let stdin_buf = match crate::lifecycle_hook::read_bounded_hook_input(std::io::stdin().lock()) {
+        Ok(input) => match String::from_utf8(input) {
+            Ok(input) => input,
+            Err(_) => {
+                eprintln!("--record-outcome: stdin is not valid UTF-8");
+                std::process::exit(2);
+            }
+        },
+        Err(error) => {
+            eprintln!("--record-outcome: {error}");
+            std::process::exit(2);
+        }
+    };
+    let stdin_has_data = !stdin_buf.trim().is_empty();
 
     let outcome = if stdin_has_data {
         match serde_json::from_str::<PendingOutcome>(&stdin_buf) {

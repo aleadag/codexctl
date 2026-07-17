@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use codexctl_core::runtime::DecisionSummary;
 
-use super::decisions::{DecisionRecord, read_all_decisions};
+use super::decisions::{DecisionRecord, read_learning_decisions};
 
 /// Read every decision on disk and project to the core `DecisionSummary`
 /// DTO in one pass. Used by every `print_*` and `compute_*` helper below —
@@ -12,7 +12,7 @@ use super::decisions::{DecisionRecord, read_all_decisions};
 /// operates on the summary form so the surface can be shared with the TUI
 /// (`ui/brain.rs`) without depending on brain-private types.
 fn read_all_summaries() -> Vec<DecisionSummary> {
-    read_all_decisions()
+    read_learning_decisions()
         .iter()
         .map(DecisionSummary::from)
         .collect()
@@ -68,7 +68,7 @@ fn rolling_correction_rate(decisions: &[DecisionRecord], window: usize) -> Vec<C
 
 /// Print the correction rate learning curve to stdout.
 pub fn print_learning_curve() {
-    let decisions = read_all_decisions();
+    let decisions = read_learning_decisions();
     let total = decisions.len();
 
     println!("Brain Learning Curve");
@@ -193,7 +193,7 @@ impl CategoryAccuracy {
 
 /// Print category-specific accuracy breakdown.
 pub fn print_accuracy() {
-    let decisions = read_all_decisions();
+    let decisions = read_learning_decisions();
     let total = decisions.len();
 
     println!("Brain Accuracy Breakdown");
@@ -335,7 +335,7 @@ fn print_temporal_accuracy(decisions: &[DecisionRecord]) {
 
 /// Print false-approve rate analysis for risky actions.
 pub fn print_false_approve() {
-    let decisions = read_all_decisions();
+    let decisions = read_learning_decisions();
     let total = decisions.len();
 
     println!("False-Approve Rate (Risky Actions)");
@@ -501,7 +501,7 @@ struct FalseApproveCase {
 
 /// Print decision distribution analysis.
 pub fn print_distribution() {
-    let decisions = read_all_decisions();
+    let decisions = read_learning_decisions();
     let total = decisions.len();
 
     println!("Decision Distribution");
@@ -570,7 +570,7 @@ fn print_distribution_table(label: &str, data: &HashMap<String, u32>, total: usi
 
 /// Print novel situation rate analysis.
 pub fn print_novel_rate() {
-    let decisions = read_all_decisions();
+    let decisions = read_learning_decisions();
     let total = decisions.len();
 
     println!("Novel Situation Rate");
@@ -662,7 +662,7 @@ pub fn print_novel_rate() {
 
 /// Print false-deny rate (brain denied, user overrode with approve).
 pub fn print_false_deny() {
-    let decisions = read_all_decisions();
+    let decisions = read_learning_decisions();
     let total = decisions.len();
 
     println!("False-Deny Rate (Friction Cost)");
@@ -787,7 +787,7 @@ pub fn print_false_deny() {
 
 /// Print confidence calibration analysis.
 pub fn print_calibration() {
-    let decisions = read_all_decisions();
+    let decisions = read_learning_decisions();
     let total = decisions.len();
 
     println!("Confidence Calibration");
@@ -969,7 +969,7 @@ fn classify_incident_cause(
 
 /// Print incident analysis for all false approvals.
 pub fn print_incidents() {
-    let decisions = read_all_decisions();
+    let decisions = read_learning_decisions();
     let total = decisions.len();
 
     println!("Incident Post-Mortems (False Approvals)");
@@ -1129,7 +1129,7 @@ pub fn print_incidents() {
 
 /// Print time-to-correct analysis — how quickly users respond to brain suggestions.
 pub fn print_time_to_correct() {
-    let decisions = read_all_decisions();
+    let decisions = read_learning_decisions();
     let total = decisions.len();
 
     println!("Time-to-Correct Analysis");
@@ -1302,7 +1302,7 @@ fn format_time_saved(secs: f64) -> String {
 
 /// Print the impact scorecard — visual cards with headline metrics.
 pub fn print_impact() {
-    let decisions = read_all_decisions();
+    let decisions = read_learning_decisions();
     let total = decisions.len();
 
     if total < 5 {
@@ -1532,7 +1532,7 @@ fn batch_metric(
 
 /// Print the brain evolution dashboard — visual learning trajectory.
 pub fn print_evolution() {
-    let decisions = read_all_decisions();
+    let decisions = read_learning_decisions();
     let total = decisions.len();
 
     if total < 10 {

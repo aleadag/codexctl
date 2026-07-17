@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use super::decisions::{DecisionRecord, DecisionType, read_all_decisions};
+use super::decisions::{DecisionRecord, DecisionType, read_learning_decisions};
 
 // ────────────────────────────────────────────────────────────────────────────
 // Outcome-weighted few-shot retrieval
@@ -35,14 +35,16 @@ pub fn retrieve_similar(
         return Vec::new();
     }
 
-    let all = read_all_decisions();
+    let all = read_learning_decisions();
     if all.is_empty() {
         return Vec::new();
     }
 
     // Filter by decision type when specified
     let filtered: Vec<&DecisionRecord> = if let Some(dt) = decision_type {
-        all.iter().filter(|d| d.decision_type == dt).collect()
+        all.iter()
+            .filter(|decision| decision.decision_type == dt)
+            .collect()
     } else {
         all.iter().collect()
     };

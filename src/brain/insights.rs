@@ -386,7 +386,7 @@ fn format_insights(insights: &[Insight], header: &str) -> String {
 
 /// Print insights to stdout. Called from main.rs --insights handler.
 pub fn print_insights() {
-    let decisions = super::decisions::read_all_decisions();
+    let decisions = super::decisions::read_learning_decisions();
     if decisions.is_empty() {
         println!("No decision history yet. Use codexctl with --brain to build history.");
         return;

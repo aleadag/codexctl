@@ -10,7 +10,7 @@
 
 use std::path::Path;
 
-use super::decisions::{DecisionRecord, read_all_decisions};
+use super::decisions::{DecisionRecord, read_learning_decisions};
 use super::garden::find_agents_md;
 use super::preferences::{
     DistilledPreferences, PreferencePattern, format_preference_summary,
@@ -42,7 +42,7 @@ pub struct BriefingOptions {
 /// with it (print, inject, save).
 pub fn build_briefing(opts: &BriefingOptions, cwd: &Path) -> String {
     let project = opts.project.as_deref().unwrap_or("(global)");
-    let all = read_all_decisions();
+    let all = read_learning_decisions();
 
     let project_filter = opts.project.as_deref();
     let recent: Vec<&DecisionRecord> = filter_recent_for_project(&all, project_filter);

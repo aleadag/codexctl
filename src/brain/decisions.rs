@@ -2,11 +2,15 @@
 
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::time::{Duration, Instant};
 
 use crate::brain::client::BrainSuggestion;
+use codexctl_core::brain_activity::ActivityEvent;
+use codexctl_core::paths::{CodingBrainPaths, PathEnvironment};
+use fs2::FileExt;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Re-exports from sub-modules so that existing `brain::decisions::*` paths
@@ -44,6 +48,7 @@ const DISTILL_INTERVAL: u32 = 10;
 
 /// Minimum number of per-project decisions before using project-specific preferences.
 const MIN_PROJECT_DECISIONS: usize = 10;
+const MAX_DECISION_RECORD_BYTES: u64 = 1024 * 1024;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Core types
@@ -265,11 +270,11 @@ pub(super) fn decisions_dir() -> PathBuf {
                 .unwrap_or_default()
                 .as_nanos()
         });
-        return std::env::temp_dir()
+        std::env::temp_dir()
             .join("codexctl-tests")
             .join(std::process::id().to_string())
             .join(format!("{run_id}-{scope}"))
-            .join("brain");
+            .join("brain")
     }
 
     #[cfg(not(test))]
@@ -322,9 +327,125 @@ fn append_json_line(path: &std::path::Path, record: &serde_json::Value) -> io::R
     line.push(b'\n');
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
+        set_directory_mode(parent)?;
     }
-    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
-    file.write_all(&line)
+    let lock_path = path.with_extension("lock");
+    let lock = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(lock_path)?;
+    set_file_mode(&lock)?;
+    let started = Instant::now();
+    loop {
+        match lock.try_lock_exclusive() {
+            Ok(()) => break,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                if started.elapsed() >= Duration::from_millis(100) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "decision store lock timed out",
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    let mut file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(path)?;
+    set_file_mode(&file)?;
+    repair_jsonl_tail(&mut file)?;
+    file.seek(SeekFrom::End(0))?;
+    file.write_all(&line)?;
+    file.flush()?;
+    file.sync_data()?;
+    if let Some(parent) = path.parent() {
+        sync_directory(parent)?;
+    }
+    FileExt::unlock(&lock)
+}
+
+fn repair_jsonl_tail(file: &mut fs::File) -> io::Result<()> {
+    let length = file.metadata()?.len();
+    if length == 0 {
+        return Ok(());
+    }
+    file.seek(SeekFrom::End(-1))?;
+    let mut last = [0_u8; 1];
+    file.read_exact(&mut last)?;
+    if last[0] == b'\n' {
+        return Ok(());
+    }
+
+    let tail_start = find_tail_start(file, length)?;
+    let tail_length = length.saturating_sub(tail_start);
+    if tail_length <= MAX_DECISION_RECORD_BYTES {
+        file.seek(SeekFrom::Start(tail_start))?;
+        let mut tail = vec![0_u8; tail_length as usize];
+        file.read_exact(&mut tail)?;
+        if serde_json::from_slice::<serde_json::Value>(&tail).is_ok() {
+            file.seek(SeekFrom::End(0))?;
+            file.write_all(b"\n")?;
+            return Ok(());
+        }
+    }
+    file.set_len(tail_start)?;
+    Ok(())
+}
+
+fn find_tail_start(file: &mut fs::File, length: u64) -> io::Result<u64> {
+    let mut cursor = length;
+    let mut buffer = [0_u8; 8 * 1024];
+    while cursor > 0 {
+        let chunk_len = usize::try_from(cursor.min(buffer.len() as u64)).unwrap_or(buffer.len());
+        cursor -= chunk_len as u64;
+        file.seek(SeekFrom::Start(cursor))?;
+        file.read_exact(&mut buffer[..chunk_len])?;
+        if let Some(index) = buffer[..chunk_len].iter().rposition(|byte| *byte == b'\n') {
+            return Ok(cursor + index as u64 + 1);
+        }
+    }
+    Ok(0)
+}
+
+#[cfg(unix)]
+fn set_directory_mode(path: &std::path::Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+}
+
+#[cfg(not(unix))]
+fn set_directory_mode(_path: &std::path::Path) -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_file_mode(file: &fs::File) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    file.set_permissions(fs::Permissions::from_mode(0o600))
+}
+
+#[cfg(not(unix))]
+fn set_file_mode(_file: &fs::File) -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn sync_directory(path: &std::path::Path) -> io::Result<()> {
+    fs::File::open(path)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_directory(_path: &std::path::Path) -> io::Result<()> {
+    Ok(())
 }
 
 /// Compute the current local hour (0-23) without chrono.
@@ -508,7 +629,6 @@ pub(crate) struct HookDecisionAudit<'a> {
     pub brain_reasoning: &'a str,
     pub brain_source: &'a str,
     pub brain_threshold: Option<f64>,
-    pub user_action: &'a str,
     pub session_id: &'a str,
     pub turn_id: &'a str,
 }
@@ -517,11 +637,20 @@ pub(crate) struct HookDecisionAudit<'a> {
 ///
 /// `hook_allow` and `hook_deny` mean that the decision was prepared; this
 /// hook does not receive a later execution confirmation from Codex.
-pub(crate) fn log_hook_decision(audit: &HookDecisionAudit<'_>) -> io::Result<()> {
+pub(crate) fn append_hook_proposal(audit: &HookDecisionAudit<'_>) -> io::Result<String> {
+    append_hook_audit(audit, "hook_proposal")
+}
+
+pub(crate) fn append_deterministic(audit: &HookDecisionAudit<'_>) -> io::Result<String> {
+    append_hook_audit(audit, "deterministic_deny")
+}
+
+fn append_hook_audit(audit: &HookDecisionAudit<'_>, user_action: &str) -> io::Result<String> {
     let resolved_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
+    let decision_id = gen_decision_id();
     let record = serde_json::json!({
         "ts": timestamp_now(),
         "pid": 0,
@@ -533,17 +662,17 @@ pub(crate) fn log_hook_decision(audit: &HookDecisionAudit<'_>) -> io::Result<()>
         "brain_reasoning": audit.brain_reasoning,
         "brain_source": audit.brain_source,
         "brain_threshold": audit.brain_threshold,
-        "user_action": audit.user_action,
+        "user_action": user_action,
         "decision_type": DecisionType::Session.label(),
         "suggested_at": resolved_at,
         "resolved_at": resolved_at,
-        "decision_id": gen_decision_id(),
+        "decision_id": decision_id,
         "session_id": audit.session_id,
         "turn_id": audit.turn_id,
     });
     append_json_line(&decisions_path(), &record)?;
     maybe_distill_background();
-    Ok(())
+    Ok(decision_id)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -567,7 +696,7 @@ fn maybe_distill_background() {
     }
 
     std::thread::spawn(|| {
-        let all = read_all_decisions();
+        let all = read_learning_decisions();
         if !all.is_empty() {
             // Global distillation
             let prefs = distill_preferences(&all);
@@ -763,6 +892,50 @@ pub fn read_all_decisions() -> Vec<DecisionRecord> {
                     }
                 },
             })
+        })
+        .collect()
+}
+
+pub(crate) fn read_learning_decisions() -> Vec<DecisionRecord> {
+    let decisions = read_all_decisions();
+    let environment = PathEnvironment::new(
+        std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+        std::env::var_os("XDG_STATE_HOME").map(PathBuf::from),
+        std::env::var_os("HOME").map(PathBuf::from),
+    );
+    let events = CodingBrainPaths::resolve(&environment)
+        .ok()
+        .and_then(|paths| {
+            super::activity::ActivityStore::at(paths.state_root().join("activity.jsonl"))
+                .read()
+                .ok()
+        })
+        .map(|log| log.events().to_vec())
+        .unwrap_or_default();
+    filter_learning_decisions(decisions, &events)
+}
+
+pub(crate) fn filter_learning_decisions(
+    decisions: Vec<DecisionRecord>,
+    events: &[ActivityEvent],
+) -> Vec<DecisionRecord> {
+    let mut terminal_activities = std::collections::HashSet::new();
+    let mut committed = std::collections::HashSet::new();
+    for event in events.iter().filter(|event| event.state.is_terminal()) {
+        if terminal_activities.insert(event.activity_id.as_str()) {
+            if let Some(decision_id) = event.decision_id.as_deref() {
+                committed.insert(decision_id);
+            }
+        }
+    }
+    decisions
+        .into_iter()
+        .filter(|decision| {
+            decision.user_action != "hook_proposal"
+                || decision
+                    .decision_id
+                    .as_deref()
+                    .is_some_and(|decision_id| committed.contains(decision_id))
         })
         .collect()
 }
@@ -1012,6 +1185,101 @@ mod tests {
         for line in log.lines() {
             serde_json::from_str::<serde_json::Value>(line).unwrap();
         }
+    }
+
+    #[test]
+    fn append_repairs_partial_crash_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("decisions.jsonl");
+        fs::write(&path, b"{\"complete\":true}\n{\"partial\":").unwrap();
+
+        append_json_line(&path, &serde_json::json!({"next": true})).unwrap();
+
+        let log = fs::read_to_string(path).unwrap();
+        let records = log
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0]["complete"], true);
+        assert_eq!(records[1]["next"], true);
+    }
+
+    #[test]
+    fn append_preserves_valid_unterminated_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("decisions.jsonl");
+        fs::write(&path, b"{\"complete\":true}").unwrap();
+
+        append_json_line(&path, &serde_json::json!({"next": true})).unwrap();
+
+        let log = fs::read_to_string(path).unwrap();
+        assert_eq!(log.lines().count(), 2);
+        for line in log.lines() {
+            serde_json::from_str::<serde_json::Value>(line).unwrap();
+        }
+    }
+
+    #[test]
+    fn learning_join_keeps_only_terminally_committed_hook_proposals() {
+        let mut paired = make_decision("Bash", "proj", "hook_proposal");
+        paired.decision_id = Some("paired".into());
+        let mut unpaired = make_decision("Bash", "proj", "hook_proposal");
+        unpaired.decision_id = Some("unpaired".into());
+        let accepted = make_decision("Bash", "proj", "accept");
+        let event = ActivityEvent {
+            schema_version: codexctl_core::brain_activity::ACTIVITY_SCHEMA_VERSION,
+            activity_id: "activity-1".into(),
+            recorded_at_ms: 1,
+            project: codexctl_core::brain_activity::ProjectEvidence {
+                project_id: codexctl_core::project::ProjectId::Temporary("project".into()),
+                cwd: std::env::current_dir().unwrap(),
+                label: None,
+            },
+            session: None,
+            state: codexctl_core::brain_activity::ActivityState::Allowed,
+            tool: Some("Bash".into()),
+            normalized_command: None,
+            fingerprint: None,
+            rule_id: None,
+            confidence: None,
+            threshold: None,
+            reasoning: None,
+            decision_id: Some("paired".into()),
+            outcome: None,
+            correction: None,
+            note: None,
+            supersedes: None,
+        };
+        let mut first_error = event.clone();
+        first_error.activity_id = "activity-2".into();
+        first_error.state = codexctl_core::brain_activity::ActivityState::Error;
+        first_error.decision_id = None;
+        let mut late_duplicate = first_error.clone();
+        late_duplicate.state = codexctl_core::brain_activity::ActivityState::Allowed;
+        late_duplicate.decision_id = Some("unpaired".into());
+
+        let learning = filter_learning_decisions(
+            vec![paired, unpaired, accepted],
+            &[event, first_error, late_duplicate],
+        );
+
+        assert_eq!(learning.len(), 2);
+        assert!(
+            learning
+                .iter()
+                .any(|decision| decision.decision_id.as_deref() == Some("paired"))
+        );
+        assert!(
+            !learning
+                .iter()
+                .any(|decision| decision.decision_id.as_deref() == Some("unpaired"))
+        );
+        assert!(
+            learning
+                .iter()
+                .any(|decision| decision.user_action == "accept")
+        );
     }
 
     #[test]

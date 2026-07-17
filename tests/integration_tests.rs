@@ -1661,6 +1661,46 @@ fn write_pending_file(p: &outcomes::PendingOutcome) {
     assert!(path.exists());
 }
 
+fn write_terminal_activity(decision_id: &str, session_id: &str, tool_use_id: &str) {
+    let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());
+    let project_id = codexctl_core::project::ProjectId::Temporary("reaper-test".into());
+    codexctl::brain::activity::ActivityStore::at(
+        home.join(".local/state/coding-brain/activity.jsonl"),
+    )
+    .append(codexctl_core::brain_activity::ActivityEvent {
+        schema_version: codexctl_core::brain_activity::ACTIVITY_SCHEMA_VERSION,
+        activity_id: format!("activity-{decision_id}"),
+        recorded_at_ms: 1,
+        project: codexctl_core::brain_activity::ProjectEvidence {
+            project_id: project_id.clone(),
+            cwd: home.clone(),
+            label: None,
+        },
+        session: Some(codexctl_core::brain_activity::SessionTarget {
+            session_id: session_id.into(),
+            turn_id: Some("turn-1".into()),
+            tool_use_id: Some(tool_use_id.into()),
+            project_id,
+            cwd: home,
+            provider_hints: Vec::new(),
+        }),
+        state: codexctl_core::brain_activity::ActivityState::Allowed,
+        tool: Some("Bash".into()),
+        normalized_command: None,
+        fingerprint: None,
+        rule_id: None,
+        confidence: None,
+        threshold: None,
+        reasoning: None,
+        decision_id: Some(decision_id.into()),
+        outcome: None,
+        correction: None,
+        note: None,
+        supersedes: None,
+    })
+    .unwrap();
+}
+
 #[test]
 fn reaper_attributes_outcome_to_recent_decision() {
     let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -1676,13 +1716,14 @@ fn reaper_attributes_outcome_to_recent_decision() {
     write_decision_jsonl(&format!(
         r#"{{"ts":"{dec_ts}","pid":42,"project":"alpha","tool":"Bash","command":"cargo test","brain_action":"approve","brain_confidence":0.9,"brain_reasoning":"safe","user_action":"accept","decision_type":"session","decision_id":"{decision_id}"}}"#
     ));
+    write_terminal_activity(&decision_id, "session-1", "call-1");
 
     write_pending_file(&outcomes::PendingOutcome {
         tool: "Bash".into(),
         command: Some("cargo test".into()),
         project: "alpha".into(),
-        session_id: None,
-        tool_use_id: None,
+        session_id: Some("session-1".into()),
+        tool_use_id: Some("call-1".into()),
         exit_code: Some(0),
         duration_ms: Some(2_400),
         stderr_tail: None,
@@ -1784,14 +1825,15 @@ fn reaper_will_not_double_attribute_one_decision() {
     write_decision_jsonl(&format!(
         r#"{{"ts":"{dec_ts}","pid":7,"project":"p","tool":"Bash","command":"echo hi","brain_action":"approve","brain_confidence":1.0,"brain_reasoning":"","user_action":"accept","decision_type":"session","decision_id":"{decision_id}"}}"#
     ));
+    write_terminal_activity(&decision_id, "session-1", "call-1");
 
     // Two pending outcomes for the same approach.
     write_pending_file(&outcomes::PendingOutcome {
         tool: "Bash".into(),
         command: Some("echo hi".into()),
         project: "p".into(),
-        session_id: None,
-        tool_use_id: None,
+        session_id: Some("session-1".into()),
+        tool_use_id: Some("call-1".into()),
         exit_code: Some(0),
         duration_ms: Some(1),
         stderr_tail: None,
@@ -1801,8 +1843,8 @@ fn reaper_will_not_double_attribute_one_decision() {
         tool: "Bash".into(),
         command: Some("echo hi".into()),
         project: "p".into(),
-        session_id: None,
-        tool_use_id: None,
+        session_id: Some("session-1".into()),
+        tool_use_id: Some("call-1".into()),
         exit_code: Some(0),
         duration_ms: Some(2),
         stderr_tail: None,
@@ -1858,7 +1900,7 @@ fn default_runners() -> Vec<String> {
 }
 
 #[test]
-fn reaper_attributes_test_failure_to_recent_edit() {
+fn reaper_does_not_guess_failed_test_attribution_from_recent_edit() {
     let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let _home = isolated_home();
 
@@ -1887,16 +1929,8 @@ fn reaper_attributes_test_failure_to_recent_edit() {
     });
 
     let stats = outcomes::reap_with_runners(&default_runners());
-    assert_eq!(
-        stats.test_failures_attributed, 1,
-        "edit decision should receive one test-failure marker"
-    );
-
-    let markers = outcomes::load_test_failures();
-    let m = markers
-        .get(&edit_id)
-        .expect("marker keyed by edit decision_id");
-    assert_eq!(m.failed_test_command, "cargo test --release");
+    assert_eq!(stats.test_failures_attributed, 0);
+    assert!(outcomes::load_test_failures().is_empty());
 }
 
 #[test]
@@ -1968,7 +2002,7 @@ fn reaper_test_failure_only_taps_edit_like_tools() {
 }
 
 #[test]
-fn reaper_test_failure_is_idempotent() {
+fn reaper_never_creates_heuristic_test_failure_markers() {
     let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let _home = isolated_home();
 
@@ -1996,7 +2030,7 @@ fn reaper_test_failure_is_idempotent() {
         ts: now,
     });
     let first = outcomes::reap_with_runners(&default_runners());
-    assert_eq!(first.test_failures_attributed, 1);
+    assert_eq!(first.test_failures_attributed, 0);
 
     // A second failing run after attribution must not double-tag the same
     // edit — markers are written with create_new.
@@ -2014,9 +2048,9 @@ fn reaper_test_failure_is_idempotent() {
     let second = outcomes::reap_with_runners(&default_runners());
     assert_eq!(
         second.test_failures_attributed, 0,
-        "second pass should not re-tag the same edit"
+        "second pass must not guess at edit attribution"
     );
-    assert_eq!(outcomes::load_test_failures().len(), 1);
+    assert!(outcomes::load_test_failures().is_empty());
 }
 
 #[test]

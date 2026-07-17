@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use super::decisions::read_all_decisions;
+use super::decisions::read_learning_decisions;
 use super::risk::{RiskTier, classify_risk};
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -81,7 +81,7 @@ pub fn rules_baseline_classify(tool: Option<&str>, command: Option<&str>) -> &'s
 
 /// Print rules baseline comparison.
 pub fn print_baseline() {
-    let decisions = read_all_decisions();
+    let decisions = read_learning_decisions();
     let total = decisions.len();
 
     println!("Rules Baseline Comparison");
