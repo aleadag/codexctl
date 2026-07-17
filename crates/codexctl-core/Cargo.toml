@@ -23,6 +23,5 @@ time = { version = "0.3", features = ["parsing"] }
 # touch heavier than we'd like — when codexctl-tui is extracted (#275) theme
 # may move with it and we can drop this dep.
 ratatui = "0.29"
-
-[dev-dependencies]
+fs2 = "0.4"
 tempfile = "3"
