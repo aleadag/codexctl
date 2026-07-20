@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use codexctl_core::runtime::{
+use coding_brain_core::runtime::{
     BrainEffect, BrainRuntime, DecisionSummary, EndpointHealth, MockBrainRuntime, ReviewItemSummary,
 };
-use codexctl_core::theme::{Theme, ThemeMode};
-use codexctl_tui::brain_app::{BrainApp, BrainTab};
+use coding_brain_core::theme::{Theme, ThemeMode};
+use coding_brain_tui::brain_app::{BrainApp, BrainTab};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{Terminal, backend::TestBackend};
 
@@ -29,7 +29,7 @@ fn offline_brain_opens_live_keeps_review_and_exits_cleanly() {
     let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
 
     terminal
-        .draw(|frame| codexctl_tui::ui::brain::render(frame, &app))
+        .draw(|frame| coding_brain_tui::ui::brain::render(frame, &app))
         .unwrap();
 
     assert_eq!(app.tab(), BrainTab::Live);

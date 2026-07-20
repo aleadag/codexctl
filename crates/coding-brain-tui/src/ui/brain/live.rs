@@ -1,4 +1,6 @@
-use codexctl_core::brain_activity::{ActivityItem, ActivityOutcome, ActivityState, DeliveryState};
+use coding_brain_core::brain_activity::{
+    ActivityItem, ActivityOutcome, ActivityState, DeliveryState,
+};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -161,9 +163,11 @@ pub(crate) fn activity_status(item: &ActivityItem) -> String {
         return format!(
             "resolved: {}",
             match correction {
-                codexctl_core::brain_activity::CorrectionDisposition::BrainRight => "brain right",
-                codexctl_core::brain_activity::CorrectionDisposition::BrainWrong => "brain wrong",
-                codexctl_core::brain_activity::CorrectionDisposition::Exception => "exception",
+                coding_brain_core::brain_activity::CorrectionDisposition::BrainRight =>
+                    "brain right",
+                coding_brain_core::brain_activity::CorrectionDisposition::BrainWrong =>
+                    "brain wrong",
+                coding_brain_core::brain_activity::CorrectionDisposition::Exception => "exception",
             }
         );
     }

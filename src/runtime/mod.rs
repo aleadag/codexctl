@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use codexctl_core::runtime::BrainRuntime;
+use coding_brain_core::runtime::BrainRuntime;
 
 mod brain;
 mod navigation;

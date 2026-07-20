@@ -7,11 +7,11 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use codexctl::brain::activity::{ActivityLimits, ActivityStore};
-use codexctl_core::brain_activity::{
+use coding_brain::brain::activity::{ActivityLimits, ActivityStore};
+use coding_brain_core::brain_activity::{
     ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityState, ProjectEvidence,
 };
-use codexctl_core::project::ProjectId;
+use coding_brain_core::project::ProjectId;
 
 fn event(activity_id: impl Into<String>, recorded_at_ms: u64) -> ActivityEvent {
     let activity_id = activity_id.into();

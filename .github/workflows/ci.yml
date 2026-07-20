@@ -52,9 +52,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --all-targets
 
-  # Workspace refactor (#279) — verify codexctl-core builds and tests
+  # Workspace refactor (#279) — verify coding-brain-core builds and tests
   # standalone, without the binary crate. Guards the
-  # codexctl → codexctl-core dependency direction at the workspace level.
+  # coding-brain → coding-brain-core dependency direction at the workspace level.
   core-standalone:
     name: Core (standalone)
     runs-on: ubuntu-latest
@@ -64,14 +64,14 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Build codexctl-core standalone
-        run: cargo build -p codexctl-core
-      - name: Clippy codexctl-core standalone
-        run: cargo clippy -p codexctl-core --all-targets -- -D warnings
-      - name: Test codexctl-core standalone
-        run: cargo test -p codexctl-core
+      - name: Build coding-brain-core standalone
+        run: cargo build -p coding-brain-core
+      - name: Clippy coding-brain-core standalone
+        run: cargo clippy -p coding-brain-core --all-targets -- -D warnings
+      - name: Test coding-brain-core standalone
+        run: cargo test -p coding-brain-core
 
-  # Same guarantee for codexctl-tui (#275): builds and tests without the
+  # Same guarantee for coding-brain-tui (#275): builds and tests without the
   # binary crate. Catches accidental `crate::brain::*` or other binary refs
   # that would only break under workspace builds.
   tui-standalone:
@@ -83,14 +83,14 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Build codexctl-tui standalone
-        run: cargo build -p codexctl-tui
-      - name: Clippy codexctl-tui standalone
-        run: cargo clippy -p codexctl-tui --all-targets -- -D warnings
-      - name: Test codexctl-tui standalone
-        run: cargo test -p codexctl-tui
+      - name: Build coding-brain-tui standalone
+        run: cargo build -p coding-brain-tui
+      - name: Clippy coding-brain-tui standalone
+        run: cargo clippy -p coding-brain-tui --all-targets -- -D warnings
+      - name: Test coding-brain-tui standalone
+        run: cargo test -p coding-brain-tui
 
-  # Layering check: nothing inside codexctl-core may reference binary-crate
+  # Layering check: nothing inside coding-brain-core may reference binary-crate
   # modules. This is a textual guard on top of the standalone build above —
   # the build would already fail on a real upward dep, but grep catches
   # subtler attempts (e.g. cfg-gated paths that don't trip on this matrix).
@@ -99,12 +99,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: No binary modules inside codexctl-core
+      - name: No binary modules inside coding-brain-core
         run: |
           set -e
           PATTERN='crate::(brain|init|launch|hooks|recorder|session_recorder|app|ui|demo)\b'
-          if grep -rEn "${PATTERN}" crates/codexctl-core/src/ ; then
-            echo "::error::codexctl-core must not depend on binary-crate modules. See #279 dependency rule."
+          if grep -rEn "${PATTERN}" crates/coding-brain-core/src/ ; then
+            echo "::error::coding-brain-core must not depend on binary-crate modules. See #279 dependency rule."
             exit 1
           fi
-          echo "codexctl-core has no upward dependencies on the binary crate."
+          echo "coding-brain-core has no upward dependencies on the binary crate."

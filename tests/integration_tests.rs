@@ -1,11 +1,13 @@
 use std::io::{Seek, SeekFrom, Write};
 use std::time::Duration;
 
-use codexctl::discovery;
-use codexctl::models;
-use codexctl::monitor;
-use codexctl::process;
-use codexctl::session::{CodexSession, CodexTaskState, RawSession, SessionStatus, TelemetryStatus};
+use coding_brain::discovery;
+use coding_brain::models;
+use coding_brain::monitor;
+use coding_brain::process;
+use coding_brain::session::{
+    CodexSession, CodexTaskState, RawSession, SessionStatus, TelemetryStatus,
+};
 
 /// Helper: create a minimal session for testing status inference.
 fn make_session(cpu: f32, last_message_age_secs: u64) -> CodexSession {
@@ -1237,22 +1239,22 @@ fn json_export_includes_subagent_breakdown() {
     )];
     s.subagent_rollups.insert(
         std::path::PathBuf::from("/tmp/codex-1/-tmp-project/session-1/tasks/agent-1.jsonl"),
-        codexctl::session::SubagentRollup {
+        coding_brain::session::SubagentRollup {
             input_tokens: 20_000,
             output_tokens: 2_000,
             cost_usd: 0.4,
             usage_metrics_available: true,
-            ..codexctl::session::SubagentRollup::default()
+            ..coding_brain::session::SubagentRollup::default()
         },
     );
     s.subagent_rollups.insert(
         std::path::PathBuf::from("/tmp/codex-1/-tmp-project/session-1/tasks/agent-2.jsonl"),
-        codexctl::session::SubagentRollup {
+        coding_brain::session::SubagentRollup {
             input_tokens: 10_000,
             output_tokens: 1_000,
             cost_usd: 0.2,
             usage_metrics_available: true,
-            ..codexctl::session::SubagentRollup::default()
+            ..coding_brain::session::SubagentRollup::default()
         },
     );
     s.subagent_count = 2;
@@ -1479,7 +1481,7 @@ fn resolve_jsonl_telemetry_available_after_resolution() {
 // and a pending-outcome file, runs the reaper, then asserts on the resulting
 // outcomes/ and pending-outcomes/ directories. HOME is restored on teardown.
 
-use codexctl::brain::outcomes;
+use coding_brain::brain::outcomes;
 
 struct HomeGuard {
     original: Option<String>,
@@ -1524,20 +1526,20 @@ fn write_pending_file(p: &outcomes::PendingOutcome) {
 
 fn write_terminal_activity(decision_id: &str, session_id: &str, tool_use_id: &str) {
     let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());
-    let project_id = codexctl_core::project::ProjectId::Temporary("reaper-test".into());
-    codexctl::brain::activity::ActivityStore::at(
+    let project_id = coding_brain_core::project::ProjectId::Temporary("reaper-test".into());
+    coding_brain::brain::activity::ActivityStore::at(
         home.join(".local/state/coding-brain/activity.jsonl"),
     )
-    .append(codexctl_core::brain_activity::ActivityEvent {
-        schema_version: codexctl_core::brain_activity::ACTIVITY_SCHEMA_VERSION,
+    .append(coding_brain_core::brain_activity::ActivityEvent {
+        schema_version: coding_brain_core::brain_activity::ACTIVITY_SCHEMA_VERSION,
         activity_id: format!("activity-{decision_id}"),
         recorded_at_ms: 1,
-        project: codexctl_core::brain_activity::ProjectEvidence {
+        project: coding_brain_core::brain_activity::ProjectEvidence {
             project_id: project_id.clone(),
             cwd: home.clone(),
             label: None,
         },
-        session: Some(codexctl_core::brain_activity::SessionTarget {
+        session: Some(coding_brain_core::brain_activity::SessionTarget {
             session_id: session_id.into(),
             turn_id: Some("turn-1".into()),
             tool_use_id: Some(tool_use_id.into()),
@@ -1545,7 +1547,7 @@ fn write_terminal_activity(decision_id: &str, session_id: &str, tool_use_id: &st
             cwd: home,
             provider_hints: Vec::new(),
         }),
-        state: codexctl_core::brain_activity::ActivityState::Allowed,
+        state: coding_brain_core::brain_activity::ActivityState::Allowed,
         tool: Some("Bash".into()),
         normalized_command: None,
         fingerprint: None,

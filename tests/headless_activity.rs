@@ -3,10 +3,10 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use codexctl_core::brain_activity::{
+use coding_brain_core::brain_activity::{
     ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityState, ProjectEvidence,
 };
-use codexctl_core::project::ProjectId;
+use coding_brain_core::project::ProjectId;
 
 #[test]
 fn headless_emits_activity_without_a_session_roster() {

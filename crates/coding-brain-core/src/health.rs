@@ -3,7 +3,7 @@
 use crate::session::CodexSession;
 
 /// Tunable thresholds for the health checks below. Lives here (not in
-/// `config`) because health is a foundational `codexctl-core` concern; the
+/// `config`) because health is a foundational `coding-brain-core` concern; the
 /// binary's `config::Config` re-exports this type and parses TOML overrides
 /// against it.
 #[derive(Debug, Clone)]

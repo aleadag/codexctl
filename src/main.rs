@@ -5,10 +5,10 @@
     clippy::io_other_error
 )]
 
-// Foundational modules from codexctl-core (epic #279). Re-aliased so existing
+// Foundational modules from coding-brain-core (epic #279). Re-aliased so existing
 // `crate::session::*` paths still resolve. See `lib.rs` for the rationale.
-use codexctl_core::{discovery, hooks, logger, rules, session, theme, transcript};
-use codexctl_tui::ui;
+use coding_brain_core::{discovery, hooks, logger, rules, session, theme, transcript};
+use coding_brain_tui::ui;
 
 mod brain;
 mod commands;
@@ -345,8 +345,8 @@ fn main() -> io::Result<()> {
 }
 
 fn maybe_print_star_prompt() {
-    let marker = codexctl_core::paths::CodingBrainPaths::resolve(
-        &codexctl_core::paths::PathEnvironment::current(),
+    let marker = coding_brain_core::paths::CodingBrainPaths::resolve(
+        &coding_brain_core::paths::PathEnvironment::current(),
     )
     .map(|paths| paths.state_root().join(".star-prompted"))
     .unwrap_or_else(|_| std::env::temp_dir().join("coding-brain/.star-prompted"));
@@ -711,7 +711,7 @@ fn launch_brain_tui(theme: theme::Theme) -> io::Result<()> {
             return Err(error);
         }
     };
-    let app = codexctl_tui::brain_app::BrainApp::new(runtime::build_brain_runtime(), theme);
+    let app = coding_brain_tui::brain_app::BrainApp::new(runtime::build_brain_runtime(), theme);
     let result = run_brain_tui(&mut terminal, app);
     let raw_result = disable_raw_mode();
     let screen_result = execute!(terminal.backend_mut(), LeaveAlternateScreen);
@@ -721,10 +721,10 @@ fn launch_brain_tui(theme: theme::Theme) -> io::Result<()> {
 
 fn run_brain_tui<W: io::Write>(
     terminal: &mut Terminal<CrosstermBackend<W>>,
-    mut app: codexctl_tui::brain_app::BrainApp,
+    mut app: coding_brain_tui::brain_app::BrainApp,
 ) -> io::Result<()> {
-    use codexctl_core::runtime::BrainEffect;
-    use codexctl_tui::terminal_suspend::{CrosstermTerminalControl, navigate_to_session};
+    use coding_brain_core::runtime::BrainEffect;
+    use coding_brain_tui::terminal_suspend::{CrosstermTerminalControl, navigate_to_session};
 
     loop {
         terminal.draw(|frame| ui::brain::render(frame, &app))?;

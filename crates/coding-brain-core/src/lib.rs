@@ -1,8 +1,8 @@
-//! codexctl-core — foundational types and IO primitives.
+//! coding-brain-core — foundational types and IO primitives.
 //!
 //! Carved out from the binary crate as the first step of the workspace
 //! refactor (epic #279). The binary, TUI, brain, bus, and every future crate
-//! depend on this; this crate depends on nothing codexctl-specific in
+//! depend on this; this crate depends on nothing Coding Brain-specific in
 //! return. Dependency direction is enforced by CI (#277) once the rest of
 //! the epic lands.
 

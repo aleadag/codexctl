@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use codexctl_core::runtime::DecisionSummary;
+use coding_brain_core::runtime::DecisionSummary;
 
 use super::decisions::{DecisionRecord, read_learning_decisions};
 

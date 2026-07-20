@@ -6,10 +6,10 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use codexctl::runtime::LiveSessionNavigation;
-use codexctl_core::brain_activity::SessionTarget;
-use codexctl_core::project::ProjectId;
-use codexctl_tui::terminal_suspend::{NavigationOutcome, TerminalControl, navigate_to_session};
+use coding_brain::runtime::LiveSessionNavigation;
+use coding_brain_core::brain_activity::SessionTarget;
+use coding_brain_core::project::ProjectId;
+use coding_brain_tui::terminal_suspend::{NavigationOutcome, TerminalControl, navigate_to_session};
 
 #[test]
 fn fake_agent_deck_resolves_attaches_and_restores_terminal() {

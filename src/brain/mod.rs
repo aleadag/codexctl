@@ -28,8 +28,8 @@ use std::path::PathBuf;
 
 /// Path to the Brain gate mode file in the Coding Brain state root.
 pub fn gate_mode_path() -> PathBuf {
-    codexctl_core::paths::CodingBrainPaths::resolve(
-        &codexctl_core::paths::PathEnvironment::current(),
+    coding_brain_core::paths::CodingBrainPaths::resolve(
+        &coding_brain_core::paths::PathEnvironment::current(),
     )
     .map(|paths| paths.state_root().join("brain/gate-mode"))
     .unwrap_or_else(|_| std::env::temp_dir().join("coding-brain/brain/gate-mode"))

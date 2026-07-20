@@ -1,4 +1,4 @@
-use codexctl_core::runtime::{BrainRuntime, MockBrainRuntime};
+use coding_brain_core::runtime::{BrainRuntime, MockBrainRuntime};
 
 #[test]
 fn final_runtime_exposes_only_brain_source_actions_and_navigation() {

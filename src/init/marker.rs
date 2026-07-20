@@ -49,8 +49,8 @@ pub struct OnboardingMarker {
 /// Default location: `<state-root>/onboarding.json`. Used in production;
 /// tests inject their own path.
 pub fn default_path() -> PathBuf {
-    codexctl_core::paths::CodingBrainPaths::resolve(
-        &codexctl_core::paths::PathEnvironment::current(),
+    coding_brain_core::paths::CodingBrainPaths::resolve(
+        &coding_brain_core::paths::PathEnvironment::current(),
     )
     .map(|paths| paths.state_root().join("onboarding.json"))
     .unwrap_or_else(|_| std::env::temp_dir().join("coding-brain/onboarding.json"))

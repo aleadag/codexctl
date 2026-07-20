@@ -3,8 +3,8 @@ use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use codexctl_core::brain_activity::SessionTarget;
-use codexctl_core::runtime::{ExternalCommand, NavigationPlan, SessionNavigation};
+use coding_brain_core::brain_activity::SessionTarget;
+use coding_brain_core::runtime::{ExternalCommand, NavigationPlan, SessionNavigation};
 use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -252,8 +252,8 @@ mod tests {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    use codexctl_core::project::ProjectId;
-    use codexctl_core::runtime::{NavigationError, NavigationPlan};
+    use coding_brain_core::project::ProjectId;
+    use coding_brain_core::runtime::{NavigationError, NavigationPlan};
 
     use super::*;
 

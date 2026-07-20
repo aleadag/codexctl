@@ -7,8 +7,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::brain::client::BrainSuggestion;
-use codexctl_core::brain_activity::ActivityEvent;
-use codexctl_core::paths::{CodingBrainPaths, PathEnvironment};
+use coding_brain_core::brain_activity::ActivityEvent;
+use coding_brain_core::paths::{CodingBrainPaths, PathEnvironment};
 use fs2::FileExt;
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -148,7 +148,7 @@ pub struct DecisionContext {
 /// pipeline once it migrates to operate on summaries. Conversion lives here
 /// because `DecisionRecord` is local to the binary crate, satisfying the
 /// orphan rules for the foreign `DecisionSummary` impl.
-impl From<&DecisionRecord> for codexctl_core::runtime::DecisionSummary {
+impl From<&DecisionRecord> for coding_brain_core::runtime::DecisionSummary {
     fn from(r: &DecisionRecord) -> Self {
         Self {
             id: r.decision_id.clone().unwrap_or_default(),
@@ -1185,16 +1185,16 @@ mod tests {
         unpaired.decision_id = Some("unpaired".into());
         let accepted = make_decision("Bash", "proj", "accept");
         let event = ActivityEvent {
-            schema_version: codexctl_core::brain_activity::ACTIVITY_SCHEMA_VERSION,
+            schema_version: coding_brain_core::brain_activity::ACTIVITY_SCHEMA_VERSION,
             activity_id: "activity-1".into(),
             recorded_at_ms: 1,
-            project: codexctl_core::brain_activity::ProjectEvidence {
-                project_id: codexctl_core::project::ProjectId::Temporary("project".into()),
+            project: coding_brain_core::brain_activity::ProjectEvidence {
+                project_id: coding_brain_core::project::ProjectId::Temporary("project".into()),
                 cwd: std::env::current_dir().unwrap(),
                 label: None,
             },
             session: None,
-            state: codexctl_core::brain_activity::ActivityState::Allowed,
+            state: coding_brain_core::brain_activity::ActivityState::Allowed,
             tool: Some("Bash".into()),
             normalized_command: None,
             fingerprint: None,
@@ -1210,10 +1210,10 @@ mod tests {
         };
         let mut first_error = event.clone();
         first_error.activity_id = "activity-2".into();
-        first_error.state = codexctl_core::brain_activity::ActivityState::Error;
+        first_error.state = coding_brain_core::brain_activity::ActivityState::Error;
         first_error.decision_id = None;
         let mut late_duplicate = first_error.clone();
-        late_duplicate.state = codexctl_core::brain_activity::ActivityState::Allowed;
+        late_duplicate.state = coding_brain_core::brain_activity::ActivityState::Allowed;
         late_duplicate.decision_id = Some("unpaired".into());
 
         let learning = filter_learning_decisions(
@@ -1408,7 +1408,7 @@ mod tests {
             task_state: crate::session::CodexTaskState::Unknown,
             transcript_evidence: None,
             lifecycle_evidence: None,
-            lifecycle_diagnostic: codexctl_core::lifecycle::LifecycleDiagnostic::default(),
+            lifecycle_diagnostic: coding_brain_core::lifecycle::LifecycleDiagnostic::default(),
             explicit_input_required: false,
             approval: crate::session::ApprovalObservation::NotChecked,
             approval_checked_at_ms: 0,

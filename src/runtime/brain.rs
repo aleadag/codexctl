@@ -5,10 +5,10 @@ use std::fs;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use codexctl_core::brain_activity::{
+use coding_brain_core::brain_activity::{
     ActivityEvent, ActivitySnapshot, CorrectionDisposition, SnapshotLimits,
 };
-use codexctl_core::runtime::{
+use coding_brain_core::runtime::{
     BrainActions, BrainGateMode, BrainSource, CacheSummary, CorrectionInput, CounterfactualSummary,
     DecisionSummary, EndpointHealth, LatencySummary, ReviewItemSummary, RiskTierSummary,
     ScorecardSummary,
@@ -317,7 +317,7 @@ fn correction_user_action(correction: CorrectionDisposition) -> &'static str {
 }
 
 fn bounded_display(value: &str) -> String {
-    codexctl_core::brain_activity::redact_activity_text(value)
+    coding_brain_core::brain_activity::redact_activity_text(value)
         .chars()
         .take(80)
         .collect()
@@ -366,12 +366,12 @@ impl BrainActions for LiveBrainActions {
             .ok_or_else(|| format!("activity {} not found", correction.activity_id))?;
         store
             .append(ActivityEvent {
-                schema_version: codexctl_core::brain_activity::ACTIVITY_SCHEMA_VERSION,
+                schema_version: coding_brain_core::brain_activity::ACTIVITY_SCHEMA_VERSION,
                 activity_id: correction.activity_id,
                 recorded_at_ms: epoch_ms(),
                 project: source.project,
                 session: source.session,
-                state: codexctl_core::brain_activity::ActivityState::Correction,
+                state: coding_brain_core::brain_activity::ActivityState::Correction,
                 tool: None,
                 normalized_command: None,
                 fingerprint: None,
@@ -582,18 +582,18 @@ mod tests {
     fn correction(
         decision_id: &str,
         disposition: CorrectionDisposition,
-    ) -> codexctl_core::brain_activity::ActivityEvent {
-        codexctl_core::brain_activity::ActivityEvent {
-            schema_version: codexctl_core::brain_activity::ACTIVITY_SCHEMA_VERSION,
+    ) -> coding_brain_core::brain_activity::ActivityEvent {
+        coding_brain_core::brain_activity::ActivityEvent {
+            schema_version: coding_brain_core::brain_activity::ACTIVITY_SCHEMA_VERSION,
             activity_id: format!("activity-{decision_id}"),
             recorded_at_ms: 1,
-            project: codexctl_core::brain_activity::ProjectEvidence {
-                project_id: codexctl_core::project::ProjectId::Stable("project".into()),
+            project: coding_brain_core::brain_activity::ProjectEvidence {
+                project_id: coding_brain_core::project::ProjectId::Stable("project".into()),
                 cwd: "/work/project".into(),
                 label: Some("project".into()),
             },
             session: None,
-            state: codexctl_core::brain_activity::ActivityState::Correction,
+            state: coding_brain_core::brain_activity::ActivityState::Correction,
             tool: None,
             normalized_command: None,
             fingerprint: None,

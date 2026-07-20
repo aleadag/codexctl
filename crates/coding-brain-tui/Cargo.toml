@@ -1,20 +1,20 @@
 [package]
-name = "codexctl-tui"
+name = "coding-brain-tui"
 version = "0.53.0"
 edition = "2024"
 rust-version = "1.88"
-description = "Coding Brain terminal UI for codexctl."
+description = "Coding Brain terminal UI."
 license = "MIT"
 repository = "https://github.com/aleadag/codexctl"
 keywords = ["codex", "tui", "ratatui"]
 categories = ["command-line-utilities"]
 
 [lib]
-name = "codexctl_tui"
+name = "coding_brain_tui"
 path = "src/lib.rs"
 
 [dependencies]
-codexctl-core = { path = "../codexctl-core", version = "0.53.0" }
+coding-brain-core = { path = "../coding-brain-core", version = "0.53.0" }
 ratatui = "0.29"
 crossterm = "0.28"
 ctrlc = "3"

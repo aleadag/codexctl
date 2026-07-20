@@ -420,7 +420,7 @@ mod tests {
         ApprovalEvidence, ApprovalObservation, CodexSession, RawSession, SessionStatus,
         TelemetryStatus,
     };
-    use codexctl_core::terminals::Terminal;
+    use coding_brain_core::terminals::Terminal;
 
     fn make_session() -> CodexSession {
         let raw = RawSession {

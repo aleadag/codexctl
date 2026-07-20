@@ -210,8 +210,8 @@ fn format_eval_decision_prompt(eval: &EvalSession) -> String {
 }
 
 fn evals_dir() -> PathBuf {
-    codexctl_core::paths::CodingBrainPaths::resolve(
-        &codexctl_core::paths::PathEnvironment::current(),
+    coding_brain_core::paths::CodingBrainPaths::resolve(
+        &coding_brain_core::paths::PathEnvironment::current(),
     )
     .map(|paths| paths.state_root().join("brain/evals"))
     .unwrap_or_else(|_| std::env::temp_dir().join("coding-brain/brain/evals"))

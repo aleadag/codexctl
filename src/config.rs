@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 
-use codexctl_core::paths::{CodingBrainPaths, PathEnvironment, PathError};
+use coding_brain_core::paths::{CodingBrainPaths, PathEnvironment, PathError};
 
 #[cfg(test)]
 pub(crate) static HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -15,10 +15,10 @@ pub struct Config {
     pub brain: Option<BrainConfig>,
 }
 
-/// `BrainConfig` and friends live in `codexctl_core::config` so the future
+/// `BrainConfig` and friends live in `coding_brain_core::config` so the future
 /// TUI crate (#275) can hold them without depending on the binary. Re-exported
 /// here so existing `crate::config::BrainConfig` callers keep resolving.
-pub use codexctl_core::config::{BrainConfig, default_test_runners};
+pub use coding_brain_core::config::{BrainConfig, default_test_runners};
 
 /// Raw TOML representation — all fields optional for partial overrides.
 #[derive(Debug, Default)]

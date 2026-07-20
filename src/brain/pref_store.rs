@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use codexctl_core::paths::{CodingBrainPaths, PathEnvironment};
+use coding_brain_core::paths::{CodingBrainPaths, PathEnvironment};
 
 use super::preferences::{
     DistilledPreferences, PreferenceCondition, PreferencePattern, TemporalPattern, ToolAccuracy,

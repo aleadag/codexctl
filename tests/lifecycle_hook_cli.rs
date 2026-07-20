@@ -6,7 +6,7 @@ use std::time::Instant;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-use codexctl_core::lifecycle::{LifecycleStore, ProjectedStatus};
+use coding_brain_core::lifecycle::{LifecycleStore, ProjectedStatus};
 
 const PROMPT: &[u8] = include_bytes!("fixtures/hooks/user-prompt-submit.json");
 
@@ -300,12 +300,12 @@ fn warm_lifecycle_hook_latency_and_roundtrip() {
     let view = store.read().unwrap();
     assert_eq!(
         view.condition,
-        codexctl_core::lifecycle::StoreCondition::Healthy
+        coding_brain_core::lifecycle::StoreCondition::Healthy
     );
     let state = &view.snapshot.unwrap().sessions["session-1"];
     assert_eq!(
         state.latest_event,
-        Some(codexctl_core::lifecycle::LifecycleEventName::PermissionRequest)
+        Some(coding_brain_core::lifecycle::LifecycleEventName::PermissionRequest)
     );
     assert_eq!(state.projected_status, Some(ProjectedStatus::Processing));
 

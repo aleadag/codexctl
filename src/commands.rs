@@ -251,7 +251,9 @@ fn collect_jsonl_files_inner(root: &std::path::Path, files: &mut Vec<std::path::
     }
 }
 
-fn activity_envelope(event: &codexctl_core::brain_activity::ActivityEvent) -> serde_json::Value {
+fn activity_envelope(
+    event: &coding_brain_core::brain_activity::ActivityEvent,
+) -> serde_json::Value {
     serde_json::json!({
         "type": "activity",
         "activity_id": event.activity_id,
@@ -278,8 +280,8 @@ struct HeadlessActivityCursor {
 impl HeadlessActivityCursor {
     fn take_unseen(
         &mut self,
-        events: &[codexctl_core::brain_activity::ActivityEvent],
-    ) -> Result<Vec<codexctl_core::brain_activity::ActivityEvent>, serde_json::Error> {
+        events: &[coding_brain_core::brain_activity::ActivityEvent],
+    ) -> Result<Vec<coding_brain_core::brain_activity::ActivityEvent>, serde_json::Error> {
         let mut occurrences = std::collections::HashMap::<String, usize>::new();
         let mut current = std::collections::HashSet::new();
         let mut unseen = Vec::new();
@@ -340,7 +342,7 @@ pub(crate) fn run_headless(
     }
 }
 
-fn emit_activity(event: &codexctl_core::brain_activity::ActivityEvent, json_mode: bool) {
+fn emit_activity(event: &coding_brain_core::brain_activity::ActivityEvent, json_mode: bool) {
     let envelope = activity_envelope(event);
     if json_mode {
         println!("{}", serde_json::to_string(&envelope).unwrap_or_default());
@@ -357,12 +359,12 @@ fn emit_activity(event: &codexctl_core::brain_activity::ActivityEvent, json_mode
 
 /// Path to the brain gate mode state file.
 pub(crate) fn brain_gate_mode_path() -> std::path::PathBuf {
-    codexctl::brain::gate_mode_path()
+    coding_brain::brain::gate_mode_path()
 }
 
 /// Read the current brain gate mode from disk. Returns "on" if no file exists.
 pub(crate) fn read_brain_gate_mode() -> String {
-    codexctl::brain::read_gate_mode()
+    coding_brain::brain::read_gate_mode()
 }
 
 /// Set the brain gate mode (on/off/auto) and print confirmation.
@@ -830,11 +832,11 @@ mod headless_tests {
     fn event(
         activity_id: &str,
         recorded_at_ms: u64,
-    ) -> codexctl_core::brain_activity::ActivityEvent {
-        use codexctl_core::brain_activity::{
+    ) -> coding_brain_core::brain_activity::ActivityEvent {
+        use coding_brain_core::brain_activity::{
             ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityState, ProjectEvidence,
         };
-        use codexctl_core::project::ProjectId;
+        use coding_brain_core::project::ProjectId;
 
         ActivityEvent {
             schema_version: ACTIVITY_SCHEMA_VERSION,

@@ -9,8 +9,8 @@ use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-use codexctl::brain::activity::ActivityStore;
-use codexctl_core::brain_activity::{ActivityState, DeliveryState, SnapshotLimits};
+use coding_brain::brain::activity::ActivityStore;
+use coding_brain_core::brain_activity::{ActivityState, DeliveryState, SnapshotLimits};
 use fs2::FileExt;
 
 fn permission_payload(cwd: &Path, command: &str) -> Vec<u8> {

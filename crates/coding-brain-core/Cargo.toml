@@ -1,16 +1,16 @@
 [package]
-name = "codexctl-core"
+name = "coding-brain-core"
 version = "0.53.0"
 edition = "2024"
 rust-version = "1.88"
-description = "Session types, transcript discovery, health checks, and runtime traits for codexctl."
+description = "Session types, transcript discovery, health checks, and runtime traits for Coding Brain."
 license = "MIT"
 repository = "https://github.com/aleadag/codexctl"
 keywords = ["codex", "session-monitoring", "internals"]
 categories = ["command-line-utilities"]
 
 [lib]
-name = "codexctl_core"
+name = "coding_brain_core"
 path = "src/lib.rs"
 
 [dependencies]
@@ -20,7 +20,7 @@ libc = "0.2"
 crossterm = "0.28"
 time = { version = "0.3", features = ["parsing"] }
 # theme.rs uses ratatui::style::Color. Pulling the whole ratatui crate is a
-# touch heavier than we'd like — when codexctl-tui is extracted (#275) theme
+# touch heavier than we'd like — when coding-brain-tui is extracted (#275) theme
 # may move with it and we can drop this dep.
 ratatui = "0.29"
 fs2 = "0.4"

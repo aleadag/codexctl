@@ -172,14 +172,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "codexctl"
+name = "coding-brain"
 version = "0.58.0"
 dependencies = [
  "clap",
  "clap_complete",
  "clap_mangen",
- "codexctl-core",
- "codexctl-tui",
+ "coding-brain-core",
+ "coding-brain-tui",
  "crossterm",
  "ctrlc",
  "fs2",
@@ -191,7 +191,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "codexctl-core"
+name = "coding-brain-core"
 version = "0.53.0"
 dependencies = [
  "crossterm",
@@ -207,10 +207,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "codexctl-tui"
+name = "coding-brain-tui"
 version = "0.53.0"
 dependencies = [
- "codexctl-core",
+ "coding-brain-core",
  "crossterm",
  "ctrlc",
  "libc",

@@ -2,7 +2,7 @@
 
 use serde_json::Value;
 
-use codexctl_core::brain_activity::redact_activity_text;
+use coding_brain_core::brain_activity::redact_activity_text;
 
 use super::client::{self, BrainSuggestion};
 use super::decisions::{

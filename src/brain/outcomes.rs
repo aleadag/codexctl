@@ -16,11 +16,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
-use codexctl_core::brain_activity::{
+use coding_brain_core::brain_activity::{
     ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityOutcome, ActivityState, ProjectEvidence,
 };
-use codexctl_core::paths::{CodingBrainPaths, PathEnvironment};
-use codexctl_core::project::ProjectId;
+use coding_brain_core::paths::{CodingBrainPaths, PathEnvironment};
+use coding_brain_core::project::ProjectId;
 
 use super::activity::ActivityStore;
 use super::decisions::{DecisionRecord, decisions_dir, read_all_decisions};
@@ -955,7 +955,7 @@ mod tests {
                     cwd: temp.path().to_path_buf(),
                     label: None,
                 },
-                session: Some(codexctl_core::brain_activity::SessionTarget {
+                session: Some(coding_brain_core::brain_activity::SessionTarget {
                     session_id: "session-1".into(),
                     turn_id: Some("turn-1".into()),
                     tool_use_id: Some("call-1".into()),

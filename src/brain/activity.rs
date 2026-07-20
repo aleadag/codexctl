@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use codexctl_core::brain_activity::{
+use coding_brain_core::brain_activity::{
     ACTIVITY_SCHEMA_VERSION, ActivityDiagnostics, ActivityEvent, ActivityItem, ActivitySnapshot,
     ActivityState, AttentionItem, DEFAULT_INTERRUPTED_AFTER_MS, DeliveryState,
     MAX_ACTIVITY_EVENT_BYTES, SnapshotLimits,
@@ -510,7 +510,7 @@ fn project_snapshot(log: ActivityLog, limits: SnapshotLimits, now_ms: u64) -> Ac
         if events.iter().any(|event| {
             matches!(
                 event.outcome,
-                Some(codexctl_core::brain_activity::ActivityOutcome::Succeeded)
+                Some(coding_brain_core::brain_activity::ActivityOutcome::Succeeded)
             )
         }) {
             superseded.extend(
@@ -542,7 +542,7 @@ fn project_snapshot(log: ActivityLog, limits: SnapshotLimits, now_ms: u64) -> Ac
             ));
         let failed_outcome = matches!(
             item.outcome,
-            Some(codexctl_core::brain_activity::ActivityOutcome::Failed)
+            Some(coding_brain_core::brain_activity::ActivityOutcome::Failed)
         );
         if needs_attention || failed_outcome {
             if needs_attention {
@@ -692,7 +692,7 @@ fn activity_rank(item: &ActivityItem) -> u8 {
     if item.delivery == DeliveryState::Failed
         || matches!(
             item.outcome,
-            Some(codexctl_core::brain_activity::ActivityOutcome::Failed)
+            Some(coding_brain_core::brain_activity::ActivityOutcome::Failed)
         )
     {
         5
@@ -799,11 +799,11 @@ fn set_file_mode(_file: &File) -> io::Result<()> {
 mod tests {
     use std::fs;
 
-    use codexctl_core::brain_activity::{
+    use coding_brain_core::brain_activity::{
         ACTIVITY_SCHEMA_VERSION, ActivityOutcome, CorrectionDisposition, DeliveryState,
         ProjectEvidence,
     };
-    use codexctl_core::project::ProjectId;
+    use coding_brain_core::project::ProjectId;
 
     use super::*;
 
@@ -1060,7 +1060,7 @@ mod tests {
     fn append_completes_large_valid_unterminated_json_within_row_limit() {
         let (root, store) = fixture_store();
         let mut large = event("large", ActivityState::Denied);
-        large.session = Some(codexctl_core::brain_activity::SessionTarget {
+        large.session = Some(coding_brain_core::brain_activity::SessionTarget {
             session_id: "session".into(),
             turn_id: None,
             tool_use_id: None,
@@ -1297,7 +1297,7 @@ mod tests {
         let mut oversized = event("a1", ActivityState::Denied);
         oversized.project.cwd = PathBuf::from(format!("/{}", "c".repeat(5_000)));
         oversized.reasoning = Some("r".repeat(5_000));
-        oversized.session = Some(codexctl_core::brain_activity::SessionTarget {
+        oversized.session = Some(coding_brain_core::brain_activity::SessionTarget {
             session_id: "s".repeat(5_000),
             turn_id: None,
             tool_use_id: None,

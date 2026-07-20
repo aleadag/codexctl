@@ -7,9 +7,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use codexctl_core::brain_activity::{SessionTarget, redact_activity_text};
-use codexctl_core::runtime::{ExternalCommand, NavigationError, NavigationPlan, SessionNavigation};
-use codexctl_core::{discovery, terminals};
+use coding_brain_core::brain_activity::{SessionTarget, redact_activity_text};
+use coding_brain_core::runtime::{
+    ExternalCommand, NavigationError, NavigationPlan, SessionNavigation,
+};
+use coding_brain_core::{discovery, terminals};
 use serde::Deserialize;
 
 const QUERY_TIMEOUT: Duration = Duration::from_secs(2);
@@ -377,9 +379,9 @@ mod tests {
     use std::sync::{Arc, Mutex, MutexGuard};
     use std::time::{Duration, Instant};
 
-    use codexctl_core::brain_activity::SessionTarget;
-    use codexctl_core::project::ProjectId;
-    use codexctl_core::runtime::{
+    use coding_brain_core::brain_activity::SessionTarget;
+    use coding_brain_core::project::ProjectId;
+    use coding_brain_core::runtime::{
         BrainRuntime, ExternalCommand, MockBrainRuntime, NavigationError, NavigationPlan,
         SessionNavigation,
     };

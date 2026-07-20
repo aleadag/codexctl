@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use codexctl_core::paths::{CodingBrainPaths, PathEnvironment};
+use coding_brain_core::paths::{CodingBrainPaths, PathEnvironment};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 
@@ -585,7 +585,7 @@ mod tests {
 
     use super::*;
     use crate::brain::decisions::{DecisionRecord, DecisionType};
-    use codexctl_core::paths::{CodingBrainPaths, PathEnvironment};
+    use coding_brain_core::paths::{CodingBrainPaths, PathEnvironment};
 
     fn paths(temp: &tempfile::TempDir) -> CodingBrainPaths {
         CodingBrainPaths::resolve(&PathEnvironment::new(

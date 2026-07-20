@@ -1,10 +1,10 @@
 [workspace]
-members = ["crates/codexctl-core", "crates/codexctl-tui"]
+members = ["crates/coding-brain-core", "crates/coding-brain-tui"]
 # The root package is also a workspace member (the binary crate). Future epics
-# (e.g. codexctl-brain — see #279) may add more.
+# may add more crates (see #279).
 
 [package]
-name = "codexctl"
+name = "coding-brain"
 version = "0.58.0"
 edition = "2024"
 # MSRV — bumped to 1.88 in #328 so cargo-install on older toolchains
@@ -24,7 +24,7 @@ name = "coding-brain"
 path = "src/main.rs"
 
 [lib]
-name = "codexctl"
+name = "coding_brain"
 path = "src/lib.rs"
 
 [dependencies]
@@ -32,8 +32,8 @@ path = "src/lib.rs"
 # published to crates.io. Local builds always use the path; crates.io strips
 # the path and resolves the published version. Bump both when the workspace
 # crates change.
-codexctl-core = { path = "crates/codexctl-core", version = "0.53.0" }
-codexctl-tui = { path = "crates/codexctl-tui", version = "0.53.0" }
+coding-brain-core = { path = "crates/coding-brain-core", version = "0.53.0" }
+coding-brain-tui = { path = "crates/coding-brain-tui", version = "0.53.0" }
 ratatui = "0.29"
 crossterm = "0.28"
 serde = { version = "1", features = ["derive"] }

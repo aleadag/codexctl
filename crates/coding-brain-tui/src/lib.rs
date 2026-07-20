@@ -1,7 +1,7 @@
 //! Coding Brain's terminal UI.
 //!
 //! Owns the Brain application state, rendering, and terminal suspension used
-//! to switch to a live Codex session. Shared contracts live in `codexctl-core`.
+//! to switch to a live Codex session. Shared contracts live in `coding-brain-core`.
 
 #![allow(unknown_lints)]
 #![allow(

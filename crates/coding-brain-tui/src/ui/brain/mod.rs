@@ -56,9 +56,9 @@ fn render_header(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &Brain
         Span::raw(format!(
             " | {} | {model}",
             match app.gate_mode() {
-                codexctl_core::runtime::BrainGateMode::On => "advisory",
-                codexctl_core::runtime::BrainGateMode::Auto => "automatic",
-                codexctl_core::runtime::BrainGateMode::Off => "off",
+                coding_brain_core::runtime::BrainGateMode::On => "advisory",
+                coding_brain_core::runtime::BrainGateMode::Auto => "automatic",
+                coding_brain_core::runtime::BrainGateMode::Off => "off",
             }
         )),
     ]);
@@ -83,7 +83,7 @@ fn render_header(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &Brain
     frame.render_widget(Paragraph::new(vec![title, tabs, guidance]), area);
 }
 
-fn tab<'a>(label: &'a str, active: bool, theme: &codexctl_core::theme::Theme) -> Span<'a> {
+fn tab<'a>(label: &'a str, active: bool, theme: &coding_brain_core::theme::Theme) -> Span<'a> {
     if active {
         Span::styled(
             format!("[ {label} ]"),
@@ -124,16 +124,16 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
 
-    use codexctl_core::brain_activity::{
+    use coding_brain_core::brain_activity::{
         ActivityItem, ActivityOutcome, ActivitySnapshot, ActivityState, AttentionItem,
         CorrectionDisposition, DeliveryState, ProjectEvidence, SessionTarget,
     };
-    use codexctl_core::project::ProjectId;
-    use codexctl_core::runtime::{
+    use coding_brain_core::project::ProjectId;
+    use coding_brain_core::runtime::{
         BrainRuntime, DecisionSummary, EndpointHealth, MockBrainRuntime, ReviewItemSummary,
         RiskTierSummary, ScorecardSummary,
     };
-    use codexctl_core::theme::{Theme, ThemeMode};
+    use coding_brain_core::theme::{Theme, ThemeMode};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -300,7 +300,7 @@ mod tests {
                 accuracy_pct: 90.0,
                 abstentions: 2,
                 dangerous_false_approvals: 1,
-                counterfactuals: codexctl_core::runtime::CounterfactualSummary {
+                counterfactuals: coding_brain_core::runtime::CounterfactualSummary {
                     brain_was_right: 2,
                     user_was_right: 1,
                 },

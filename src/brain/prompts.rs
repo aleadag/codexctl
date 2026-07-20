@@ -33,8 +33,8 @@ pub fn expand(template: &str, vars: &[(&str, &str)]) -> String {
 
 /// Get the user override path for a prompt.
 fn user_prompt_path(name: &str) -> Option<PathBuf> {
-    codexctl_core::paths::CodingBrainPaths::resolve(
-        &codexctl_core::paths::PathEnvironment::current(),
+    coding_brain_core::paths::CodingBrainPaths::resolve(
+        &coding_brain_core::paths::PathEnvironment::current(),
     )
     .ok()
     .map(|paths| {

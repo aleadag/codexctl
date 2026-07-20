@@ -9,16 +9,16 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use codexctl_core::brain_activity::{
+use coding_brain_core::brain_activity::{
     ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityState, MAX_ACTIVITY_FIELD_BYTES,
     ProjectEvidence, SessionTarget, redact_activity_text,
 };
-use codexctl_core::lifecycle::{
+use coding_brain_core::lifecycle::{
     LifecycleEvent, LifecycleIdentity, LifecycleStore, PermissionDisposition,
     coding_brain_state_root,
 };
-use codexctl_core::paths::{CodingBrainPaths, PathEnvironment};
-use codexctl_core::project::ProjectIdentity;
+use coding_brain_core::paths::{CodingBrainPaths, PathEnvironment};
+use coding_brain_core::project::ProjectIdentity;
 
 use super::activity::ActivityStore;
 use super::client::BrainSuggestion;
@@ -802,8 +802,8 @@ mod tests {
     use crate::brain::decisions::decisions_dir;
     use crate::config::BrainConfig;
     use crate::rules::RuleAction;
-    use codexctl_core::brain_activity::ActivityState;
-    use codexctl_core::lifecycle::{LifecycleStore, ProjectedStatus};
+    use coding_brain_core::brain_activity::ActivityState;
+    use coding_brain_core::lifecycle::{LifecycleStore, ProjectedStatus};
 
     struct FailingWriter;
 

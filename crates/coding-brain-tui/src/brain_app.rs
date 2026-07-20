@@ -1,15 +1,15 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use codexctl_core::brain_activity::{
+use coding_brain_core::brain_activity::{
     ActivityItem, ActivitySnapshot, AttentionItem, CorrectionDisposition, SnapshotLimits,
     redact_activity_text,
 };
-use codexctl_core::runtime::{
+use coding_brain_core::runtime::{
     BrainEffect, BrainGateMode, BrainRuntime, CorrectionInput, EndpointHealth, ReviewItemSummary,
     ScorecardSummary, SessionNavigation,
 };
-use codexctl_core::theme::Theme;
+use coding_brain_core::theme::Theme;
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::terminal_suspend::NavigationOutcome;
@@ -426,16 +426,16 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
 
-    use codexctl_core::brain_activity::{
+    use coding_brain_core::brain_activity::{
         ActivityItem, ActivitySnapshot, ActivityState, AttentionItem, CorrectionDisposition,
         DeliveryState, ProjectEvidence, SessionTarget,
     };
-    use codexctl_core::project::ProjectId;
-    use codexctl_core::runtime::{
+    use coding_brain_core::project::ProjectId;
+    use coding_brain_core::runtime::{
         BrainEffect, BrainRuntime, CorrectionInput, DecisionSummary, MockBrainAction,
         MockBrainRuntime, ReviewItemSummary,
     };
-    use codexctl_core::theme::{Theme, ThemeMode};
+    use coding_brain_core::theme::{Theme, ThemeMode};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     use super::*;

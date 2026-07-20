@@ -33,7 +33,7 @@ pub mod state;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use codexctl_core::paths::{CodingBrainPaths, PathEnvironment};
+use coding_brain_core::paths::{CodingBrainPaths, PathEnvironment};
 
 use marker::{OnboardingMarker, PhaseRecord};
 use phases::{Answers, Phase};
@@ -105,7 +105,7 @@ fn ensure_project_identity() -> io::Result<()> {
     let paths = CodingBrainPaths::resolve(&PathEnvironment::current())
         .map_err(|error| io::Error::other(format!("path resolution failed: {error:?}")))?;
     let cwd = std::env::current_dir()?;
-    codexctl_core::project::ProjectManifest::create(&cwd, &paths)
+    coding_brain_core::project::ProjectManifest::create(&cwd, &paths)
         .map(|_| ())
         .map_err(|error| io::Error::other(format!("project identity setup failed: {error}")))
 }

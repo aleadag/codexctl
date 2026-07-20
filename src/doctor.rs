@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use codexctl_core::lifecycle::{LifecycleStore, StoreCondition, coding_brain_state_root};
+use coding_brain_core::lifecycle::{LifecycleStore, StoreCondition, coding_brain_state_root};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -383,8 +383,8 @@ fn check_brain_endpoint() -> Check {
 }
 
 fn check_project_identity() -> Check {
-    let paths = match codexctl_core::paths::CodingBrainPaths::resolve(
-        &codexctl_core::paths::PathEnvironment::current(),
+    let paths = match coding_brain_core::paths::CodingBrainPaths::resolve(
+        &coding_brain_core::paths::PathEnvironment::current(),
     ) {
         Ok(paths) => paths,
         Err(error) => {
@@ -397,7 +397,7 @@ fn check_project_identity() -> Check {
         }
     };
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    match codexctl_core::project::ProjectIdentity::load(&cwd, &paths) {
+    match coding_brain_core::project::ProjectIdentity::load(&cwd, &paths) {
         Ok(identity) if identity.is_durable() => Check {
             name: "project identity".into(),
             status: CheckStatus::Pass,
@@ -482,7 +482,7 @@ fn check_session_discovery() -> Check {
     // matches. The signal we want is "the scanner runs and finds at
     // least one session." Zero sessions is normal if no Codex is
     // running; advise instead of fail.
-    let sessions = codexctl_core::discovery::scan_sessions();
+    let sessions = coding_brain_core::discovery::scan_sessions();
     if sessions.is_empty() {
         Check {
             name: "session discovery".into(),
@@ -507,7 +507,7 @@ fn check_terminal_integration() -> Check {
     // Re-use the existing terminal doctor report. We collapse it to a
     // one-line summary (the detailed view is still available via the
     // legacy `--doctor` flag).
-    let report = codexctl_core::terminals::doctor_report();
+    let report = coding_brain_core::terminals::doctor_report();
     if report.terminal == "Unknown" {
         return Check {
             name: "terminal integration".into(),

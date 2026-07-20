@@ -3,7 +3,7 @@ use std::time::Duration;
 // Test session status display and sorting
 #[test]
 fn test_session_status_sort_order() {
-    use codexctl::session::SessionStatus;
+    use coding_brain::session::SessionStatus;
     assert!(SessionStatus::NeedsInput.sort_key() < SessionStatus::Processing.sort_key());
     assert!(SessionStatus::Processing.sort_key() < SessionStatus::WaitingInput.sort_key());
     assert!(SessionStatus::WaitingInput.sort_key() < SessionStatus::Unknown.sort_key());
@@ -13,7 +13,7 @@ fn test_session_status_sort_order() {
 
 #[test]
 fn test_session_status_display() {
-    use codexctl::session::SessionStatus;
+    use coding_brain::session::SessionStatus;
     assert_eq!(SessionStatus::NeedsInput.to_string(), "Needs Input");
     assert_eq!(SessionStatus::Processing.to_string(), "Processing");
     assert_eq!(SessionStatus::WaitingInput.to_string(), "Waiting");
@@ -24,7 +24,7 @@ fn test_session_status_display() {
 
 #[test]
 fn test_session_from_raw() {
-    use codexctl::session::{CodexSession, RawSession};
+    use coding_brain::session::{CodexSession, RawSession};
     let raw = RawSession {
         pid: 12345,
         session_id: "abc-123".to_string(),
@@ -39,7 +39,7 @@ fn test_session_from_raw() {
 
 #[test]
 fn test_session_display_name_prefers_session_name() {
-    use codexctl::session::{CodexSession, RawSession};
+    use coding_brain::session::{CodexSession, RawSession};
     let raw = RawSession {
         pid: 1,
         session_id: "x".to_string(),
@@ -53,7 +53,7 @@ fn test_session_display_name_prefers_session_name() {
 
 #[test]
 fn test_format_elapsed() {
-    use codexctl::session::{CodexSession, RawSession};
+    use coding_brain::session::{CodexSession, RawSession};
     let raw = RawSession {
         pid: 1,
         session_id: "x".to_string(),
@@ -70,7 +70,7 @@ fn test_format_elapsed() {
 
 #[test]
 fn test_format_tokens() {
-    use codexctl::session::{CodexSession, RawSession, TelemetryStatus};
+    use coding_brain::session::{CodexSession, RawSession, TelemetryStatus};
     let raw = RawSession {
         pid: 1,
         session_id: "x".to_string(),
@@ -90,7 +90,7 @@ fn test_format_tokens() {
 
 #[test]
 fn test_format_cost() {
-    use codexctl::session::{CodexSession, RawSession, TelemetryStatus};
+    use coding_brain::session::{CodexSession, RawSession, TelemetryStatus};
     let raw = RawSession {
         pid: 1,
         session_id: "x".to_string(),
@@ -112,7 +112,7 @@ fn test_format_cost() {
 
 #[test]
 fn test_cwd_to_project_name() {
-    use codexctl::session::{CodexSession, RawSession};
+    use coding_brain::session::{CodexSession, RawSession};
     let cases = vec![
         ("/Users/foo/bar/my-project", "my-project"),
         ("/tmp", "tmp"),

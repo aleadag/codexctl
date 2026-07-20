@@ -5,13 +5,13 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use codexctl_core::brain_activity::{
+use coding_brain_core::brain_activity::{
     ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityOutcome, ActivityState, ProjectEvidence,
     SessionTarget,
 };
-use codexctl_core::lifecycle::{LifecycleEvent, LifecycleStore, coding_brain_state_root};
-use codexctl_core::paths::{CodingBrainPaths, PathEnvironment};
-use codexctl_core::project::ProjectIdentity;
+use coding_brain_core::lifecycle::{LifecycleEvent, LifecycleStore, coding_brain_state_root};
+use coding_brain_core::paths::{CodingBrainPaths, PathEnvironment};
+use coding_brain_core::project::ProjectIdentity;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -314,12 +314,12 @@ mod tests {
     use std::fs;
     use std::io::Cursor;
 
-    use codexctl_core::brain_activity::{
+    use coding_brain_core::brain_activity::{
         ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityOutcome, ActivityState, ProjectEvidence,
         SessionTarget,
     };
-    use codexctl_core::lifecycle::{LifecycleStore, StoreCondition};
-    use codexctl_core::project::ProjectId;
+    use coding_brain_core::lifecycle::{LifecycleStore, StoreCondition};
+    use coding_brain_core::project::ProjectId;
 
     use crate::brain::activity::ActivityStore;
 

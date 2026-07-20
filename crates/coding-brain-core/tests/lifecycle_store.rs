@@ -4,7 +4,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use codexctl_core::lifecycle::{ApplyOutcome, LifecycleEvent, LifecycleStore, StoreError};
+use coding_brain_core::lifecycle::{ApplyOutcome, LifecycleEvent, LifecycleStore, StoreError};
 use fs2::FileExt;
 use serde_json::json;
 
