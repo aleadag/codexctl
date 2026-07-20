@@ -213,6 +213,10 @@ impl BrainApp {
             self.status = Some("Select a Needs Attention item first".into());
             return;
         };
+        if item.kind != coding_brain_core::brain_activity::ActivityKind::Decision {
+            self.status = Some("Corrections are only available for Decision activity".into());
+            return;
+        }
         self.input = Some(BrainInput::Correction {
             activity_id: item.activity_id.clone(),
             disposition: None,
@@ -427,8 +431,8 @@ mod tests {
     use std::sync::Arc;
 
     use coding_brain_core::brain_activity::{
-        ActivityItem, ActivitySnapshot, ActivityState, AttentionItem, CorrectionDisposition,
-        DeliveryState, ProjectEvidence, SessionTarget,
+        ActivityItem, ActivityKind, ActivitySnapshot, ActivityState, AttentionItem,
+        CorrectionDisposition, DeliveryState, ProjectEvidence, SessionTarget,
     };
     use coding_brain_core::project::ProjectId;
     use coding_brain_core::runtime::{
@@ -528,6 +532,38 @@ mod tests {
     }
 
     #[test]
+    fn diagnostic_attention_does_not_open_correction_input() {
+        let mut diagnostic = activity();
+        diagnostic.kind = ActivityKind::Diagnostic;
+        diagnostic.state = ActivityState::Error;
+        diagnostic.decision_id = None;
+        let mock = Arc::new(MockBrainRuntime {
+            activity_snapshot: ActivitySnapshot {
+                attention: vec![AttentionItem {
+                    activity: diagnostic,
+                    occurrences: 1,
+                    unresolved_occurrences: 1,
+                }],
+                recent: Vec::new(),
+                unresolved_count: 1,
+                diagnostics: Default::default(),
+            },
+            ..MockBrainRuntime::default()
+        });
+        let runtime = BrainRuntime::new(mock.clone(), mock.clone());
+        let mut app = BrainApp::new(runtime, Theme::from_mode(ThemeMode::Dark));
+
+        app.begin_correction();
+
+        assert_eq!(app.input_prompt(), None);
+        assert_eq!(
+            app.status(),
+            Some("Corrections are only available for Decision activity")
+        );
+        assert!(mock.actions().is_empty());
+    }
+
+    #[test]
     fn review_mark_records_exact_decision_id_without_dashboard_actions() {
         let mock = MockBrainRuntime {
             review_queue: vec![ReviewItemSummary {
@@ -577,6 +613,7 @@ mod tests {
         let project_id = ProjectId::Stable("project-1".into());
         ActivityItem {
             activity_id: "activity-1".into(),
+            kind: ActivityKind::Decision,
             recorded_at_ms: 1,
             project: ProjectEvidence {
                 project_id: project_id.clone(),

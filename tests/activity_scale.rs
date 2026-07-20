@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use coding_brain::brain::activity::{ActivityLimits, ActivityStore};
 use coding_brain_core::brain_activity::{
-    ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityState, ProjectEvidence,
+    ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityKind, ActivityState, ProjectEvidence,
 };
 use coding_brain_core::project::ProjectId;
 
@@ -17,6 +17,7 @@ fn event(activity_id: impl Into<String>, recorded_at_ms: u64) -> ActivityEvent {
     let activity_id = activity_id.into();
     ActivityEvent {
         schema_version: ACTIVITY_SCHEMA_VERSION,
+        kind: ActivityKind::Decision,
         activity_id: activity_id.clone(),
         recorded_at_ms,
         project: ProjectEvidence {

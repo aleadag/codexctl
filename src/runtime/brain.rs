@@ -2,11 +2,12 @@
 
 use std::collections::HashMap;
 use std::fs;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use coding_brain_core::brain_activity::{
-    ActivityEvent, ActivitySnapshot, CorrectionDisposition, SnapshotLimits,
+    ActivityEvent, ActivityKind, ActivitySnapshot, CorrectionDisposition, SnapshotLimits,
 };
 use coding_brain_core::runtime::{
     BrainActions, BrainGateMode, BrainSource, CacheSummary, CorrectionInput, CounterfactualSummary,
@@ -354,38 +355,7 @@ pub struct LiveBrainActions;
 impl BrainActions for LiveBrainActions {
     fn record_correction(&self, correction: CorrectionInput) -> Result<(), String> {
         let paths = brain::distill::current_paths().map_err(|error| error.to_string())?;
-        let store = brain::activity::ActivityStore::at(paths.state_root().join("activity.jsonl"));
-        let source = store
-            .read()
-            .map_err(|error| error.to_string())?
-            .events()
-            .iter()
-            .rev()
-            .find(|event| event.activity_id == correction.activity_id)
-            .cloned()
-            .ok_or_else(|| format!("activity {} not found", correction.activity_id))?;
-        store
-            .append(ActivityEvent {
-                schema_version: coding_brain_core::brain_activity::ACTIVITY_SCHEMA_VERSION,
-                activity_id: correction.activity_id,
-                recorded_at_ms: epoch_ms(),
-                project: source.project,
-                session: source.session,
-                state: coding_brain_core::brain_activity::ActivityState::Correction,
-                tool: None,
-                normalized_command: None,
-                fingerprint: None,
-                rule_id: None,
-                confidence: None,
-                threshold: None,
-                reasoning: None,
-                decision_id: source.decision_id,
-                outcome: None,
-                correction: Some(correction.disposition),
-                note: correction.note,
-                supersedes: None,
-            })
-            .map_err(|error| error.to_string())
+        record_correction_at_path(&paths.state_root().join("activity.jsonl"), correction)
     }
 
     fn mark_canonical(&self, decision_id: &str, note: Option<String>) -> Result<(), String> {
@@ -399,6 +369,49 @@ impl BrainActions for LiveBrainActions {
         }
         fs::write(path, mode.as_str()).map_err(|error| format!("write gate-mode: {error}"))
     }
+}
+
+fn record_correction_at_path(path: &Path, correction: CorrectionInput) -> Result<(), String> {
+    let store = brain::activity::ActivityStore::at(path);
+    let source = store
+        .read()
+        .map_err(|error| error.to_string())?
+        .events()
+        .iter()
+        .rev()
+        .find(|event| event.activity_id == correction.activity_id)
+        .cloned()
+        .ok_or_else(|| format!("activity {} not found", correction.activity_id))?;
+    if source.kind != ActivityKind::Decision {
+        return Err(format!(
+            "correction requires Decision activity; {} is {:?}",
+            bounded_display(&source.activity_id),
+            source.kind
+        ));
+    }
+    store
+        .append(ActivityEvent {
+            schema_version: coding_brain_core::brain_activity::ACTIVITY_SCHEMA_VERSION,
+            kind: ActivityKind::Decision,
+            activity_id: correction.activity_id,
+            recorded_at_ms: epoch_ms(),
+            project: source.project,
+            session: source.session,
+            state: coding_brain_core::brain_activity::ActivityState::Correction,
+            tool: None,
+            normalized_command: None,
+            fingerprint: None,
+            rule_id: None,
+            confidence: None,
+            threshold: None,
+            reasoning: None,
+            decision_id: source.decision_id,
+            outcome: None,
+            correction: Some(correction.disposition),
+            note: correction.note,
+            supersedes: None,
+        })
+        .map_err(|error| error.to_string())
 }
 
 fn epoch_ms() -> u64 {
@@ -424,6 +437,67 @@ mod tests {
         // Matches the file-missing default in `brain::read_gate_mode`.
         assert_eq!(parse_gate_mode(""), BrainGateMode::On);
         assert_eq!(parse_gate_mode("garbage"), BrainGateMode::On);
+    }
+
+    #[test]
+    fn diagnostic_correction_is_rejected_without_appending() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("activity.jsonl");
+        let store = brain::activity::ActivityStore::at(path.clone());
+        let activity_id = format!("diagnostic-{}", "x".repeat(200));
+        let mut diagnostic = source_event(ActivityKind::Diagnostic);
+        diagnostic.activity_id = activity_id.clone();
+        store.append(diagnostic).unwrap();
+        let before = std::fs::read(&path).unwrap();
+
+        let error = record_correction_at_path(
+            &path,
+            CorrectionInput {
+                activity_id: activity_id.clone(),
+                disposition: CorrectionDisposition::BrainWrong,
+                note: Some("not a decision".into()),
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.contains("correction requires Decision activity"));
+        assert!(error.contains("Diagnostic"));
+        assert!(error.chars().count() <= 160);
+        assert!(!error.contains(&activity_id));
+        let after = std::fs::read(&path).unwrap();
+        assert_eq!(after, before);
+    }
+
+    #[test]
+    fn decision_correction_still_appends() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("activity.jsonl");
+        let store = brain::activity::ActivityStore::at(path.clone());
+        store.append(source_event(ActivityKind::Decision)).unwrap();
+
+        record_correction_at_path(
+            &path,
+            CorrectionInput {
+                activity_id: "activity-1".into(),
+                disposition: CorrectionDisposition::BrainRight,
+                note: Some("confirmed".into()),
+            },
+        )
+        .unwrap();
+
+        let events = store.read().unwrap();
+        assert_eq!(events.events().len(), 2);
+        let correction = &events.events()[1];
+        assert_eq!(correction.kind, ActivityKind::Decision);
+        assert_eq!(
+            correction.state,
+            coding_brain_core::brain_activity::ActivityState::Correction
+        );
+        assert_eq!(
+            correction.correction,
+            Some(CorrectionDisposition::BrainRight)
+        );
+        assert_eq!(correction.decision_id.as_deref(), Some("decision-1"));
     }
 
     #[test]
@@ -585,6 +659,7 @@ mod tests {
     ) -> coding_brain_core::brain_activity::ActivityEvent {
         coding_brain_core::brain_activity::ActivityEvent {
             schema_version: coding_brain_core::brain_activity::ACTIVITY_SCHEMA_VERSION,
+            kind: ActivityKind::Decision,
             activity_id: format!("activity-{decision_id}"),
             recorded_at_ms: 1,
             project: coding_brain_core::brain_activity::ProjectEvidence {
@@ -604,6 +679,38 @@ mod tests {
             decision_id: Some(decision_id.into()),
             outcome: None,
             correction: Some(disposition),
+            note: None,
+            supersedes: None,
+        }
+    }
+
+    fn source_event(kind: ActivityKind) -> ActivityEvent {
+        ActivityEvent {
+            schema_version: coding_brain_core::brain_activity::ACTIVITY_SCHEMA_VERSION,
+            kind,
+            activity_id: "activity-1".into(),
+            recorded_at_ms: 1,
+            project: coding_brain_core::brain_activity::ProjectEvidence {
+                project_id: coding_brain_core::project::ProjectId::Stable("project".into()),
+                cwd: "/work/project".into(),
+                label: Some("project".into()),
+            },
+            session: None,
+            state: if kind == ActivityKind::Diagnostic {
+                coding_brain_core::brain_activity::ActivityState::Error
+            } else {
+                coding_brain_core::brain_activity::ActivityState::Denied
+            },
+            tool: None,
+            normalized_command: None,
+            fingerprint: None,
+            rule_id: None,
+            confidence: None,
+            threshold: None,
+            reasoning: None,
+            decision_id: (kind == ActivityKind::Decision).then(|| "decision-1".into()),
+            outcome: None,
+            correction: None,
             note: None,
             supersedes: None,
         }

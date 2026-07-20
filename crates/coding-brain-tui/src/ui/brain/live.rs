@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use coding_brain_core::brain_activity::{
     ActivityItem, ActivityOutcome, ActivityState, DeliveryState,
 };
@@ -204,8 +206,24 @@ fn decision_state(state: ActivityState) -> &'static str {
     }
 }
 
-fn project_label(item: &ActivityItem) -> &str {
-    item.project.label.as_deref().unwrap_or("unknown project")
+pub(super) fn project_label(item: &ActivityItem) -> Cow<'_, str> {
+    if let Some(label) = item
+        .project
+        .label
+        .as_deref()
+        .filter(|label| !label.is_empty())
+    {
+        return Cow::Borrowed(label);
+    }
+    if let Some(name) = item.project.cwd.file_name() {
+        return name.to_string_lossy();
+    }
+    let path = item.project.cwd.to_string_lossy();
+    if path.is_empty() {
+        Cow::Borrowed("unknown project")
+    } else {
+        path
+    }
 }
 
 fn command_label(item: &ActivityItem) -> &str {

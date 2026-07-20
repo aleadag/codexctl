@@ -1532,6 +1532,7 @@ fn write_terminal_activity(decision_id: &str, session_id: &str, tool_use_id: &st
     )
     .append(coding_brain_core::brain_activity::ActivityEvent {
         schema_version: coding_brain_core::brain_activity::ACTIVITY_SCHEMA_VERSION,
+        kind: coding_brain_core::brain_activity::ActivityKind::Decision,
         activity_id: format!("activity-{decision_id}"),
         recorded_at_ms: 1,
         project: coding_brain_core::brain_activity::ProjectEvidence {

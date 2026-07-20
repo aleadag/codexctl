@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use coding_brain_core::brain_activity::{
-    ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityOutcome, ActivityState, ProjectEvidence,
-    SessionTarget,
+    ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityKind, ActivityOutcome, ActivityState,
+    ProjectEvidence, SessionTarget,
 };
 use coding_brain_core::lifecycle::{LifecycleEvent, LifecycleStore, coding_brain_state_root};
 use coding_brain_core::paths::{CodingBrainPaths, PathEnvironment};
@@ -123,6 +123,7 @@ fn append_observation(
     activity
         .append(ActivityEvent {
             schema_version: ACTIVITY_SCHEMA_VERSION,
+            kind: ActivityKind::Lifecycle,
             activity_id: format!(
                 "lifecycle_{}_{}_{}",
                 epoch_ms(),
@@ -174,6 +175,7 @@ fn append_outcome(
     };
     let matched = log.events().iter().rev().find(|event| {
         event.state.is_terminal()
+            && event.decision_id.is_some()
             && event.session.as_ref().is_some_and(|session| {
                 session.session_id == identity.session_id()
                     && session.turn_id.as_deref() == identity.turn_id()
@@ -187,6 +189,7 @@ fn append_outcome(
     };
     let mut outcome = ActivityEvent {
         schema_version: matched.schema_version,
+        kind: matched.kind,
         activity_id: matched.activity_id.clone(),
         recorded_at_ms: epoch_ms(),
         project: matched.project.clone(),
@@ -225,6 +228,7 @@ fn append_orphan(
     activity
         .append(ActivityEvent {
             schema_version: ACTIVITY_SCHEMA_VERSION,
+            kind: ActivityKind::Diagnostic,
             activity_id: format!("orphan_{}_{}", epoch_ms(), std::process::id()),
             recorded_at_ms: epoch_ms(),
             project: ProjectEvidence {
@@ -438,6 +442,7 @@ mod tests {
         activity
             .append(ActivityEvent {
                 schema_version: ACTIVITY_SCHEMA_VERSION,
+                kind: ActivityKind::Decision,
                 activity_id: "activity-1".into(),
                 recorded_at_ms: 1,
                 project: ProjectEvidence {
@@ -498,6 +503,96 @@ mod tests {
     }
 
     #[test]
+    fn post_tool_use_ignores_newer_lifecycle_observation_when_joining_outcome() {
+        let temp = tempfile::tempdir().unwrap();
+        let lifecycle = LifecycleStore::at(temp.path().join("lifecycle"));
+        let activity = ActivityStore::at(temp.path().join("activity.jsonl"));
+        let project_id = ProjectId::Temporary("project-1".into());
+        activity
+            .append(ActivityEvent {
+                schema_version: ACTIVITY_SCHEMA_VERSION,
+                kind: ActivityKind::Decision,
+                activity_id: "activity-1".into(),
+                recorded_at_ms: 1,
+                project: ProjectEvidence {
+                    project_id: project_id.clone(),
+                    cwd: temp.path().to_path_buf(),
+                    label: Some("project".into()),
+                },
+                session: Some(SessionTarget {
+                    session_id: "session-1".into(),
+                    turn_id: Some("turn-1".into()),
+                    tool_use_id: Some("call-1".into()),
+                    project_id,
+                    cwd: temp.path().to_path_buf(),
+                    provider_hints: Vec::new(),
+                }),
+                state: ActivityState::Allowed,
+                tool: Some("Bash".into()),
+                normalized_command: Some("cargo test".into()),
+                fingerprint: None,
+                rule_id: None,
+                confidence: Some(0.9),
+                threshold: Some(0.6),
+                reasoning: Some("safe".into()),
+                decision_id: Some("decision-1".into()),
+                outcome: None,
+                correction: None,
+                note: None,
+                supersedes: None,
+            })
+            .unwrap();
+        let observation = serde_json::json!({
+            "session_id": "session-1",
+            "turn_id": "turn-1",
+            "cwd": temp.path(),
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_use_id": "call-1"
+        });
+        let mut observation_stderr = Vec::new();
+        run_with_activity(
+            Cursor::new(observation.to_string()),
+            Vec::new(),
+            &mut observation_stderr,
+            &lifecycle,
+            Some(&activity),
+        );
+        assert!(observation_stderr.is_empty());
+        let before_outcome = activity.read().unwrap().events().to_vec();
+        assert_eq!(before_outcome.len(), 2);
+        assert_eq!(before_outcome[0].kind, ActivityKind::Decision);
+        assert_eq!(before_outcome[1].kind, ActivityKind::Lifecycle);
+
+        let outcome = serde_json::json!({
+            "session_id": "session-1",
+            "turn_id": "turn-1",
+            "cwd": temp.path(),
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Bash",
+            "tool_use_id": "call-1",
+            "tool_response": {"exit_code": 0}
+        });
+        let mut outcome_stderr = Vec::new();
+        run_with_activity(
+            Cursor::new(outcome.to_string()),
+            Vec::new(),
+            &mut outcome_stderr,
+            &lifecycle,
+            Some(&activity),
+        );
+
+        assert!(outcome_stderr.is_empty());
+        let events = activity.read().unwrap().events().to_vec();
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[2].activity_id, "activity-1");
+        assert_eq!(events[2].kind, ActivityKind::Decision);
+        assert_eq!(events[2].decision_id.as_deref(), Some("decision-1"));
+        assert_eq!(events[2].state, ActivityState::Outcome);
+        assert_eq!(events[2].outcome, Some(ActivityOutcome::Succeeded));
+    }
+
+    #[test]
     fn unmatched_post_tool_use_appends_orphan_diagnostic_without_guessing() {
         let temp = tempfile::tempdir().unwrap();
         let lifecycle = LifecycleStore::at(temp.path().join("lifecycle"));
@@ -549,6 +644,7 @@ mod tests {
         activity
             .append(ActivityEvent {
                 schema_version: ACTIVITY_SCHEMA_VERSION,
+                kind: ActivityKind::Decision,
                 activity_id: "activity-1".into(),
                 recorded_at_ms: 1,
                 project: ProjectEvidence {

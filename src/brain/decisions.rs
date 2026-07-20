@@ -971,6 +971,7 @@ pub fn read_canonical_ids() -> std::collections::HashSet<String> {
 mod tests {
     use super::*;
     use crate::rules::RuleAction;
+    use coding_brain_core::brain_activity::ActivityKind;
 
     #[test]
     fn unit_test_decision_paths_are_thread_scoped() {
@@ -1186,6 +1187,7 @@ mod tests {
         let accepted = make_decision("Bash", "proj", "accept");
         let event = ActivityEvent {
             schema_version: coding_brain_core::brain_activity::ACTIVITY_SCHEMA_VERSION,
+            kind: ActivityKind::Decision,
             activity_id: "activity-1".into(),
             recorded_at_ms: 1,
             project: coding_brain_core::brain_activity::ProjectEvidence {

@@ -125,8 +125,8 @@ mod tests {
     use std::sync::Arc;
 
     use coding_brain_core::brain_activity::{
-        ActivityItem, ActivityOutcome, ActivitySnapshot, ActivityState, AttentionItem,
-        CorrectionDisposition, DeliveryState, ProjectEvidence, SessionTarget,
+        ActivityItem, ActivityKind, ActivityOutcome, ActivitySnapshot, ActivityState,
+        AttentionItem, CorrectionDisposition, DeliveryState, ProjectEvidence, SessionTarget,
     };
     use coding_brain_core::project::ProjectId;
     use coding_brain_core::runtime::{
@@ -178,6 +178,68 @@ mod tests {
         for forbidden in ["PID", "send", "terminate", "route", "spawn"] {
             assert!(!text.contains(forbidden), "found {forbidden}:\n{text}");
         }
+    }
+
+    #[test]
+    fn live_derives_missing_project_label_from_cwd() {
+        let mut item = activity("attention-1", DeliveryState::Unknown);
+        item.project.label = None;
+        item.project.cwd = PathBuf::from("/work/codexctl");
+        let mock = MockBrainRuntime {
+            activity_snapshot: ActivitySnapshot {
+                attention: vec![AttentionItem {
+                    activity: item,
+                    occurrences: 1,
+                    unresolved_occurrences: 1,
+                }],
+                unresolved_count: 1,
+                ..ActivitySnapshot::default()
+            },
+            endpoint_health: online(),
+            ..MockBrainRuntime::default()
+        };
+        let text = render_text(&fixture_app(mock));
+        assert!(text.contains("codexctl"));
+        assert!(!text.contains("unknown project"));
+    }
+
+    #[test]
+    fn live_keeps_explicit_label_and_handles_root_cwd() {
+        let mut explicit = activity("explicit", DeliveryState::Unknown);
+        explicit.project.label = Some("friendly".into());
+        explicit.project.cwd = PathBuf::from("/work/ignored");
+        assert_eq!(live::project_label(&explicit), "friendly");
+
+        explicit.project.label = None;
+        explicit.project.cwd = PathBuf::from("/");
+        assert_eq!(live::project_label(&explicit), "/");
+    }
+
+    #[test]
+    fn live_handles_empty_project_label_and_empty_cwd() {
+        let mut item = activity("empty", DeliveryState::Unknown);
+        item.project.label = Some(String::new());
+        item.project.cwd = PathBuf::from("/work/codexctl");
+        assert_eq!(live::project_label(&item), "codexctl");
+
+        item.project.label = None;
+        item.project.cwd = PathBuf::new();
+        assert_eq!(live::project_label(&item), "unknown project");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn live_uses_lossy_utf8_for_project_basename() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let basename = OsString::from_vec(vec![b'c', 0xff, b't']);
+        let expected = basename.to_string_lossy();
+        let mut item = activity("non-utf8", DeliveryState::Unknown);
+        item.project.label = None;
+        item.project.cwd = PathBuf::from("/work").join(&basename);
+
+        assert_eq!(live::project_label(&item), expected);
     }
 
     #[test]
@@ -388,6 +450,7 @@ mod tests {
         let project_id = ProjectId::Stable("project-1".into());
         ActivityItem {
             activity_id: id.into(),
+            kind: ActivityKind::Decision,
             recorded_at_ms: 1,
             project: ProjectEvidence {
                 project_id: project_id.clone(),

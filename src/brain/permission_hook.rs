@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use coding_brain_core::brain_activity::{
-    ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityState, MAX_ACTIVITY_FIELD_BYTES,
+    ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityKind, ActivityState, MAX_ACTIVITY_FIELD_BYTES,
     ProjectEvidence, SessionTarget, redact_activity_text,
 };
 use coding_brain_core::lifecycle::{
@@ -144,6 +144,7 @@ impl HookActivity {
     fn event(&self, state: ActivityState) -> ActivityEvent {
         ActivityEvent {
             schema_version: ACTIVITY_SCHEMA_VERSION,
+            kind: ActivityKind::Decision,
             activity_id: self.activity_id.clone(),
             recorded_at_ms: epoch_ms(),
             project: self.project.clone(),

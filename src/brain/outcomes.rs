@@ -17,7 +17,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::{Deserialize, Serialize};
 
 use coding_brain_core::brain_activity::{
-    ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityOutcome, ActivityState, ProjectEvidence,
+    ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityKind, ActivityOutcome, ActivityState,
+    ProjectEvidence,
 };
 use coding_brain_core::paths::{CodingBrainPaths, PathEnvironment};
 use coding_brain_core::project::ProjectId;
@@ -676,6 +677,7 @@ fn append_activity_outcome(
         let tool_use_id = pending.tool_use_id.as_deref()?;
         log.events().iter().rev().find(|event| {
             event.state.is_terminal()
+                && event.decision_id.is_some()
                 && event.session.as_ref().is_some_and(|session| {
                     session.session_id == session_id
                         && session.tool_use_id.as_deref() == Some(tool_use_id)
@@ -704,6 +706,7 @@ fn append_activity_outcome(
     activity
         .append(ActivityEvent {
             schema_version: ACTIVITY_SCHEMA_VERSION,
+            kind: matched.kind,
             activity_id: matched.activity_id.clone(),
             recorded_at_ms: pending.ts.saturating_mul(1_000),
             project: matched.project.clone(),
@@ -755,6 +758,7 @@ fn append_orphan_activity(
     activity
         .append(ActivityEvent {
             schema_version: ACTIVITY_SCHEMA_VERSION,
+            kind: ActivityKind::Diagnostic,
             activity_id,
             recorded_at_ms: pending.ts.saturating_mul(1_000),
             project: ProjectEvidence {
@@ -948,6 +952,7 @@ mod tests {
         activity
             .append(ActivityEvent {
                 schema_version: ACTIVITY_SCHEMA_VERSION,
+                kind: ActivityKind::Decision,
                 activity_id: "activity-1".into(),
                 recorded_at_ms: 1,
                 project: ProjectEvidence {
@@ -998,6 +1003,100 @@ mod tests {
         assert_eq!(events[1].state, ActivityState::Outcome);
         assert_eq!(events[1].outcome, Some(ActivityOutcome::Succeeded));
         assert!(events[1].normalized_command.is_none());
+    }
+
+    #[test]
+    fn stable_hook_ids_skip_newer_lifecycle_observation() {
+        let temp = tempfile::tempdir().unwrap();
+        let activity = ActivityStore::at(temp.path().join("activity.jsonl"));
+        let project_id = ProjectId::Temporary("project".into());
+        let project = ProjectEvidence {
+            project_id: project_id.clone(),
+            cwd: temp.path().to_path_buf(),
+            label: None,
+        };
+        let session = coding_brain_core::brain_activity::SessionTarget {
+            session_id: "session-1".into(),
+            turn_id: Some("turn-1".into()),
+            tool_use_id: Some("call-1".into()),
+            project_id,
+            cwd: temp.path().to_path_buf(),
+            provider_hints: Vec::new(),
+        };
+        activity
+            .append(ActivityEvent {
+                schema_version: ACTIVITY_SCHEMA_VERSION,
+                kind: ActivityKind::Decision,
+                activity_id: "decision-activity".into(),
+                recorded_at_ms: 1,
+                project: project.clone(),
+                session: Some(session.clone()),
+                state: ActivityState::Allowed,
+                tool: Some("Bash".into()),
+                normalized_command: Some("cargo test".into()),
+                fingerprint: None,
+                rule_id: None,
+                confidence: None,
+                threshold: None,
+                reasoning: None,
+                decision_id: Some("decision-1".into()),
+                outcome: None,
+                correction: None,
+                note: None,
+                supersedes: None,
+            })
+            .unwrap();
+        activity
+            .append(ActivityEvent {
+                schema_version: ACTIVITY_SCHEMA_VERSION,
+                kind: ActivityKind::Lifecycle,
+                activity_id: "lifecycle-activity".into(),
+                recorded_at_ms: 2,
+                project,
+                session: Some(session),
+                state: ActivityState::Abstained,
+                tool: Some("Bash".into()),
+                normalized_command: None,
+                fingerprint: None,
+                rule_id: None,
+                confidence: None,
+                threshold: None,
+                reasoning: Some("lifecycle observation".into()),
+                decision_id: None,
+                outcome: None,
+                correction: None,
+                note: None,
+                supersedes: None,
+            })
+            .unwrap();
+        let pending = PendingOutcome {
+            tool: "Bash".into(),
+            command: Some("cargo test".into()),
+            project: "codexctl".into(),
+            session_id: Some("session-1".into()),
+            tool_use_id: Some("call-1".into()),
+            exit_code: Some(0),
+            duration_ms: None,
+            stderr_tail: None,
+            ts: 3,
+        };
+
+        assert_eq!(
+            append_activity_outcome(&activity, &pending).unwrap(),
+            Some("decision-1".into())
+        );
+        let events = activity.read().unwrap().events().to_vec();
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[1].activity_id, "lifecycle-activity");
+        assert_eq!(events[1].kind, ActivityKind::Lifecycle);
+        assert_eq!(events[1].state, ActivityState::Abstained);
+        assert!(events[1].decision_id.is_none());
+        assert_eq!(events[2].activity_id, "decision-activity");
+        assert_eq!(events[2].state, ActivityState::Outcome);
+        assert_eq!(events[2].decision_id.as_deref(), Some("decision-1"));
+        assert!(events.iter().all(|event| {
+            event.kind != ActivityKind::Diagnostic && event.state != ActivityState::Error
+        }));
     }
 
     #[test]

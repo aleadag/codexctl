@@ -834,12 +834,13 @@ mod headless_tests {
         recorded_at_ms: u64,
     ) -> coding_brain_core::brain_activity::ActivityEvent {
         use coding_brain_core::brain_activity::{
-            ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityState, ProjectEvidence,
+            ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityKind, ActivityState, ProjectEvidence,
         };
         use coding_brain_core::project::ProjectId;
 
         ActivityEvent {
             schema_version: ACTIVITY_SCHEMA_VERSION,
+            kind: ActivityKind::Decision,
             activity_id: activity_id.into(),
             recorded_at_ms,
             project: ProjectEvidence {

@@ -4,7 +4,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use coding_brain_core::brain_activity::{
-    ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityState, ProjectEvidence,
+    ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityKind, ActivityState, ProjectEvidence,
 };
 use coding_brain_core::project::ProjectId;
 
@@ -16,6 +16,7 @@ fn headless_emits_activity_without_a_session_roster() {
     std::fs::create_dir_all(&activity_dir).unwrap();
     let event = ActivityEvent {
         schema_version: ACTIVITY_SCHEMA_VERSION,
+        kind: ActivityKind::Decision,
         activity_id: "activity-process-fixture".into(),
         recorded_at_ms: 1,
         project: ProjectEvidence {

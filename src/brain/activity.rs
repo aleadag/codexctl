@@ -9,8 +9,8 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use coding_brain_core::brain_activity::{
-    ACTIVITY_SCHEMA_VERSION, ActivityDiagnostics, ActivityEvent, ActivityItem, ActivitySnapshot,
-    ActivityState, AttentionItem, DEFAULT_INTERRUPTED_AFTER_MS, DeliveryState,
+    ACTIVITY_SCHEMA_VERSION, ActivityDiagnostics, ActivityEvent, ActivityItem, ActivityKind,
+    ActivitySnapshot, ActivityState, AttentionItem, DEFAULT_INTERRUPTED_AFTER_MS, DeliveryState,
     MAX_ACTIVITY_EVENT_BYTES, SnapshotLimits,
 };
 use fs2::FileExt;
@@ -395,17 +395,29 @@ impl ActivityStore {
         }
 
         let mut log = ActivityLog::default();
+        let mut activity_kinds = HashMap::<String, ActivityKind>::new();
         let mut offset = 0_u64;
         for raw_line in contents.split_inclusive(|byte| *byte == b'\n') {
             let line = raw_line.strip_suffix(b"\n").unwrap_or(raw_line);
             if !line.is_empty() {
                 if let Ok(event) = serde_json::from_slice::<ActivityEvent>(line) {
-                    if event.schema_version == ACTIVITY_SCHEMA_VERSION
-                        && event.has_consistent_payload()
+                    let kind_was_absent = serde_json::from_slice::<serde_json::Value>(line)?
+                        .get("kind")
+                        .is_none();
+                    let mut event = event;
+                    if kind_was_absent && event.activity_id.starts_with("lifecycle_") {
+                        event.kind = ActivityKind::Lifecycle;
+                    }
+                    if event.schema_version != ACTIVITY_SCHEMA_VERSION
+                        || !event.has_consistent_payload()
+                        || activity_kinds
+                            .get(&event.activity_id)
+                            .is_some_and(|kind| *kind != event.kind)
                     {
-                        log.events.push(event);
-                    } else {
                         record_malformed(&mut log.diagnostics, offset);
+                    } else {
+                        activity_kinds.insert(event.activity_id.clone(), event.kind);
+                        log.events.push(event);
                     }
                 } else if let Ok(row) = serde_json::from_slice::<DiagnosticRow>(line) {
                     apply_diagnostic(&mut log.diagnostics, row);
@@ -526,6 +538,9 @@ fn project_snapshot(log: ActivityLog, limits: SnapshotLimits, now_ms: u64) -> Ac
     let mut recent = Vec::new();
     for events in groups.into_values() {
         let item = project_activity(&events, limits.interrupted_after_ms, now_ms);
+        if item.kind == ActivityKind::Lifecycle {
+            continue;
+        }
         let resolved = item.outcome.is_some()
             || item.correction.is_some()
             || superseded.contains(item.activity_id.as_str());
@@ -652,6 +667,7 @@ fn project_activity(events: &[&ActivityEvent], stale_after_ms: u64, now_ms: u64)
 
     ActivityItem {
         activity_id: source.activity_id.clone(),
+        kind: source.kind,
         recorded_at_ms: latest_at,
         project: source.project.clone(),
         session: source.session.clone(),
@@ -816,6 +832,7 @@ mod tests {
     fn event_at(activity_id: &str, state: ActivityState, recorded_at_ms: u64) -> ActivityEvent {
         ActivityEvent {
             schema_version: ACTIVITY_SCHEMA_VERSION,
+            kind: ActivityKind::Decision,
             activity_id: activity_id.into(),
             recorded_at_ms,
             project: ProjectEvidence {
@@ -842,6 +859,89 @@ mod tests {
 
     fn event(activity_id: &str, state: ActivityState) -> ActivityEvent {
         event_at(activity_id, state, 100)
+    }
+
+    #[test]
+    fn legacy_lifecycle_ids_are_normalized_on_read() {
+        let (root, store) = fixture_store();
+        let mut event = event("lifecycle_1", ActivityState::Abstained);
+        event.normalized_command = None;
+        event.fingerprint = None;
+        event.rule_id = None;
+        event.confidence = None;
+        event.threshold = None;
+        event.reasoning = None;
+        event.decision_id = None;
+        event.tool = Some("SessionStart".into());
+        let mut legacy = serde_json::to_value(event).unwrap();
+        legacy.as_object_mut().unwrap().remove("kind");
+        fs::write(root.path().join("activity.jsonl"), format!("{legacy}\n")).unwrap();
+        assert_eq!(
+            store.read().unwrap().events()[0].kind,
+            ActivityKind::Lifecycle
+        );
+    }
+
+    #[test]
+    fn explicit_kind_is_preserved_for_lifecycle_prefixed_activity_id() {
+        let (_root, store) = fixture_store();
+        store
+            .append(event("lifecycle_explicit_decision", ActivityState::Denied))
+            .unwrap();
+
+        let log = store.read().unwrap();
+        assert_eq!(log.events().len(), 1);
+        assert_eq!(log.events()[0].kind, ActivityKind::Decision);
+    }
+
+    #[test]
+    fn mixed_activity_kinds_are_diagnosed() {
+        let (_root, store) = fixture_store();
+        let first = event("same", ActivityState::Denied);
+        let mut conflicting = first.clone();
+        conflicting.kind = ActivityKind::Diagnostic;
+        conflicting.state = ActivityState::Error;
+        conflicting.decision_id = None;
+        store.append(first).unwrap();
+        store.append(conflicting).unwrap();
+        let log = store.read().unwrap();
+        assert_eq!(log.events().len(), 1);
+        assert_eq!(log.diagnostics().malformed_rows, 1);
+    }
+
+    #[test]
+    fn lifecycle_activity_is_audited_but_absent_from_live_snapshot() {
+        let (_root, store) = fixture_store();
+        let mut lifecycle = event("lifecycle_1", ActivityState::Abstained);
+        lifecycle.kind = ActivityKind::Lifecycle;
+        lifecycle.normalized_command = None;
+        lifecycle.fingerprint = None;
+        lifecycle.rule_id = None;
+        lifecycle.confidence = None;
+        lifecycle.threshold = None;
+        lifecycle.reasoning = None;
+        lifecycle.decision_id = None;
+        lifecycle.tool = Some("SessionStart".into());
+        store.append(lifecycle).unwrap();
+        store
+            .append(event("decision-1", ActivityState::Abstained))
+            .unwrap();
+        let mut diagnostic = event("orphan_1", ActivityState::Error);
+        diagnostic.kind = ActivityKind::Diagnostic;
+        diagnostic.decision_id = None;
+        store.append(diagnostic).unwrap();
+
+        assert_eq!(store.read().unwrap().events().len(), 3);
+        let snapshot = store.snapshot(SnapshotLimits::default()).unwrap();
+        assert_eq!(snapshot.attention.len(), 2);
+        assert_eq!(snapshot.unresolved_count, 2);
+        assert!(snapshot.recent.is_empty());
+        assert!(
+            snapshot
+                .attention
+                .iter()
+                .all(|item| item.kind != ActivityKind::Lifecycle)
+        );
     }
 
     #[test]

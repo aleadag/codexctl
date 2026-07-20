@@ -49,6 +49,15 @@ pub enum ActivityState {
     Interrupted,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivityKind {
+    #[default]
+    Decision,
+    Lifecycle,
+    Diagnostic,
+}
+
 impl ActivityState {
     pub fn is_terminal(self) -> bool {
         matches!(
@@ -86,6 +95,8 @@ pub enum CorrectionDisposition {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ActivityEvent {
     pub schema_version: u32,
+    #[serde(default)]
+    pub kind: ActivityKind,
     pub activity_id: String,
     pub recorded_at_ms: u64,
     pub project: ProjectEvidence,
@@ -150,13 +161,31 @@ impl ActivityEvent {
     }
 
     pub fn has_consistent_payload(&self) -> bool {
-        match self.state {
+        let state_payload_is_valid = match self.state {
             ActivityState::Outcome => {
                 self.outcome.is_some() && self.correction.is_none() && self.note.is_none()
             }
             ActivityState::Correction => self.outcome.is_none() && self.correction.is_some(),
             _ => self.outcome.is_none() && self.correction.is_none() && self.note.is_none(),
-        }
+        };
+        let kind_payload_is_valid = match self.kind {
+            ActivityKind::Decision => true,
+            ActivityKind::Lifecycle => {
+                self.state == ActivityState::Abstained
+                    && self.decision_id.is_none()
+                    && self.normalized_command.is_none()
+                    && self.rule_id.is_none()
+                    && self.confidence.is_none()
+                    && self.threshold.is_none()
+            }
+            ActivityKind::Diagnostic => {
+                self.state == ActivityState::Error
+                    && self.decision_id.is_none()
+                    && self.outcome.is_none()
+                    && self.correction.is_none()
+            }
+        };
+        state_payload_is_valid && kind_payload_is_valid
     }
 }
 
@@ -256,6 +285,7 @@ fn secret_prefix(value: &str) -> bool {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ActivityItem {
     pub activity_id: String,
+    pub kind: ActivityKind,
     pub recorded_at_ms: u64,
     pub project: ProjectEvidence,
     pub session: Option<SessionTarget>,
@@ -420,6 +450,7 @@ mod tests {
     fn event(command: &str, reasoning: &str, note: &str) -> ActivityEvent {
         ActivityEvent {
             schema_version: ACTIVITY_SCHEMA_VERSION,
+            kind: ActivityKind::Decision,
             activity_id: "activity-1".into(),
             recorded_at_ms: 1,
             project: ProjectEvidence {
@@ -442,6 +473,22 @@ mod tests {
             note: Some(note.into()),
             supersedes: None,
         }
+    }
+
+    #[test]
+    fn activity_kind_is_additive_and_serialized() {
+        let mut activity = event("cargo test", "safe", "note");
+        activity.kind = ActivityKind::Decision;
+        let value = serde_json::to_value(activity).unwrap();
+        assert_eq!(value["schema_version"], ACTIVITY_SCHEMA_VERSION);
+        assert_eq!(value["kind"], "decision");
+    }
+
+    #[test]
+    fn lifecycle_kind_rejects_decision_evidence() {
+        let mut activity = event("cargo test", "safe", "note");
+        activity.kind = ActivityKind::Lifecycle;
+        assert!(!activity.has_consistent_payload());
     }
 
     #[test]
