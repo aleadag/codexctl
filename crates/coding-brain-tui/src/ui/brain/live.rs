@@ -7,7 +7,9 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{
+    Block, Borders, HighlightSpacing, List, ListItem, ListState, Paragraph, Wrap,
+};
 
 use crate::brain_app::BrainApp;
 
@@ -70,7 +72,8 @@ fn render_attention(frame: &mut Frame<'_>, area: Rect, app: &BrainApp) {
                 .fg(app.theme().header)
                 .add_modifier(Modifier::BOLD),
         )
-        .highlight_symbol("> ");
+        .highlight_symbol("> ")
+        .highlight_spacing(HighlightSpacing::Always);
     let mut state = ListState::default();
     if !snapshot.attention.is_empty() && app.selection() < snapshot.attention.len() {
         state.select(Some(app.selection()));
@@ -103,7 +106,8 @@ fn render_recent(frame: &mut Frame<'_>, area: Rect, app: &BrainApp) {
                 .fg(app.theme().header)
                 .add_modifier(Modifier::BOLD),
         )
-        .highlight_symbol("> ");
+        .highlight_symbol("> ")
+        .highlight_spacing(HighlightSpacing::Always);
     let mut state = ListState::default();
     if app.selection() >= snapshot.attention.len() && !snapshot.recent.is_empty() {
         state.select(Some(app.selection() - snapshot.attention.len()));

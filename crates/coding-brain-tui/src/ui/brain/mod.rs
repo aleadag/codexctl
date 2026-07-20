@@ -181,6 +181,42 @@ mod tests {
     }
 
     #[test]
+    fn live_list_indentation_stays_fixed_when_selection_moves_between_lists() {
+        let mut recent = activity("recent-1", DeliveryState::Delivered);
+        recent.state = ActivityState::Allowed;
+        let mock = MockBrainRuntime {
+            activity_snapshot: ActivitySnapshot {
+                attention: vec![AttentionItem {
+                    activity: activity("attention-1", DeliveryState::Unknown),
+                    occurrences: 1,
+                    unresolved_occurrences: 1,
+                }],
+                recent: vec![recent],
+                unresolved_count: 1,
+                diagnostics: Default::default(),
+            },
+            endpoint_health: online(),
+            ..MockBrainRuntime::default()
+        };
+        let mut app = fixture_app(mock);
+
+        let attention_focused = render_text(&app);
+        app.handle_key(key(KeyCode::Down));
+        let recent_focused = render_text(&app);
+
+        assert_eq!(
+            content_column(&attention_focused, "attention-1", "denied"),
+            content_column(&recent_focused, "attention-1", "denied")
+        );
+        assert_eq!(
+            content_column(&attention_focused, "recent-1", "allowed"),
+            content_column(&recent_focused, "recent-1", "allowed")
+        );
+        assert_eq!(attention_focused.matches("> ").count(), 1);
+        assert_eq!(recent_focused.matches("> ").count(), 1);
+    }
+
+    #[test]
     fn live_derives_missing_project_label_from_cwd() {
         let mut item = activity("attention-1", DeliveryState::Unknown);
         item.project.label = None;
@@ -436,6 +472,17 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    fn content_column(text: &str, row_id: &str, content: &str) -> usize {
+        let line = text
+            .lines()
+            .find(|line| line.contains(row_id))
+            .unwrap_or_else(|| panic!("missing row {row_id}:\n{text}"));
+        let byte_index = line
+            .find(content)
+            .unwrap_or_else(|| panic!("missing content {content} in row {row_id}:\n{line}"));
+        line[..byte_index].chars().count()
     }
 
     fn online() -> EndpointHealth {
