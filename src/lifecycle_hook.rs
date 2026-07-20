@@ -173,16 +173,28 @@ fn append_outcome(
         append_orphan(activity, lifecycle, input, diagnostic)?;
         return Err(diagnostic.into());
     };
-    let matched = log.events().iter().rev().find(|event| {
-        event.state.is_terminal()
-            && event.decision_id.is_some()
+    let mut has_decision_activity = false;
+    let mut matched = None;
+    for event in log.events().iter().rev() {
+        let matches_identity = event.kind == ActivityKind::Decision
             && event.session.as_ref().is_some_and(|session| {
                 session.session_id == identity.session_id()
                     && session.turn_id.as_deref() == identity.turn_id()
                     && session.tool_use_id.as_deref() == Some(tool_use_id)
-            })
-    });
+            });
+        if !matches_identity {
+            continue;
+        }
+        has_decision_activity = true;
+        if event.state.is_terminal() && event.decision_id.is_some() {
+            matched = Some(event);
+            break;
+        }
+    }
     let Some(matched) = matched else {
+        if !has_decision_activity {
+            return Ok(());
+        }
         let diagnostic = "orphan outcome: no activity matches the lifecycle identity";
         append_orphan(activity, lifecycle, input, diagnostic)?;
         return Err(diagnostic.into());
@@ -593,18 +605,103 @@ mod tests {
     }
 
     #[test]
-    fn unmatched_post_tool_use_appends_orphan_diagnostic_without_guessing() {
+    fn post_tool_use_without_decision_activity_is_ignored() {
         let temp = tempfile::tempdir().unwrap();
         let lifecycle = LifecycleStore::at(temp.path().join("lifecycle"));
         let activity = ActivityStore::at(temp.path().join("activity.jsonl"));
+        let observation = serde_json::json!({
+            "session_id": "session-orphan",
+            "turn_id": "turn-orphan",
+            "cwd": temp.path(),
+            "hook_event_name": "PreToolUse",
+            "tool_name": "collaborationwait_agent",
+            "tool_use_id": "call-orphan"
+        });
+        let mut observation_stderr = Vec::new();
+        run_with_activity(
+            Cursor::new(observation.to_string()),
+            Vec::new(),
+            &mut observation_stderr,
+            &lifecycle,
+            Some(&activity),
+        );
+        assert!(observation_stderr.is_empty());
+
         let input = serde_json::json!({
             "session_id": "session-orphan",
             "turn_id": "turn-orphan",
             "cwd": temp.path(),
             "hook_event_name": "PostToolUse",
-            "tool_name": "Bash",
+            "tool_name": "collaborationwait_agent",
             "tool_use_id": "call-orphan",
             "tool_response": {"exit_code": 1}
+        });
+        let mut stderr = Vec::new();
+
+        run_with_activity(
+            Cursor::new(input.to_string()),
+            Vec::new(),
+            &mut stderr,
+            &lifecycle,
+            Some(&activity),
+        );
+
+        assert!(stderr.is_empty());
+        let events = activity.read().unwrap().events().to_vec();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, ActivityKind::Lifecycle);
+        assert_eq!(events[0].state, ActivityState::Abstained);
+        assert!(events[0].decision_id.is_none());
+    }
+
+    #[test]
+    fn post_tool_use_with_incomplete_decision_activity_is_diagnostic() {
+        let temp = tempfile::tempdir().unwrap();
+        let lifecycle = LifecycleStore::at(temp.path().join("lifecycle"));
+        let activity = ActivityStore::at(temp.path().join("activity.jsonl"));
+        let project_id = ProjectId::Temporary("project-1".into());
+        activity
+            .append(ActivityEvent {
+                schema_version: ACTIVITY_SCHEMA_VERSION,
+                kind: ActivityKind::Decision,
+                activity_id: "activity-1".into(),
+                recorded_at_ms: 1,
+                project: ProjectEvidence {
+                    project_id: project_id.clone(),
+                    cwd: temp.path().to_path_buf(),
+                    label: Some("project".into()),
+                },
+                session: Some(SessionTarget {
+                    session_id: "session-1".into(),
+                    turn_id: Some("turn-1".into()),
+                    tool_use_id: Some("call-1".into()),
+                    project_id,
+                    cwd: temp.path().to_path_buf(),
+                    provider_hints: Vec::new(),
+                }),
+                state: ActivityState::Observed,
+                tool: Some("Bash".into()),
+                normalized_command: Some("cargo test".into()),
+                fingerprint: None,
+                rule_id: None,
+                confidence: None,
+                threshold: None,
+                reasoning: None,
+                decision_id: None,
+                outcome: None,
+                correction: None,
+                note: None,
+                supersedes: None,
+            })
+            .unwrap();
+        let input = serde_json::json!({
+            "session_id": "session-1",
+            "turn_id": "turn-1",
+            "cwd": temp.path(),
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Bash",
+            "tool_use_id": "call-1",
+            "tool_response": {"exit_code": 0}
         });
         let mut stderr = Vec::new();
 
@@ -622,17 +719,11 @@ mod tests {
                 .contains("orphan outcome")
         );
         let events = activity.read().unwrap().events().to_vec();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].state, ActivityState::Error);
-        assert!(events[0].decision_id.is_none());
-        assert!(events[0].normalized_command.is_none());
-        assert!(
-            events[0]
-                .reasoning
-                .as_deref()
-                .unwrap()
-                .contains("orphan outcome")
-        );
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].kind, ActivityKind::Decision);
+        assert_eq!(events[0].state, ActivityState::Observed);
+        assert_eq!(events[1].kind, ActivityKind::Diagnostic);
+        assert_eq!(events[1].state, ActivityState::Error);
     }
 
     #[test]
