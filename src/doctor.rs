@@ -12,7 +12,7 @@
 //! non-fatal so optional brain configuration does not make doctor fail.
 
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -397,19 +397,26 @@ fn check_project_identity() -> Check {
         }
     };
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    match coding_brain_core::project::ProjectIdentity::load(&cwd, &paths) {
+    check_project_identity_at(&cwd, &paths)
+}
+
+fn check_project_identity_at(
+    cwd: &Path,
+    paths: &coding_brain_core::paths::CodingBrainPaths,
+) -> Check {
+    match coding_brain_core::project::ProjectIdentity::load(cwd, paths) {
         Ok(identity) if identity.is_durable() => Check {
             name: "project identity".into(),
             status: CheckStatus::Pass,
-            message: "stable project UUID loaded".into(),
+            message: "stable project identity loaded".into(),
             fix_hint: None,
         },
         Ok(_) => Check {
             name: "project identity".into(),
             status: CheckStatus::Advisory,
-            message: ".coding-brain/project.toml is missing; memory is temporary".into(),
+            message: "no manifest or usable Git origin; memory is temporary".into(),
             fix_hint: Some(
-                "Run `coding-brain init` to create an identity. Removing .coding-brain/project.toml before rerunning init deliberately creates a new identity."
+                "Run `coding-brain init` to create an explicit identity override at the project-root `.coding-brain/project.toml`. Removing the project-root `.coding-brain/project.toml` before rerunning init deliberately creates a new identity."
                     .into(),
             ),
         },
@@ -418,7 +425,7 @@ fn check_project_identity() -> Check {
             status: CheckStatus::Advisory,
             message: format!("project manifest is malformed: {error}"),
             fix_hint: Some(
-                "Fix .coding-brain/project.toml, or remove it before `coding-brain init` to deliberately create a new identity."
+                "Fix the project-root `.coding-brain/project.toml`, or remove it before `coding-brain init` to deliberately create a new identity."
                     .into(),
             ),
         },
@@ -534,6 +541,97 @@ fn check_terminal_integration() -> Check {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fixture_paths(home: &Path) -> coding_brain_core::paths::CodingBrainPaths {
+        coding_brain_core::paths::CodingBrainPaths::resolve(
+            &coding_brain_core::paths::PathEnvironment::new(None, None, Some(home.to_path_buf())),
+        )
+        .unwrap()
+    }
+
+    fn run_git(cwd: &Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed");
+    }
+
+    #[test]
+    fn project_identity_passes_for_manifest() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = fixture_paths(root.path());
+        coding_brain_core::project::ProjectManifest::create(root.path(), &paths).unwrap();
+
+        let check = check_project_identity_at(root.path(), &paths);
+
+        assert_eq!(check.status, CheckStatus::Pass);
+        assert_eq!(check.message, "stable project identity loaded");
+        assert_eq!(check.fix_hint, None);
+    }
+
+    #[test]
+    fn project_identity_passes_for_git_origin_without_manifest() {
+        let root = tempfile::tempdir().unwrap();
+        run_git(root.path(), &["init", "--quiet"]);
+        run_git(
+            root.path(),
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/owner/repo.git",
+            ],
+        );
+        let paths = fixture_paths(root.path());
+
+        let check = check_project_identity_at(root.path(), &paths);
+
+        assert_eq!(check.status, CheckStatus::Pass);
+        assert_eq!(check.message, "stable project identity loaded");
+        assert_eq!(check.fix_hint, None);
+    }
+
+    #[test]
+    fn project_identity_advises_init_without_manifest_or_origin() {
+        let root = tempfile::tempdir().unwrap();
+        run_git(root.path(), &["init", "--quiet"]);
+        let nested = root.path().join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        let paths = fixture_paths(root.path());
+
+        let check = check_project_identity_at(&nested, &paths);
+
+        assert_eq!(check.status, CheckStatus::Advisory);
+        assert_eq!(
+            check.message,
+            "no manifest or usable Git origin; memory is temporary"
+        );
+        let hint = check.fix_hint.unwrap();
+        assert!(hint.contains("coding-brain init"));
+        assert!(hint.contains("project-root `.coding-brain/project.toml`"));
+    }
+
+    #[test]
+    fn project_identity_advises_actionable_fix_for_malformed_manifest() {
+        let root = tempfile::tempdir().unwrap();
+        run_git(root.path(), &["init", "--quiet"]);
+        let paths = fixture_paths(root.path());
+        let project_dir = root.path().join(".coding-brain");
+        std::fs::create_dir_all(&project_dir).unwrap();
+        std::fs::write(project_dir.join("project.toml"), "not valid toml = [").unwrap();
+        let nested = root.path().join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+
+        let check = check_project_identity_at(&nested, &paths);
+
+        assert_eq!(check.status, CheckStatus::Advisory);
+        assert!(check.message.contains("project manifest is malformed"));
+        let hint = check.fix_hint.unwrap();
+        assert!(hint.contains("Fix the project-root `.coding-brain/project.toml`"));
+        assert!(hint.contains("coding-brain init"));
+    }
 
     #[test]
     fn render_handles_empty_check_list() {

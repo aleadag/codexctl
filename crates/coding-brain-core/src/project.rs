@@ -58,11 +58,15 @@ impl From<io::Error> for ProjectError {
 
 impl ProjectIdentity {
     pub fn load(cwd: &Path, paths: &CodingBrainPaths) -> Result<Self, ProjectError> {
-        let manifest_path = manifest_path(cwd, paths);
+        let root = project_root(cwd);
+        let manifest_path = manifest_path(&root, paths);
         match fs::read_to_string(&manifest_path) {
             Ok(contents) => ProjectManifest::parse(&contents),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                let canonical = fs::canonicalize(cwd)?;
+                if let Some(id) = git_remote_project_id(&root) {
+                    return Ok(Self { id });
+                }
+                let canonical = fs::canonicalize(&root)?;
                 Ok(Self {
                     id: ProjectId::Temporary(temporary_id(&canonical)),
                 })
@@ -82,10 +86,11 @@ impl ProjectIdentity {
 
 impl ProjectManifest {
     pub fn create(cwd: &Path, paths: &CodingBrainPaths) -> Result<ProjectIdentity, ProjectError> {
-        let project_dir = paths.project_dir(cwd);
+        let root = project_root(cwd);
+        let project_dir = paths.project_dir(&root);
         fs::create_dir_all(&project_dir)?;
         set_directory_mode(&project_dir)?;
-        let destination = manifest_path(cwd, paths);
+        let destination = manifest_path(&root, paths);
         match fs::read_to_string(&destination) {
             Ok(contents) => return Self::parse(&contents),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
@@ -111,7 +116,7 @@ impl ProjectManifest {
         match temporary.persist_noclobber(&destination) {
             Ok(_) => sync_directory(&project_dir)?,
             Err(error) if error.error.kind() == io::ErrorKind::AlreadyExists => {
-                return ProjectIdentity::load(cwd, paths);
+                return ProjectIdentity::load(&root, paths);
             }
             Err(error) => return Err(ProjectError::Io(error.error)),
         }
@@ -139,6 +144,19 @@ fn manifest_path(cwd: &Path, paths: &CodingBrainPaths) -> PathBuf {
     paths.project_dir(cwd).join("project.toml")
 }
 
+fn git_root(cwd: &Path) -> Option<PathBuf> {
+    let root = git_path_output(cwd, &["rev-parse", "--show-toplevel"])?;
+    if root.is_absolute() {
+        Some(root)
+    } else {
+        fs::canonicalize(cwd.join(root)).ok()
+    }
+}
+
+fn project_root(cwd: &Path) -> PathBuf {
+    git_root(cwd).unwrap_or_else(|| cwd.to_path_buf())
+}
+
 fn temporary_id(path: &Path) -> String {
     // A compact stable hash is sufficient here: temporary IDs are explicitly
     // machine-local and are never promoted to durable project identity.
@@ -148,6 +166,165 @@ fn temporary_id(path: &Path) -> String {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     format!("temporary-{hash:016x}")
+}
+
+const GIT_REMOTE_NAMESPACE: uuid::Uuid =
+    uuid::Uuid::from_u128(0x2c54e35b_775d_4bc5_83df_40d4d2fde58e);
+
+fn git_path_output(cwd: &Path, args: &[&str]) -> Option<PathBuf> {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let mut value = output.stdout;
+    if value.last() == Some(&b'\n') {
+        value.pop();
+        #[cfg(windows)]
+        if value.last() == Some(&b'\r') {
+            value.pop();
+        }
+    }
+    if value.is_empty() {
+        return None;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+
+        Some(PathBuf::from(std::ffi::OsString::from_vec(value)))
+    }
+    #[cfg(not(unix))]
+    {
+        String::from_utf8(value).ok().map(PathBuf::from)
+    }
+}
+
+fn git_text_output(cwd: &Path, args: &[&str]) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8(output.stdout).ok()?;
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_owned())
+}
+
+fn normalize_repo_path(path: &str) -> Option<&str> {
+    let path = path.split(['?', '#']).next()?;
+    let path = path.trim_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    (!path.is_empty()).then_some(path)
+}
+
+fn valid_remote_port(port: &str) -> bool {
+    !port.is_empty()
+        && port.bytes().all(|byte| byte.is_ascii_digit())
+        && port.parse::<u16>().is_ok()
+}
+
+fn valid_remote_authority(host_port: &str) -> bool {
+    if host_port.is_empty()
+        || host_port
+            .chars()
+            .any(|character| character.is_whitespace() || matches!(character, '/' | '\\'))
+    {
+        return false;
+    }
+
+    if let Some(bracketed) = host_port.strip_prefix('[') {
+        let Some((host, suffix)) = bracketed.split_once(']') else {
+            return false;
+        };
+        if host.parse::<std::net::Ipv6Addr>().is_err() {
+            return false;
+        }
+        return suffix.is_empty() || suffix.strip_prefix(':').is_some_and(valid_remote_port);
+    }
+
+    if host_port.contains('[') || host_port.contains(']') {
+        return false;
+    }
+    let mut parts = host_port.split(':');
+    let host = parts.next().unwrap_or_default();
+    if host.is_empty() {
+        return false;
+    }
+    match parts.next() {
+        None => true,
+        Some(port) => parts.next().is_none() && valid_remote_port(port),
+    }
+}
+
+fn canonical_network_remote(authority: &str, path: &str) -> Option<String> {
+    let host_port = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, value)| value);
+    if !valid_remote_authority(host_port) {
+        return None;
+    }
+    let path = normalize_repo_path(path)?;
+    Some(format!("{}/{path}", host_port.to_ascii_lowercase()))
+}
+
+fn canonical_remote(remote: &str) -> Option<String> {
+    let remote = remote.trim();
+    if remote.is_empty() {
+        return None;
+    }
+    if remote
+        .split_once(':')
+        .is_some_and(|(scheme, _)| scheme.eq_ignore_ascii_case("file"))
+    {
+        return None;
+    }
+    if remote
+        .as_bytes()
+        .first()
+        .is_some_and(u8::is_ascii_alphabetic)
+        && remote.as_bytes().get(1) == Some(&b':')
+    {
+        return None;
+    }
+    if let Some((scheme, rest)) = remote.split_once("://") {
+        let scheme = scheme.to_ascii_lowercase();
+        if !matches!(
+            scheme.as_str(),
+            "https" | "http" | "ssh" | "git" | "ftp" | "ftps"
+        ) {
+            return None;
+        }
+        let (authority, path) = rest.split_once('/')?;
+        if authority.contains('?') || authority.contains('#') {
+            return None;
+        }
+        return canonical_network_remote(authority, path);
+    }
+    if remote.starts_with('[') || remote.contains("@[") {
+        return None;
+    }
+    if let Some((authority, path)) = remote.split_once(':') {
+        if !authority.contains('/') {
+            return canonical_network_remote(authority, path);
+        }
+    }
+    None
+}
+
+fn git_remote_project_id(git_root: &Path) -> Option<ProjectId> {
+    let remote = git_text_output(git_root, &["remote", "get-url", "origin"])?;
+    let canonical = canonical_remote(&remote)?;
+    let fingerprint = format!("git-remote:v1:{canonical}");
+    Some(ProjectId::Stable(
+        uuid::Uuid::new_v5(&GIT_REMOTE_NAMESPACE, fingerprint.as_bytes()).to_string(),
+    ))
 }
 
 #[cfg(unix)]
@@ -188,11 +365,32 @@ fn sync_directory(_path: &Path) -> io::Result<()> {
 mod tests {
     use super::*;
     use crate::paths::PathEnvironment;
+    #[cfg(unix)]
+    use std::ffi::OsString;
     use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::ffi::OsStringExt;
 
     fn fixture_paths(home: &Path) -> CodingBrainPaths {
         CodingBrainPaths::resolve(&PathEnvironment::new(None, None, Some(home.to_path_buf())))
             .unwrap()
+    }
+
+    fn run_git(cwd: &Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed");
+    }
+
+    fn init_git_repository(root: &Path, remote: Option<&str>) {
+        fs::create_dir_all(root).unwrap();
+        run_git(root, &["init", "--quiet"]);
+        if let Some(remote) = remote {
+            run_git(root, &["remote", "add", "origin", remote]);
+        }
     }
 
     fn copy_manifest(from: &Path, to: &Path) {
@@ -202,6 +400,259 @@ mod tests {
             to.join(".coding-brain/project.toml"),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn canonicalizes_equivalent_network_remotes() {
+        for remote in [
+            "https://github.com/Owner/Repo.git",
+            "https://user:secret@github.com/Owner/Repo.git",
+            "https://github.com/Owner/Repo.git?token=secret#clone",
+            "ssh://git@github.com/Owner/Repo.git",
+            "git@GITHUB.COM:Owner/Repo.git",
+        ] {
+            assert_eq!(
+                canonical_remote(remote).as_deref(),
+                Some("github.com/Owner/Repo")
+            );
+        }
+    }
+
+    #[test]
+    fn normalization_preserves_ports_and_path_case() {
+        assert_eq!(
+            canonical_remote("ssh://git@example.com:2222/Owner/Repo.git").as_deref(),
+            Some("example.com:2222/Owner/Repo")
+        );
+        assert_ne!(
+            canonical_remote("https://example.com/Owner/Repo"),
+            canonical_remote("https://example.com/owner/repo")
+        );
+    }
+
+    #[test]
+    fn rejects_machine_local_remotes() {
+        assert_eq!(canonical_remote("upstream.git"), None);
+        assert_eq!(canonical_remote("file:///srv/upstream.git"), None);
+    }
+
+    #[test]
+    fn rejects_file_scheme_in_every_form() {
+        for remote in [
+            "file:///srv/upstream.git",
+            "file:/srv/upstream.git",
+            "file:relative.git",
+            "FILE:///srv/upstream.git",
+            "FiLe:/srv/upstream.git",
+            "fIlE:relative.git",
+        ] {
+            assert_eq!(canonical_remote(remote), None, "accepted {remote:?}");
+        }
+    }
+
+    #[test]
+    fn rejects_windows_drive_paths() {
+        for remote in ["C:/work/repo.git", r"C:\work\repo.git", "C:repo.git"] {
+            assert_eq!(canonical_remote(remote), None);
+        }
+    }
+
+    #[test]
+    fn rejects_empty_or_incomplete_network_remotes() {
+        for remote in [
+            "",
+            "https://",
+            "https://github.com",
+            "git@github.com:",
+            "custom://github.com/Owner/Repo.git",
+            "git@[2001:db8::1]:Owner/Repo.git",
+        ] {
+            assert_eq!(canonical_remote(remote), None);
+        }
+    }
+
+    #[test]
+    fn rejects_url_query_or_fragment_before_path() {
+        for remote in [
+            "https://github.com?token=secret/Owner/Repo.git",
+            "https://github.com#fragment/Owner/Repo.git",
+        ] {
+            assert_eq!(canonical_remote(remote), None, "accepted {remote:?}");
+        }
+    }
+
+    #[test]
+    fn rejects_malformed_network_authorities() {
+        for remote in [
+            "ssh://:2222/Owner/Repo.git",
+            "ssh://example.com:ssh/Owner/Repo.git",
+            "ssh://example.com:+22/Owner/Repo.git",
+            "ssh://example.com:65536/Owner/Repo.git",
+            "ssh://2001:db8::1/Owner/Repo.git",
+            "ssh://[]/Owner/Repo.git",
+            "ssh://[not-ipv6]/Owner/Repo.git",
+            "ssh://[2001:db8::1/Owner/Repo.git",
+            "ssh://[2001:db8::1]extra/Owner/Repo.git",
+            "ssh://[2001:db8::1]:/Owner/Repo.git",
+            "ssh://[2001:db8::1]:ssh/Owner/Repo.git",
+            "ssh://[2001:db8::1]:+22/Owner/Repo.git",
+            "ssh://[2001:db8::1]:65536/Owner/Repo.git",
+            "https://example .com/Owner/Repo.git",
+            r"git@example\com:Owner/Repo.git",
+        ] {
+            assert_eq!(canonical_remote(remote), None, "accepted {remote:?}");
+        }
+    }
+
+    #[test]
+    fn accepts_bracketed_ipv6_in_url_form() {
+        assert_eq!(
+            canonical_remote("ssh://git@[2001:DB8::1]:2222/Owner/Repo.git").as_deref(),
+            Some("[2001:db8::1]:2222/Owner/Repo")
+        );
+    }
+
+    #[test]
+    fn git_root_and_subdirectory_share_remote_identity() {
+        let root = tempfile::tempdir().unwrap();
+        init_git_repository(root.path(), Some("git@github.com:owner/repo.git"));
+        let nested = root.path().join("src/nested");
+        fs::create_dir_all(&nested).unwrap();
+        let paths = fixture_paths(root.path());
+        let root_id = ProjectIdentity::load(root.path(), &paths).unwrap();
+        let nested_id = ProjectIdentity::load(&nested, &paths).unwrap();
+        assert!(root_id.is_durable());
+        assert_eq!(root_id, nested_id);
+    }
+
+    #[test]
+    fn equivalent_clone_remotes_share_identity() {
+        let fixture = tempfile::tempdir().unwrap();
+        let first = fixture.path().join("first");
+        let second = fixture.path().join("second");
+        init_git_repository(
+            &first,
+            Some("https://user:secret@github.com/Owner/Repo.git?token=hidden"),
+        );
+        init_git_repository(&second, Some("git@github.com:Owner/Repo.git"));
+        let paths = fixture_paths(fixture.path());
+        let first_id = ProjectIdentity::load(&first, &paths).unwrap();
+        let second_id = ProjectIdentity::load(&second, &paths).unwrap();
+        assert_eq!(first_id, second_id);
+        let ProjectId::Stable(value) = first_id.id() else {
+            panic!("remote identity must be stable");
+        };
+        assert!(uuid::Uuid::parse_str(value).is_ok());
+        assert!(!value.contains("secret"));
+        assert!(!value.contains("hidden"));
+        assert!(!value.contains("Owner"));
+    }
+
+    #[test]
+    fn root_manifest_overrides_remote_from_nested_directory() {
+        let root = tempfile::tempdir().unwrap();
+        init_git_repository(root.path(), Some("https://example.com/owner/repo.git"));
+        let paths = fixture_paths(root.path());
+        let explicit = ProjectManifest::create(root.path(), &paths).unwrap();
+        let nested = root.path().join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        assert_eq!(ProjectIdentity::load(&nested, &paths).unwrap(), explicit);
+    }
+
+    #[test]
+    fn manifest_creation_from_nested_directory_writes_at_git_root() {
+        let root = tempfile::tempdir().unwrap();
+        init_git_repository(root.path(), Some("https://example.com/owner/repo.git"));
+        let nested = root.path().join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        let paths = fixture_paths(root.path());
+        ProjectManifest::create(&nested, &paths).unwrap();
+        assert!(root.path().join(".coding-brain/project.toml").is_file());
+        assert!(!nested.join(".coding-brain/project.toml").exists());
+    }
+
+    #[test]
+    fn repository_without_origin_uses_one_temporary_root_identity() {
+        let root = tempfile::tempdir().unwrap();
+        init_git_repository(root.path(), None);
+        let nested = root.path().join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        let paths = fixture_paths(root.path());
+        let root_id = ProjectIdentity::load(root.path(), &paths).unwrap();
+        let nested_id = ProjectIdentity::load(&nested, &paths).unwrap();
+        assert!(!root_id.is_durable());
+        assert_eq!(root_id, nested_id);
+    }
+
+    #[test]
+    fn git_root_preserves_trailing_whitespace() {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path().join("repo ");
+        init_git_repository(&root, None);
+        let nested = root.join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        let paths = fixture_paths(fixture.path());
+
+        let root_id = ProjectIdentity::load(&root, &paths).unwrap();
+        let nested_id = ProjectIdentity::load(&nested, &paths).unwrap();
+
+        assert!(matches!(root_id.id(), ProjectId::Temporary(_)));
+        assert_eq!(root_id, nested_id);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn git_root_preserves_non_utf8_path_bytes() {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture
+            .path()
+            .join(OsString::from_vec(b"repo-\xff".to_vec()));
+        init_git_repository(&root, None);
+        let nested = root.join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        let paths = fixture_paths(fixture.path());
+
+        let root_id = ProjectIdentity::load(&root, &paths).unwrap();
+        let nested_id = ProjectIdentity::load(&nested, &paths).unwrap();
+
+        assert!(matches!(root_id.id(), ProjectId::Temporary(_)));
+        assert_eq!(root_id, nested_id);
+    }
+
+    #[test]
+    fn local_and_file_origins_use_one_temporary_root_identity() {
+        let fixture = tempfile::tempdir().unwrap();
+        for (name, remote) in [
+            ("local", "../upstream.git"),
+            ("file", "file:///srv/upstream.git"),
+        ] {
+            let root = fixture.path().join(name);
+            init_git_repository(&root, Some(remote));
+            let nested = root.join("nested");
+            fs::create_dir_all(&nested).unwrap();
+            let paths = fixture_paths(fixture.path());
+
+            let root_id = ProjectIdentity::load(&root, &paths).unwrap();
+            let nested_id = ProjectIdentity::load(&nested, &paths).unwrap();
+
+            assert!(matches!(root_id.id(), ProjectId::Temporary(_)));
+            assert_eq!(root_id, nested_id, "origin {remote:?}");
+        }
+    }
+
+    #[test]
+    fn malformed_root_manifest_does_not_fall_back_to_origin() {
+        let root = tempfile::tempdir().unwrap();
+        init_git_repository(root.path(), Some("https://example.com/owner/repo.git"));
+        fs::create_dir_all(root.path().join(".coding-brain")).unwrap();
+        fs::write(
+            root.path().join(".coding-brain/project.toml"),
+            "schema_version = 2\nproject_id = \"not-a-uuid\"\n",
+        )
+        .unwrap();
+        let nested = root.path().join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        assert!(ProjectIdentity::load(&nested, &fixture_paths(root.path())).is_err());
     }
 
     #[test]

@@ -24,7 +24,9 @@ coding-brain
 
 From this repository, use `cargo install --path .`. Nix users can install the default flake package; Home Manager users can enable `programs.coding-brain`.
 
-`coding-brain init` creates `.coding-brain/project.toml` for stable project identity and installs managed Codex hooks. Review the generated commands with `/hooks` after restarting Codex. Hook events provide the first activity signal; transcript discovery then supplies richer session evidence.
+Project identity resolves in this order: a project-root `.coding-brain/project.toml` override, the canonical network `origin`, then a path-derived temporary identity. A normal Git clone with a usable network origin does not need `coding-brain init` for identity.
+
+Init still installs managed Codex hooks and creates an explicit manifest override, which is useful for local, `file:`, missing, or otherwise unusable origins. Review the generated commands with `/hooks` after restarting Codex. Hook events provide the first activity signal; transcript discovery then supplies richer session evidence.
 
 To enable local-model evaluation with Ollama:
 

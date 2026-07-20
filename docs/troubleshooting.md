@@ -21,9 +21,9 @@ Init removes only exact managed `coding-brain` entries and exact legacy managed 
 
 ## Project identity is missing or malformed
 
-`coding-brain init` creates `.coding-brain/project.toml`. If it is missing, activity can still use a temporary identity, but learning will not have a stable project UUID.
+Identity resolution first uses the project-root `.coding-brain/project.toml`, then a canonical network `origin`, and finally a path-derived temporary identity. A normal Git clone with a usable network origin therefore has stable identity without `coding-brain init`. Local paths and `file:` origins are not network origins, so they use the temporary fallback unless a manifest overrides them.
 
-Fix malformed TOML rather than editing the UUID. If a fork should intentionally learn as a separate project, remove `.coding-brain/project.toml` in that fork and rerun `coding-brain init`.
+Use `coding-brain init` to create an explicit override when the origin is unusable or when you want to pin identity independently of the remote. Fix malformed TOML in the project-root manifest rather than editing its UUID. If a fork should intentionally learn as a separate project, remove its project-root `.coding-brain/project.toml` and rerun init.
 
 ## No sessions appear in Live
 

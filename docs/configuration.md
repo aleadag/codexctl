@@ -68,6 +68,12 @@ Init writes complete lifecycle handlers for `SessionStart`, `UserPromptSubmit`, 
 
 Hook activity is bounded status evidence, not authorization by itself. Permission decisions still pass through deterministic rules and, when enabled, the Brain evaluator. Transcript discovery supplies richer evidence when the rollout catches up.
 
+## Project identity
+
+Coding Brain first checks the Git project root for `.coding-brain/project.toml`. Without that explicit override, it derives a stable identity from a canonical network `origin`; if the origin is missing, local, `file:`, or otherwise unusable, it falls back to a path-derived temporary identity.
+
+For a normal Git clone with a usable network origin, `coding-brain init` is optional for identity. Run it when you want an explicit manifest override or need stable identity despite an unusable origin; imperative setup also uses init to install managed hooks.
+
 ## Paths
 
 | Data | Path |
