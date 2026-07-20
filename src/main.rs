@@ -31,7 +31,29 @@ use crossterm::{
 use ratatui::{Terminal, backend::CrosstermBackend};
 
 #[derive(Subcommand)]
+pub(crate) enum ConfigAction {
+    /// Show resolved configuration and file locations.
+    Show,
+    /// Print one resolved configuration value.
+    Get { key: String },
+    /// Persist one configuration value.
+    Set { key: String, value: String },
+    /// Print an annotated default config template to stdout.
+    Template,
+    /// Validate config files and report unknown keys or malformed values.
+    Validate,
+    /// Write a sample .coding-brain.toml in the current directory.
+    Init,
+}
+
+#[derive(Subcommand)]
 pub(crate) enum Command {
+    /// Inspect or update Coding Brain configuration.
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
+
     /// Onboarding wizard (brain, hooks, skills). See issue #257.
     Init {
         /// Drift report comparing recorded onboarding against current state.
@@ -136,19 +158,11 @@ pub(crate) struct Cli {
     pub(crate) headless: bool,
 
     // ── Brain (Local LLM) ──────────────────────────────────────────────
-    /// Enable local LLM brain for session advisory (requires ollama or compatible endpoint)
-    #[arg(long, help_heading = "Brain (Local LLM)")]
-    pub(crate) brain: bool,
-
-    /// Auto-execute brain suggestions without confirmation (requires --brain)
-    #[arg(long, help_heading = "Brain (Local LLM)")]
-    pub(crate) auto_run: bool,
-
-    /// LLM endpoint URL for brain (requires --brain)
+    /// LLM endpoint URL for brain
     #[arg(long, help_heading = "Brain (Local LLM)")]
     pub(crate) url: Option<String>,
 
-    /// Override brain model name (requires --brain)
+    /// Override brain model name
     #[arg(long, help_heading = "Brain (Local LLM)")]
     pub(crate) brain_model: Option<String>,
 
@@ -205,11 +219,6 @@ pub(crate) struct Cli {
     #[arg(long, help_heading = "Brain (Local LLM)")]
     pub(crate) project: Option<String>,
 
-    /// Set brain gate mode: on (default), off (disable), auto (full auto-approve).
-    /// Controls whether Codex hooks query the brain.
-    #[arg(long, help_heading = "Brain (Local LLM)")]
-    pub(crate) mode: Option<String>,
-
     /// Record a tool-call outcome to the pending-outcomes spool.
     /// Used by the Codex PostToolUse hook for #220 baselining.
     /// Reads pending-outcome JSON from stdin (preferred) or builds one from
@@ -259,7 +268,7 @@ pub(crate) struct Cli {
     pub(crate) top: Option<usize>,
 
     /// Show auto-generated insights, or set mode (on/off/status).
-    /// Requires --brain or brain.enabled in config.
+    /// Requires brain.enabled in config.
     /// Without argument: show current insights.
     /// With argument: set insights mode (on = auto-generate, off = disable).
     #[arg(long, help_heading = "Brain (Local LLM)", num_args = 0..=1, default_missing_value = "")]
@@ -294,22 +303,6 @@ pub(crate) struct Cli {
     /// Session ID or JSONL path for --autopsy (defaults to most recent session)
     #[arg(long, help_heading = "History & Diagnostics")]
     pub(crate) session: Option<String>,
-
-    /// Show resolved configuration and exit
-    #[arg(long, help_heading = "History & Diagnostics")]
-    pub(crate) config: bool,
-
-    /// Print an annotated default config template to stdout and exit
-    #[arg(long, help_heading = "History & Diagnostics")]
-    pub(crate) config_template: bool,
-
-    /// Validate config files and report unknown keys or malformed values
-    #[arg(long, help_heading = "History & Diagnostics")]
-    pub(crate) config_validate: bool,
-
-    /// Write a sample .coding-brain.toml in the current directory
-    #[arg(long, help_heading = "Setup")]
-    pub(crate) config_init: bool,
 
     /// List configured event hooks and exit
     #[arg(long, help_heading = "History & Diagnostics")]
@@ -407,18 +400,24 @@ fn print_first_run_banner() {
 }
 
 fn apply_brain_cli_overrides(cfg: &mut config::Config, cli: &Cli) {
-    if cli.brain {
-        let brain = cfg.brain.get_or_insert_with(config::BrainConfig::default);
-        brain.enabled = true;
-        if cli.auto_run {
-            brain.auto_mode = true;
-        }
+    if cli.url.is_some() || cli.brain_model.is_some() {
+        let brain = cfg.brain.get_or_insert_with(|| config::BrainConfig {
+            enabled: false,
+            ..config::BrainConfig::default()
+        });
         if let Some(ref endpoint) = cli.url {
             brain.endpoint = endpoint.clone();
         }
         if let Some(ref model) = cli.brain_model {
             brain.model = model.clone();
         }
+    }
+}
+
+fn early_config_action(cli: &Cli) -> Option<&ConfigAction> {
+    match cli.command.as_ref() {
+        Some(Command::Config { action }) => Some(action),
+        _ => None,
     }
 }
 
@@ -440,7 +439,7 @@ fn run_main(cli: Cli) -> io::Result<()> {
         }
     }
 
-    // Load config from files, then let CLI flags override
+    // Load config from files, then let endpoint/model flags override.
     let mut cfg = config::Config::load();
     for (path, warning) in config::legacy_config_warnings() {
         eprintln!(
@@ -452,6 +451,22 @@ fn run_main(cli: Cli) -> io::Result<()> {
     }
 
     apply_brain_cli_overrides(&mut cfg, &cli);
+    if let Some(action) = early_config_action(&cli) {
+        return match action {
+            ConfigAction::Show => {
+                cfg.print_resolved();
+                Ok(())
+            }
+            ConfigAction::Get { key } => commands::run_config_get(&cfg, key),
+            ConfigAction::Set { key, value } => commands::run_config_set(key, value),
+            ConfigAction::Template => {
+                config::Config::print_template();
+                Ok(())
+            }
+            ConfigAction::Validate => commands::validate_config(),
+            ConfigAction::Init => commands::write_config_init(),
+        };
+    }
     if cli.permission_hook {
         brain::permission_hook::run(cfg.brain.as_ref());
         return Ok(());
@@ -464,24 +479,6 @@ fn run_main(cli: Cli) -> io::Result<()> {
 
     // Load event hooks from config
     let hook_registry = config::load_hooks();
-
-    if cli.config {
-        cfg.print_resolved();
-        return Ok(());
-    }
-
-    if cli.config_template {
-        config::Config::print_template();
-        return Ok(());
-    }
-
-    if cli.config_validate {
-        return commands::validate_config();
-    }
-
-    if cli.config_init {
-        return commands::write_config_init();
-    }
 
     if cli.hooks {
         hook_registry.print_list();
@@ -546,6 +543,7 @@ fn run_main(cli: Cli) -> io::Result<()> {
 
     if let Some(ref command) = cli.command {
         match command {
+            Command::Config { .. } => unreachable!("config commands are dispatched after loading"),
             Command::Init {
                 check,
                 reset,
@@ -657,12 +655,8 @@ fn run_main(cli: Cli) -> io::Result<()> {
         return commands::run_brain_baseline(&cli);
     }
 
-    if let Some(ref mode) = cli.mode {
-        return commands::run_brain_mode(mode);
-    }
-
     if let Some(ref insights_arg) = cli.insights {
-        return commands::run_insights(&cfg, &cli, insights_arg);
+        return commands::run_insights(&cfg, insights_arg);
     }
 
     if cli.brain_garden {
@@ -776,6 +770,31 @@ mod default_brain_cli_tests {
 
         assert_eq!(select_mode(&cli), RunMode::Headless { json: true });
     }
+
+    #[test]
+    fn endpoint_and_model_overrides_do_not_enable_the_brain() {
+        for args in [
+            ["coding-brain", "--url", "http://localhost:9999"],
+            ["coding-brain", "--brain-model", "local-model"],
+        ] {
+            let cli = Cli::try_parse_from(args).unwrap();
+            let mut config = config::Config::default();
+
+            apply_brain_cli_overrides(&mut config, &cli);
+
+            assert!(!config.brain.unwrap().enabled);
+        }
+    }
+
+    #[test]
+    fn config_subcommand_is_selected_ahead_of_brain_actions() {
+        let cli = Cli::try_parse_from(["coding-brain", "--brain-eval", "config", "show"]).unwrap();
+
+        assert!(matches!(
+            early_config_action(&cli),
+            Some(ConfigAction::Show)
+        ));
+    }
 }
 
 #[cfg(test)]
@@ -820,14 +839,19 @@ mod brain_only_cli_tests {
         "--init",
         "--uninstall",
         "--doctor",
+        "--brain",
+        "--auto-run",
+        "--mode",
+        "--config",
+        "--config-template",
+        "--config-validate",
+        "--config-init",
     ];
 
     const RETAINED_ARGS: &[&str] = &[
         "--headless",
         "--json",
         "--theme",
-        "--brain",
-        "--auto-run",
         "--url",
         "--brain-model",
         "--brain-eval",
@@ -839,7 +863,6 @@ mod brain_only_cli_tests {
         "--tool",
         "--tool-input",
         "--project",
-        "--mode",
         "--record-outcome",
         "--exit-code",
         "--duration-ms",
@@ -856,10 +879,6 @@ mod brain_only_cli_tests {
         "--brain-briefing",
         "--autopsy",
         "--session",
-        "--config",
-        "--config-template",
-        "--config-validate",
-        "--config-init",
         "--hooks",
         "--log",
     ];
@@ -906,17 +925,11 @@ mod brain_only_cli_tests {
         assert!(Cli::try_parse_from(["coding-brain", "--run", "tasks.json"]).is_err());
         assert!(Cli::try_parse_from(["coding-brain", "--parallel"]).is_err());
         assert!(Cli::try_parse_from(["coding-brain", "--decompose", "split this work"]).is_err());
-
-        let advisory = Cli::try_parse_from(["coding-brain"]).unwrap();
-        assert!(!advisory.auto_run);
-        let automatic = Cli::try_parse_from(["coding-brain", "--auto-run"]).unwrap();
-        assert!(automatic.auto_run);
     }
 
     #[test]
-    fn generated_help_keeps_auto_run_and_omits_removed_surfaces() {
+    fn generated_help_omits_removed_surfaces() {
         let help = Cli::command().render_long_help().to_string();
-        assert!(help.contains("--auto-run"));
         for command in [
             "coord",
             "bus",
@@ -937,6 +950,35 @@ mod brain_only_cli_tests {
         }
         for flag in ["--run", "--parallel", "--decompose"] {
             assert!(!help.contains(flag), "{flag} remains in generated help");
+        }
+    }
+
+    #[test]
+    fn persistent_mode_uses_config_subcommand() {
+        let cli = Cli::try_parse_from(["coding-brain", "config", "set", "mode", "auto"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Command::Config {
+                action: ConfigAction::Set { ref key, ref value }
+            }) if key == "mode" && value == "auto"
+        ));
+    }
+
+    #[test]
+    fn overlapping_brain_flags_are_removed() {
+        for flag in [
+            "--brain",
+            "--auto-run",
+            "--mode",
+            "--config",
+            "--config-template",
+            "--config-validate",
+            "--config-init",
+        ] {
+            assert!(
+                Cli::try_parse_from(["coding-brain", flag]).is_err(),
+                "{flag}"
+            );
         }
     }
 }

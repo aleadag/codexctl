@@ -33,7 +33,10 @@ fn ordinary_commands_ignore_and_preserve_legacy_namespace() {
     assert!(help.status.success());
     assert!(String::from_utf8_lossy(&help.stdout).starts_with("Supervise Codex"));
 
-    let config = isolated_command(&temp).arg("--config").output().unwrap();
+    let config = isolated_command(&temp)
+        .args(["config", "show"])
+        .output()
+        .unwrap();
     assert!(config.status.success());
     let config_stdout = String::from_utf8_lossy(&config.stdout);
     assert!(config_stdout.contains("coding-brain/config.toml"));

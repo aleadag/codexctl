@@ -76,8 +76,71 @@ pub(crate) fn write_config_init() -> io::Result<()> {
     let template = config::Config::template_string();
     std::fs::write(&path, template).map_err(|e| io::Error::other(format!("write: {e}")))?;
     println!("Created .coding-brain.toml with annotated defaults.");
-    println!("Edit the file to customize, then run `coding-brain --config-validate` to check.");
+    println!("Edit the file to customize, then run `coding-brain config validate` to check.");
     Ok(())
+}
+
+pub(crate) fn run_config_get(cfg: &config::Config, key: &str) -> io::Result<()> {
+    let report = config_report_at(&brain::gate_mode_path(), cfg.brain.as_ref(), key)?;
+    print!("{report}");
+    Ok(())
+}
+
+pub(crate) fn run_config_set(key: &str, value: &str) -> io::Result<()> {
+    set_config_at(&brain::gate_mode_path(), key, value)?;
+    println!("mode: {value}");
+    Ok(())
+}
+
+fn config_report_at(
+    path: &std::path::Path,
+    brain_config: Option<&config::BrainConfig>,
+    key: &str,
+) -> io::Result<String> {
+    if key != "mode" {
+        return Err(unsupported_config_key(key));
+    }
+    Ok(mode_report_at(path, brain_config))
+}
+
+fn mode_report_at(path: &std::path::Path, brain_config: Option<&config::BrainConfig>) -> String {
+    let resolution = brain::resolve_gate_mode_at(path, brain_config);
+    let mut report = format!("mode: {}\n", resolution.mode);
+    if let Some(warning) = resolution.warning {
+        report.push_str(&format!(
+            "warning: {warning}\ncorrect with: coding-brain config set mode <off|on|auto>\n"
+        ));
+    }
+    report
+}
+
+fn set_config_at(path: &std::path::Path, key: &str, value: &str) -> io::Result<()> {
+    if key != "mode" {
+        return Err(unsupported_config_key(key));
+    }
+    set_mode_at(path, value)
+}
+
+fn set_mode_at(path: &std::path::Path, value: &str) -> io::Result<()> {
+    let mode = match value {
+        "off" => coding_brain_core::runtime::BrainGateMode::Off,
+        "on" => coding_brain_core::runtime::BrainGateMode::On,
+        "auto" => coding_brain_core::runtime::BrainGateMode::Auto,
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("unsupported mode value {value:?}; expected off, on, or auto"),
+            ));
+        }
+    };
+    brain::write_gate_mode_at(path, mode)
+}
+
+fn unsupported_config_key(key: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidInput,
+        format!("unsupported config key {key:?}; expected mode"),
+    )
 }
 
 /// Build a per-project session briefing (#198) and print to stdout.
@@ -357,70 +420,13 @@ fn emit_activity(event: &coding_brain_core::brain_activity::ActivityEvent, json_
     }
 }
 
-/// Path to the brain gate mode state file.
-pub(crate) fn brain_gate_mode_path() -> std::path::PathBuf {
-    coding_brain::brain::gate_mode_path()
-}
-
-/// Read the current brain gate mode from disk. Returns "on" if no file exists.
-pub(crate) fn read_brain_gate_mode() -> String {
-    coding_brain::brain::read_gate_mode()
-}
-
-/// Set the brain gate mode (on/off/auto) and print confirmation.
-pub(crate) fn run_brain_mode(mode: &str) -> io::Result<()> {
-    match mode {
-        "on" | "off" | "auto" => {}
-        "status" | "" => {
-            let current = read_brain_gate_mode();
-            println!("Brain gate mode: {current}");
-            println!();
-            println!("Modes:");
-            println!("  on   — brain evaluates tool calls, denies dangerous ones (default)");
-            println!("  off  — brain disabled, all tool calls pass through");
-            println!("  auto — brain auto-approves above confidence threshold");
-            return Ok(());
-        }
-        _ => {
-            eprintln!("Unknown brain mode: {mode}");
-            eprintln!("Valid modes: on, off, auto, status");
-            std::process::exit(1);
-        }
-    }
-
-    let path = brain_gate_mode_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    if mode == "on" {
-        // "on" is the default — remove the file so absence = on
-        let _ = std::fs::remove_file(&path);
-    } else {
-        std::fs::write(&path, mode)?;
-    }
-
-    let description = match mode {
-        "on" => "brain evaluates tool calls, denies dangerous ones",
-        "off" => "brain disabled — all tool calls pass through to normal permission flow",
-        "auto" => "brain auto-approves tool calls above confidence threshold",
-        _ => unreachable!(),
-    };
-
-    println!("Brain gate mode set to: {mode}");
-    println!("  {description}");
-    Ok(())
-}
-
 /// Handle --insights: show insights or set mode (on/off/status).
 /// Requires brain to be enabled.
-pub(crate) fn run_insights(cfg: &config::Config, cli: &Cli, arg: &str) -> io::Result<()> {
-    let brain_enabled = cfg.brain.as_ref().map(|b| b.enabled).unwrap_or(false) || cli.brain;
+pub(crate) fn run_insights(cfg: &config::Config, arg: &str) -> io::Result<()> {
+    let brain_enabled = cfg.brain.as_ref().map(|b| b.enabled).unwrap_or(false);
 
     if !brain_enabled {
-        eprintln!(
-            "Insights requires the brain. Use --brain or set brain.enabled = true in config."
-        );
+        eprintln!("Insights requires brain.enabled = true in config.");
         std::process::exit(1);
     }
 
@@ -429,13 +435,13 @@ pub(crate) fn run_insights(cfg: &config::Config, cli: &Cli, arg: &str) -> io::Re
             let _ = brain::insights::write_insights_mode("on");
             println!("Insights mode: on");
             println!("  Auto-generating insights every 10 decisions during brain distillation.");
-            println!("  Run `coding-brain --brain --insights` to view.");
+            println!("  Run `coding-brain --insights` to view.");
         }
         "off" => {
             let _ = brain::insights::write_insights_mode("off");
             println!("Insights mode: off");
             println!(
-                "  Auto-generation disabled. Run `coding-brain --brain --insights` to generate on demand."
+                "  Auto-generation disabled. Run `coding-brain --insights` to generate on demand."
             );
         }
         "status" => {
@@ -726,12 +732,9 @@ fn read_diff_digest_from_stdin(tool_name: &str) -> Option<brain::diff_digest::Di
 /// local LLM, and prints a JSON decision to stdout. Designed to be called
 /// by Codex hooks for inline approve/deny.
 pub(crate) fn run_brain_query(cfg: &config::Config, cli: &Cli) -> io::Result<()> {
-    let gate_mode = read_brain_gate_mode();
-    let brain_cfg = cfg.brain.clone().unwrap_or_default();
-
-    if gate_mode != "off" && !brain_cfg.enabled && !cli.brain {
-        eprintln!("Brain is not enabled. Use --brain or set brain.enabled = true in config.");
-        std::process::exit(1);
+    let resolution = brain::resolve_gate_mode(cfg.brain.as_ref());
+    if let Some(warning) = resolution.warning {
+        eprintln!("Warning: {warning}");
     }
 
     let tool_name = cli.tool.clone().unwrap_or_else(|| "unknown".into());
@@ -747,7 +750,7 @@ pub(crate) fn run_brain_query(cfg: &config::Config, cli: &Cli) -> io::Result<()>
     // We try to parse it into a `DiffDigest` for richer prompt context and
     // structured decision-log attribution. Missing/invalid stdin is fine —
     // the rest of the flow degrades to the pre-#237 behaviour.
-    let diff_digest = if gate_mode == "off" {
+    let diff_digest = if resolution.mode == coding_brain_core::runtime::BrainGateMode::Off {
         None
     } else {
         read_diff_digest_from_stdin(&tool_name)
@@ -759,22 +762,22 @@ pub(crate) fn run_brain_query(cfg: &config::Config, cli: &Cli) -> io::Result<()>
         tool_input: command,
         diff_digest,
     };
-    let result = brain_query_json_with(cfg, &request, &gate_mode, brain::client::infer);
+    let result = evaluate_brain_query_with(cfg, &request, resolution.mode, brain::client::infer);
     println!("{}", serde_json::to_string(&result).unwrap());
     Ok(())
 }
 
-fn brain_query_json_with<F>(
+fn evaluate_brain_query_with<F>(
     cfg: &config::Config,
     request: &brain::query::BrainDecisionRequest,
-    gate_mode: &str,
+    gate_mode: coding_brain_core::runtime::BrainGateMode,
     infer: F,
 ) -> serde_json::Value
 where
     F: FnOnce(&config::BrainConfig, &str) -> Result<brain::client::BrainSuggestion, String>,
 {
     let brain_cfg = cfg.brain.clone().unwrap_or_default();
-    let decision = brain::query::evaluate_with(request, &brain_cfg, gate_mode, infer);
+    let decision = brain::query::evaluate_with(request, &brain_cfg, gate_mode.as_str(), infer);
     let mut result = serde_json::json!({
         "action": decision.action,
         "reasoning": decision.reasoning,
@@ -926,19 +929,109 @@ mod brain_query_adapter_tests {
             tool_input: "cargo test".into(),
             diff_digest: None,
         };
-        let result = brain_query_json_with(&cfg, &request, "on", |_, _| {
-            Ok(BrainSuggestion {
-                action: RuleAction::Approve,
-                message: Some("brain chose this".into()),
-                reasoning: "injected brain decision".into(),
-                confidence: 0.9,
-                suggested_at: 0,
-            })
-        });
+        let result = evaluate_brain_query_with(
+            &cfg,
+            &request,
+            coding_brain_core::runtime::BrainGateMode::On,
+            |_, _| {
+                Ok(BrainSuggestion {
+                    action: RuleAction::Approve,
+                    message: Some("brain chose this".into()),
+                    reasoning: "injected brain decision".into(),
+                    confidence: 0.9,
+                    suggested_at: 0,
+                })
+            },
+        );
 
         assert_eq!(result["action"], "approve");
         assert_eq!(result["source"], "brain");
         assert_eq!(result["reasoning"], "injected brain decision");
         assert_ne!(result["source"], "rule");
+    }
+
+    #[test]
+    fn explicit_on_mode_ignores_disabled_legacy_config() {
+        let cfg = config::Config {
+            brain: Some(config::BrainConfig {
+                enabled: false,
+                ..config::BrainConfig::default()
+            }),
+            ..config::Config::default()
+        };
+        let request = brain::query::BrainDecisionRequest {
+            project: "codexctl".into(),
+            tool_name: "Bash".into(),
+            tool_input: "cargo test".into(),
+            diff_digest: None,
+        };
+
+        let result = evaluate_brain_query_with(
+            &cfg,
+            &request,
+            coding_brain_core::runtime::BrainGateMode::On,
+            |_, _| {
+                Ok(BrainSuggestion {
+                    action: RuleAction::Approve,
+                    message: None,
+                    reasoning: "explicit mode reached inference".into(),
+                    confidence: 0.9,
+                    suggested_at: 0,
+                })
+            },
+        );
+
+        assert_eq!(result["source"], "brain");
+        assert_eq!(result["reasoning"], "explicit mode reached inference");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::BrainConfig;
+
+    #[test]
+    fn config_set_mode_rejects_unknown_value_without_writing() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("gate-mode");
+
+        let error = set_mode_at(&path, "automatic").unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn config_set_rejects_unknown_key_without_writing() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("gate-mode");
+
+        let error = set_config_at(&path, "brain.mode", "auto").unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn config_get_mode_reports_fail_closed_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("gate-mode");
+        std::fs::write(&path, "broken").unwrap();
+
+        let report = mode_report_at(&path, Some(&BrainConfig::default()));
+
+        assert!(report.contains("mode: off"));
+        assert!(report.contains("config set mode <off|on|auto>"));
+    }
+
+    #[test]
+    fn config_get_rejects_unknown_key() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("gate-mode");
+
+        let error = config_report_at(&path, None, "brain.mode").unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
     }
 }
