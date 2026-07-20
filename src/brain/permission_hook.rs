@@ -19,6 +19,7 @@ use coding_brain_core::lifecycle::{
 };
 use coding_brain_core::paths::{CodingBrainPaths, PathEnvironment};
 use coding_brain_core::project::ProjectIdentity;
+use coding_brain_core::runtime::BrainGateMode;
 
 use super::activity::ActivityStore;
 use super::client::BrainSuggestion;
@@ -210,7 +211,7 @@ fn current_paths() -> Result<CodingBrainPaths, HookDiagnostic> {
 pub(crate) fn evaluate_request<F>(
     request: &BrainDecisionRequest,
     config: Option<&BrainConfig>,
-    gate_mode: &str,
+    gate_mode: BrainGateMode,
     persistence_ready: bool,
     supported: bool,
     infer: F,
@@ -240,24 +241,24 @@ where
             terminal_state: ActivityState::Abstained,
         };
     }
-    let Some(config) = config.filter(|config| config.enabled) else {
+    if gate_mode == BrainGateMode::Off {
         return HookEvaluation::Abstain {
             brain: None,
-            reason: "Brain is disabled".into(),
-            terminal_state: ActivityState::Abstained,
-        };
-    };
-    if gate_mode == "off" {
-        return HookEvaluation::Abstain {
-            brain: None,
-            reason: "Brain gate mode is off".into(),
+            reason: "Brain model mode is off".into(),
             terminal_state: ActivityState::Abstained,
         };
     }
+    let Some(config) = config else {
+        return HookEvaluation::Abstain {
+            brain: None,
+            reason: "Brain model is not configured".into(),
+            terminal_state: ActivityState::Abstained,
+        };
+    };
 
     let mut hook_config = config.clone();
     hook_config.timeout_ms = hook_config.timeout_ms.min(HOOK_INFERENCE_TIMEOUT_MS);
-    let brain = query::evaluate_with(request, &hook_config, gate_mode, infer);
+    let brain = query::evaluate_with(request, &hook_config, gate_mode.as_str(), infer);
     if brain.source == "brain" && brain.below_threshold == Some(false) {
         return match brain.action.as_str() {
             "approve" => HookEvaluation::Allow {
@@ -404,7 +405,7 @@ fn run_with_gate_and_store<R, W, E, F>(
     stdout: W,
     stderr: E,
     config: Option<&BrainConfig>,
-    gate_mode: &str,
+    gate_mode: BrainGateMode,
     store: &LifecycleStore,
     infer: F,
 ) where
@@ -432,7 +433,7 @@ fn run_with_gate_and_stores<R, W, E, F>(
     mut stdout: W,
     mut stderr: E,
     config: Option<&BrainConfig>,
-    gate_mode: &str,
+    gate_mode: BrainGateMode,
     lifecycle_store: &LifecycleStore,
     activity_store: Option<&ActivityStore>,
     infer: F,
@@ -736,7 +737,7 @@ fn run_with_gate<R, W, E, F>(
     stdout: W,
     stderr: E,
     config: Option<&BrainConfig>,
-    gate_mode: &str,
+    gate_mode: BrainGateMode,
     infer: F,
 ) where
     R: Read,
@@ -760,21 +761,18 @@ fn run_with_gate<R, W, E, F>(
     );
 }
 
-fn run_with<R, W, E, F>(stdin: R, stdout: W, stderr: E, config: Option<&BrainConfig>, infer: F)
+fn run_with<R, W, E, F>(stdin: R, stdout: W, mut stderr: E, config: Option<&BrainConfig>, infer: F)
 where
     R: Read,
     W: Write,
     E: Write,
     F: FnOnce(&BrainConfig, &str) -> Result<BrainSuggestion, String>,
 {
-    run_with_gate(
-        stdin,
-        stdout,
-        stderr,
-        config,
-        &super::read_gate_mode(),
-        infer,
-    );
+    let resolved = super::resolve_gate_mode(config);
+    if let Some(warning) = resolved.warning {
+        write_diagnostic(&mut stderr, warning);
+    }
+    run_with_gate(stdin, stdout, stderr, config, resolved.mode, infer);
 }
 
 pub(crate) fn run(config: Option<&BrainConfig>) {
@@ -906,7 +904,7 @@ mod tests {
         stdout: W,
         stderr: E,
         config: Option<&BrainConfig>,
-        gate_mode: &str,
+        gate_mode: BrainGateMode,
         infer: F,
     ) where
         R: Read,
@@ -926,7 +924,7 @@ mod tests {
         E: Write,
         F: FnOnce(&BrainConfig, &str) -> Result<BrainSuggestion, String>,
     {
-        run_test_with_gate(stdin, stdout, stderr, config, "on", infer);
+        run_test_with_gate(stdin, stdout, stderr, config, BrainGateMode::On, infer);
     }
 
     fn projected_status(store: &LifecycleStore) -> Option<ProjectedStatus> {
@@ -974,7 +972,7 @@ mod tests {
             &mut stdout,
             &mut stderr,
             Some(&enabled_config()),
-            "on",
+            BrainGateMode::On,
             &store,
             |_, _| panic!("non-Bash permission must not reach inference"),
         );
@@ -997,7 +995,7 @@ mod tests {
             &mut stdout,
             &mut stderr,
             Some(&enabled_config()),
-            "on",
+            BrainGateMode::On,
             &store,
             |_, _| panic!("oversized permission must not reach inference"),
         );
@@ -1024,7 +1022,7 @@ mod tests {
             &mut healthy_stdout,
             &mut healthy_stderr,
             Some(&enabled_config()),
-            "on",
+            BrainGateMode::On,
             &healthy,
             Some(&healthy_activity),
             |_, _| Ok(suggestion(RuleAction::Approve, 0.9)),
@@ -1036,7 +1034,7 @@ mod tests {
             &mut failed_stdout,
             &mut failed_stderr,
             Some(&enabled_config()),
-            "on",
+            BrainGateMode::On,
             &blocked,
             Some(&blocked_activity),
             |_, _| Ok(suggestion(RuleAction::Approve, 0.9)),
@@ -1075,7 +1073,7 @@ mod tests {
                 &mut stdout,
                 &mut stderr,
                 Some(&enabled_config()),
-                "on",
+                BrainGateMode::On,
                 &store,
                 |_, _| panic!("empty command must not reach inference"),
             );
@@ -1108,7 +1106,7 @@ mod tests {
             &mut stdout,
             &mut stderr,
             Some(&enabled_config()),
-            "on",
+            BrainGateMode::On,
             &store,
             |config, _| {
                 assert_eq!(config.timeout_ms, 25_000);
@@ -1172,7 +1170,7 @@ mod tests {
             &mut stdout,
             &mut stderr,
             Some(&enabled_config()),
-            "on",
+            BrainGateMode::On,
             &store,
             |_, _| Ok(suggestion(RuleAction::Deny, 0.9)),
         );
@@ -1208,6 +1206,54 @@ mod tests {
     }
 
     #[test]
+    fn mode_off_skips_model_inference() {
+        let evaluation = evaluate_request(
+            &BrainDecisionRequest {
+                project: "project".into(),
+                tool_name: "Bash".into(),
+                tool_input: "cargo test".into(),
+                diff_digest: None,
+            },
+            Some(&enabled_config()),
+            BrainGateMode::Off,
+            true,
+            true,
+            |_, _| panic!("mode off must not invoke the model"),
+        );
+
+        assert!(matches!(
+            evaluation,
+            HookEvaluation::Abstain { brain: None, .. }
+        ));
+    }
+
+    #[test]
+    fn explicit_mode_on_overrides_legacy_disabled_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("gate-mode");
+        std::fs::write(&path, "on").unwrap();
+        let mut disabled = enabled_config();
+        disabled.enabled = false;
+        let resolved = super::super::resolve_gate_mode_at(&path, Some(&disabled));
+
+        let evaluation = evaluate_request(
+            &BrainDecisionRequest {
+                project: "project".into(),
+                tool_name: "Bash".into(),
+                tool_input: "cargo test".into(),
+                diff_digest: None,
+            },
+            Some(&disabled),
+            resolved.mode,
+            true,
+            true,
+            |_, _| Ok(suggestion(RuleAction::Approve, 0.9)),
+        );
+
+        assert!(matches!(evaluation, HookEvaluation::Allow { .. }));
+    }
+
+    #[test]
     fn fallthrough_cases_leave_stdout_empty() {
         let _guard = crate::config::HOME_ENV_LOCK
             .lock()
@@ -1218,15 +1264,19 @@ mod tests {
         let cases = [
             (
                 enabled_config(),
-                "on",
+                BrainGateMode::On,
                 Ok(suggestion(RuleAction::Approve, 0.1)),
             ),
             (
                 enabled_config(),
-                "off",
+                BrainGateMode::Off,
                 Ok(suggestion(RuleAction::Approve, 0.9)),
             ),
-            (enabled_config(), "on", Err("endpoint unavailable".into())),
+            (
+                enabled_config(),
+                BrainGateMode::On,
+                Err("endpoint unavailable".into()),
+            ),
         ];
         for (config, gate_mode, inference) in cases {
             let temp = tempfile::tempdir().unwrap();
@@ -1257,7 +1307,11 @@ mod tests {
             &mut stdout,
             &mut stderr,
             Some(&disabled),
-            "on",
+            super::super::resolve_gate_mode_at(
+                &temp.path().join("missing-gate-mode"),
+                Some(&disabled),
+            )
+            .mode,
             &store,
             |_, _| panic!("disabled hook must not infer"),
         );
@@ -1333,7 +1387,7 @@ mod tests {
             FailingWriter,
             &mut stderr,
             Some(&enabled_config()),
-            "on",
+            BrainGateMode::On,
             &lifecycle,
             Some(&activity),
             |_, _| Ok(suggestion(RuleAction::Approve, 0.9)),
@@ -1358,7 +1412,7 @@ mod tests {
             FailingFlushWriter,
             &mut stderr,
             Some(&enabled_config()),
-            "on",
+            BrainGateMode::On,
             &lifecycle,
             Some(&activity),
             |_, _| Ok(suggestion(RuleAction::Approve, 0.9)),

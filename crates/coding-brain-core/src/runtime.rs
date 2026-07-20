@@ -223,7 +223,6 @@ pub trait BrainSource: Send + Sync {
 pub trait BrainActions: Send + Sync {
     fn record_correction(&self, correction: CorrectionInput) -> Result<(), String>;
     fn mark_canonical(&self, decision_id: &str, note: Option<String>) -> Result<(), String>;
-    fn set_gate_mode(&self, mode: BrainGateMode) -> Result<(), String>;
 }
 
 #[derive(Clone)]
@@ -353,7 +352,6 @@ pub enum MockBrainAction {
         decision_id: String,
         note: Option<String>,
     },
-    SetGateMode(BrainGateMode),
 }
 
 impl MockBrainRuntime {
@@ -412,15 +410,6 @@ impl BrainActions for MockBrainRuntime {
                 decision_id: decision_id.into(),
                 note,
             });
-        Ok(())
-    }
-
-    fn set_gate_mode(&self, mode: BrainGateMode) -> Result<(), String> {
-        *self.gate_mode.lock().expect("brain gate_mode poisoned") = Some(mode);
-        self.actions_log
-            .lock()
-            .expect("brain actions_log poisoned")
-            .push(MockBrainAction::SetGateMode(mode));
         Ok(())
     }
 }

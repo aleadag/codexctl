@@ -189,21 +189,6 @@ impl BrainApp {
                 }
                 None
             }
-            KeyCode::Char('g') => {
-                let mode = match self.gate_mode {
-                    BrainGateMode::On => BrainGateMode::Auto,
-                    BrainGateMode::Auto => BrainGateMode::Off,
-                    BrainGateMode::Off => BrainGateMode::On,
-                };
-                match self.runtime.actions.set_gate_mode(mode) {
-                    Ok(()) => {
-                        self.gate_mode = mode;
-                        self.status = Some(format!("Brain mode: {mode}"));
-                    }
-                    Err(error) => self.status = Some(format!("Could not set mode: {error}")),
-                }
-                None
-            }
             _ => None,
         }
     }
@@ -464,6 +449,16 @@ mod tests {
         let effect = app.handle_key(key(KeyCode::Enter));
 
         assert!(matches!(effect, Some(BrainEffect::SwitchToSession(_))));
+        assert!(mock.actions().is_empty());
+    }
+
+    #[test]
+    fn g_does_not_change_the_read_only_gate_mode() {
+        let (mut app, mock) = fixture_app(false);
+
+        app.handle_key(key(KeyCode::Char('g')));
+
+        assert_eq!(app.gate_mode(), BrainGateMode::On);
         assert!(mock.actions().is_empty());
     }
 

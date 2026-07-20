@@ -58,7 +58,7 @@ fn render_header(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &Brain
             match app.gate_mode() {
                 coding_brain_core::runtime::BrainGateMode::On => "advisory",
                 coding_brain_core::runtime::BrainGateMode::Auto => "automatic",
-                coding_brain_core::runtime::BrainGateMode::Off => "off",
+                coding_brain_core::runtime::BrainGateMode::Off => "model off",
             }
         )),
     ]);
@@ -178,6 +178,22 @@ mod tests {
         for forbidden in ["PID", "send", "terminate", "route", "spawn"] {
             assert!(!text.contains(forbidden), "found {forbidden}:\n{text}");
         }
+    }
+
+    #[test]
+    fn header_describes_off_as_model_off() {
+        let mock = MockBrainRuntime {
+            gate_mode: std::sync::Mutex::new(Some(coding_brain_core::runtime::BrainGateMode::Off)),
+            endpoint_health: online(),
+            ..MockBrainRuntime::default()
+        };
+
+        let text = render_text(&fixture_app(mock));
+
+        assert!(
+            text.contains("model off"),
+            "missing model-off label:\n{text}"
+        );
     }
 
     #[test]

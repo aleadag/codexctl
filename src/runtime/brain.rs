@@ -1,7 +1,6 @@
 //! Bind Brain read contracts to the binary's brain subsystem.
 
 use std::collections::HashMap;
-use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -148,7 +147,8 @@ impl BrainSource for LiveBrainSource {
     }
 
     fn gate_mode(&self) -> BrainGateMode {
-        parse_gate_mode(&brain::read_gate_mode())
+        let config = config::Config::load();
+        brain::resolve_gate_mode(config.brain.as_ref()).mode
     }
 
     fn endpoint_health(&self) -> EndpointHealth {
@@ -340,16 +340,6 @@ fn endpoint_reachable(endpoint: &str) -> bool {
         .is_ok_and(|output| String::from_utf8_lossy(&output.stdout).trim() != "000")
 }
 
-/// String → enum. Unknown values fall back to `On` to match
-/// `brain::read_gate_mode`'s "no file" default.
-fn parse_gate_mode(raw: &str) -> BrainGateMode {
-    match raw.trim().to_lowercase().as_str() {
-        "off" => BrainGateMode::Off,
-        "auto" => BrainGateMode::Auto,
-        _ => BrainGateMode::On,
-    }
-}
-
 pub struct LiveBrainActions;
 
 impl BrainActions for LiveBrainActions {
@@ -360,14 +350,6 @@ impl BrainActions for LiveBrainActions {
 
     fn mark_canonical(&self, decision_id: &str, note: Option<String>) -> Result<(), String> {
         brain::review::mark_by_id(decision_id, note.as_deref())
-    }
-
-    fn set_gate_mode(&self, mode: BrainGateMode) -> Result<(), String> {
-        let path = brain::gate_mode_path();
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|error| format!("create gate-mode dir: {error}"))?;
-        }
-        fs::write(path, mode.as_str()).map_err(|error| format!("write gate-mode: {error}"))
     }
 }
 
@@ -426,17 +408,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn gate_mode_parsing_recognizes_known_values() {
-        assert_eq!(parse_gate_mode("on"), BrainGateMode::On);
-        assert_eq!(parse_gate_mode("OFF"), BrainGateMode::Off);
-        assert_eq!(parse_gate_mode(" auto "), BrainGateMode::Auto);
-    }
+    fn gate_mode_resolution_fails_closed_for_invalid_explicit_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("gate-mode");
+        std::fs::write(&path, "garbage").unwrap();
 
-    #[test]
-    fn gate_mode_parsing_falls_back_to_on() {
-        // Matches the file-missing default in `brain::read_gate_mode`.
-        assert_eq!(parse_gate_mode(""), BrainGateMode::On);
-        assert_eq!(parse_gate_mode("garbage"), BrainGateMode::On);
+        let resolved = brain::resolve_gate_mode_at(&path, Some(&config::BrainConfig::default()));
+
+        assert_eq!(resolved.mode, BrainGateMode::Off);
+        assert!(resolved.warning.is_some());
     }
 
     #[test]

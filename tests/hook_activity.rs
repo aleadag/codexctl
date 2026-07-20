@@ -237,10 +237,9 @@ fn model_action_requires_proposal_and_terminal_before_delivery() {
 fn model_proposal_failure_abstains_before_terminal_commit() {
     let home = tempfile::tempdir().unwrap();
     install_model_fixture(home.path(), "approve");
-    fs::create_dir_all(home.path().join(".local/state/coding-brain")).unwrap();
-    fs::write(
-        home.path().join(".local/state/coding-brain/brain"),
-        b"occupied",
+    fs::create_dir_all(
+        home.path()
+            .join(".local/state/coding-brain/brain/decisions.jsonl"),
     )
     .unwrap();
 
