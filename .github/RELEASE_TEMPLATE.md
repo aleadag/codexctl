@@ -19,7 +19,7 @@
 ```bash
 brew upgrade coding-brain                 # Homebrew
 cargo install coding-brain                # crates.io
-curl -fsSL https://raw.githubusercontent.com/aleadag/codexctl/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/aleadag/coding-brain/main/install.sh | sh
 coding-brain init
 coding-brain doctor
 # Restart Codex after reviewing the new managed hooks.
@@ -27,7 +27,7 @@ coding-brain doctor
 
 ## Changelog
 
-<!-- Link to full diff: https://github.com/aleadag/codexctl/compare/vX.Y.Z...vA.B.C -->
+<!-- Link to full diff: https://github.com/aleadag/coding-brain/compare/vX.Y.Z...vA.B.C -->
 
 <details>
 <summary>Full changelog</summary>
@@ -39,4 +39,4 @@ coding-brain doctor
 
 ---
 
-Questions? [Start a Discussion](https://github.com/aleadag/codexctl/discussions). Found a bug? [Open an issue](https://github.com/aleadag/codexctl/issues/new).
+Questions? [Start a Discussion](https://github.com/aleadag/coding-brain/discussions). Found a bug? [Open an issue](https://github.com/aleadag/coding-brain/issues/new).

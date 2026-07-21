@@ -23,7 +23,7 @@ rustPlatform.buildRustPackage rec {
 
   src = fetchFromGitHub {
     owner = "aleadag";
-    repo = "codexctl";
+    repo = "coding-brain";
     rev = "v${version}";
     hash = lib.fakeHash;
   };
@@ -32,7 +32,7 @@ rustPlatform.buildRustPackage rec {
 
   meta = {
     description = "Supervise Codex sessions with a local brain that learns from you.";
-    homepage = "https://github.com/aleadag/codexctl";
+    homepage = "https://github.com/aleadag/coding-brain";
     license = lib.licenses.mit;
     mainProgram = "coding-brain";
     platforms = lib.platforms.unix;

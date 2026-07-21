@@ -271,12 +271,12 @@ mod tests {
             .unwrap()
             .as_secs();
         let all = vec![
-            dec("Codexctl", "Bash", "cargo test", "accept", now),
+            dec("Coding-Brain", "Bash", "cargo test", "accept", now),
             dec("other", "Bash", "rm -rf", "reject", now),
         ];
-        let kept = filter_recent_for_project(&all, Some("codexctl"));
+        let kept = filter_recent_for_project(&all, Some("coding-brain"));
         assert_eq!(kept.len(), 1);
-        assert_eq!(kept[0].project, "Codexctl");
+        assert_eq!(kept[0].project, "Coding-Brain");
     }
 
     #[test]

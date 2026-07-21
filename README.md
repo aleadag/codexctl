@@ -95,4 +95,4 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-See the [documentation](https://aleadag.github.io/codexctl/) for configuration, CLI reference, terminal support, and troubleshooting.
+See the [documentation](https://aleadag.github.io/coding-brain/) for configuration, CLI reference, terminal support, and troubleshooting.

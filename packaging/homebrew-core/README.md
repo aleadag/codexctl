@@ -12,7 +12,7 @@ and is what `brew install coding-brain` resolves to once accepted.
 
 1. Bump `url` and `sha256` in `coding-brain.rb` to the release you want to ship.
    ```sh
-   curl -fsSL https://github.com/aleadag/codexctl/archive/refs/tags/vX.Y.Z.tar.gz \
+   curl -fsSL https://github.com/aleadag/coding-brain/archive/refs/tags/vX.Y.Z.tar.gz \
      | shasum -a 256
    ```
 2. Locally:

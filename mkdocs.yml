@@ -1,8 +1,8 @@
 site_name: Coding Brain
-site_url: https://aleadag.github.io/codexctl/
+site_url: https://aleadag.github.io/coding-brain/
 site_description: A local brain for supervising and learning from Codex sessions.
-repo_url: https://github.com/aleadag/codexctl
-repo_name: aleadag/codexctl
+repo_url: https://github.com/aleadag/coding-brain
+repo_name: aleadag/coding-brain
 
 theme:
   name: material
@@ -72,4 +72,4 @@ plugins:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/aleadag/codexctl
+      link: https://github.com/aleadag/coding-brain

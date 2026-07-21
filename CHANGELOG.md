@@ -1,5 +1,7 @@
 # Changelog
 
+> **Repository renamed (2026-07-21):** This project was renamed from `codexctl` to `coding-brain`. The repository moved from `aleadag/codexctl` to `aleadag/coding-brain`. Historical entries below reflect the original name.
+
 All notable changes to codexctl are documented here.
 
 ## [Unreleased]

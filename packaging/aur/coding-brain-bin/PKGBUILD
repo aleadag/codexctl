@@ -5,13 +5,13 @@ pkgver=0.16.0
 pkgrel=1
 pkgdesc='Local brain for supervising and learning from Codex sessions'
 arch=('x86_64')
-url='https://github.com/aleadag/codexctl'
+url='https://github.com/aleadag/coding-brain'
 license=('MIT')
 provides=('coding-brain')
 conflicts=('coding-brain' 'coding-brain-git')
 source=(
-  "coding-brain-v${pkgver}-x86_64-unknown-linux-musl.tar.gz::https://github.com/aleadag/codexctl/releases/download/v${pkgver}/coding-brain-v${pkgver}-x86_64-unknown-linux-musl.tar.gz"
-  "LICENSE::https://raw.githubusercontent.com/aleadag/codexctl/v${pkgver}/LICENSE"
+  "coding-brain-v${pkgver}-x86_64-unknown-linux-musl.tar.gz::https://github.com/aleadag/coding-brain/releases/download/v${pkgver}/coding-brain-v${pkgver}-x86_64-unknown-linux-musl.tar.gz"
+  "LICENSE::https://raw.githubusercontent.com/aleadag/coding-brain/v${pkgver}/LICENSE"
 )
 sha256sums=(
   '3832a8f29b30368aa1e139f4563353c6abf9de09af649c527a29ae9814f2926f'
