@@ -1208,8 +1208,11 @@ fn current_codex_post_tool_use_confirms_idless_permission_decision() {
     assert!(!persisted.contains("Process exited with code 0"));
     let lifecycle = LifecycleStore::at(home.path().join(".local/state/coding-brain"));
     let lifecycle = lifecycle.read().unwrap().snapshot.unwrap();
+    let session_key =
+        coding_brain_core::provider::AgentSessionKey::native(AgentProvider::Codex, "session-1")
+            .storage_key();
     assert_eq!(
-        lifecycle.sessions["session-1"].latest_event,
+        lifecycle.sessions[&session_key].latest_event,
         Some(coding_brain_core::lifecycle::LifecycleEventName::PostToolUse)
     );
     let lifecycle = serde_json::to_string(&lifecycle).unwrap();
