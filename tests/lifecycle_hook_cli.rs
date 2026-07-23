@@ -157,12 +157,16 @@ fn antigravity_trusted_cli_events_record_provider_qualified_lifecycle() {
         snapshot.sessions[&key].latest_event,
         Some(LifecycleEventName::PostToolUse)
     );
-    assert!(
-        !post_home
+    let activity = fs::read_to_string(
+        post_home
             .path()
-            .join(".local/state/coding-brain/activity.jsonl")
-            .exists()
-    );
+            .join(".local/state/coding-brain/activity.jsonl"),
+    )
+    .unwrap();
+    let row: serde_json::Value = serde_json::from_str(activity.trim()).unwrap();
+    assert_eq!(row["kind"], "lifecycle");
+    assert_eq!(row["tool"], "PostToolUse");
+    assert_eq!(row["session"]["provider"], "antigravity");
 
     let adversarial_home = tempfile::tempdir().unwrap();
     let mut adversarial: serde_json::Value =
