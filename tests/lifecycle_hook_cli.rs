@@ -1152,7 +1152,15 @@ fn write_brain_config(home: &std::path::Path) {
     let bin_dir = home.join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
     let curl = bin_dir.join("curl");
-    fs::write(&curl, format!("#!/usr/bin/env sh\nprintf '%s' '{body}'\n")).unwrap();
+    let shell = std::env::split_paths(&std::env::var_os("PATH").unwrap())
+        .map(|dir| dir.join("sh"))
+        .find(|path| path.is_file())
+        .expect("sh is available on the test PATH");
+    fs::write(
+        &curl,
+        format!("#!{}\nprintf '%s' '{body}'\n", shell.display()),
+    )
+    .unwrap();
     fs::set_permissions(curl, fs::Permissions::from_mode(0o755)).unwrap();
 }
 
