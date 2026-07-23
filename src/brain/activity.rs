@@ -10,8 +10,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use coding_brain_core::brain_activity::{
     ACTIVITY_SCHEMA_VERSION, ActivityDiagnostics, ActivityEvent, ActivityItem, ActivityKind,
-    ActivitySnapshot, ActivityState, AttentionItem, DEFAULT_INTERRUPTED_AFTER_MS, DeliveryState,
-    MAX_ACTIVITY_EVENT_BYTES, SnapshotLimits,
+    ActivityOutcome, ActivitySnapshot, ActivityState, AttentionItem, DEFAULT_INTERRUPTED_AFTER_MS,
+    DeliveryState, MAX_ACTIVITY_EVENT_BYTES, MIN_ACTIVITY_SCHEMA_VERSION, SnapshotLimits,
 };
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
@@ -195,18 +195,42 @@ impl ActivityStore {
         if event.schema_version != ACTIVITY_SCHEMA_VERSION {
             return Err(ActivityStoreError::UnsupportedSchema(event.schema_version));
         }
-        let event = event.normalized();
-        if !event.has_consistent_payload() {
-            return Err(ActivityStoreError::InvalidEvent);
-        }
-        let mut serialized = serde_json::to_vec(&event)?;
-        if serialized.len() > MAX_ACTIVITY_EVENT_BYTES {
-            return Err(ActivityStoreError::EventTooLarge);
-        }
-        serialized.push(b'\n');
-
         let lock = self.open_lock()?;
         let _guard = lock_with_timeout(&lock, self.limits.lock_timeout_ms, LockKind::Exclusive)?;
+        self.append_events_unlocked(&[event])
+    }
+
+    pub(crate) fn append_from_snapshot<F>(&self, build: F) -> Result<(), ActivityStoreError>
+    where
+        F: FnOnce(&ActivityLog) -> Vec<ActivityEvent>,
+    {
+        let lock = self.open_lock()?;
+        let _guard = lock_with_timeout(&lock, self.limits.lock_timeout_ms, LockKind::Exclusive)?;
+        let log = self.read_unlocked()?;
+        let events = build(&log);
+        self.append_events_unlocked(&events)
+    }
+
+    fn append_events_unlocked(&self, events: &[ActivityEvent]) -> Result<(), ActivityStoreError> {
+        let serialized = events
+            .iter()
+            .map(|event| {
+                if event.schema_version != ACTIVITY_SCHEMA_VERSION {
+                    return Err(ActivityStoreError::UnsupportedSchema(event.schema_version));
+                }
+                let event = event.clone().normalized();
+                if !event.has_consistent_payload() {
+                    return Err(ActivityStoreError::InvalidEvent);
+                }
+                let mut serialized = serde_json::to_vec(&event)?;
+                if serialized.len() > MAX_ACTIVITY_EVENT_BYTES {
+                    return Err(ActivityStoreError::EventTooLarge);
+                }
+                serialized.push(b'\n');
+                Ok(serialized)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
         let mut file = OpenOptions::new()
             .create(true)
             .read(true)
@@ -225,7 +249,9 @@ impl ActivityStore {
             file.write_all(&diagnostic)?;
         }
         file.seek(SeekFrom::End(0))?;
-        file.write_all(&serialized)?;
+        for row in serialized {
+            file.write_all(&row)?;
+        }
         file.flush()?;
         file.sync_data()?;
         Ok(())
@@ -408,7 +434,7 @@ impl ActivityStore {
                     if kind_was_absent && event.activity_id.starts_with("lifecycle_") {
                         event.kind = ActivityKind::Lifecycle;
                     }
-                    if event.schema_version != ACTIVITY_SCHEMA_VERSION
+                    if !supported_activity_schema(event.schema_version)
                         || !event.has_consistent_payload()
                         || activity_kinds
                             .get(&event.activity_id)
@@ -430,6 +456,10 @@ impl ActivityStore {
         log.diagnostics.duplicate_terminal_states = duplicate_terminal_count(&log.events);
         Ok(log)
     }
+}
+
+fn supported_activity_schema(version: u32) -> bool {
+    (MIN_ACTIVITY_SCHEMA_VERSION..=ACTIVITY_SCHEMA_VERSION).contains(&version)
 }
 
 fn lock_with_timeout(
@@ -519,18 +549,17 @@ fn project_snapshot(log: ActivityLog, limits: SnapshotLimits, now_ms: u64) -> Ac
     }
     let mut superseded = HashSet::<String>::new();
     for events in groups.values() {
-        if events.iter().any(|event| {
-            matches!(
-                event.outcome,
-                Some(coding_brain_core::brain_activity::ActivityOutcome::Succeeded)
-            )
-        }) {
-            superseded.extend(
-                events
-                    .iter()
-                    .filter_map(|event| event.supersedes.as_ref().cloned()),
-            );
-        }
+        superseded.extend(
+            events
+                .iter()
+                .filter(|event| {
+                    matches!(
+                        event.outcome,
+                        Some(coding_brain_core::brain_activity::ActivityOutcome::Succeeded)
+                    )
+                })
+                .filter_map(|event| event.supersedes.as_ref().cloned()),
+        );
     }
 
     let mut unresolved_count = 0;
@@ -648,8 +677,11 @@ fn project_activity(events: &[&ActivityEvent], stale_after_ms: u64, now_ms: u64)
             ActivityState::DeliveryFailed => delivery = DeliveryState::Failed,
             _ => {}
         }
-        if event.outcome.is_some() {
-            outcome = event.outcome;
+        match event.outcome {
+            Some(ActivityOutcome::Completed)
+                if outcome.is_some_and(|existing| existing != ActivityOutcome::Completed) => {}
+            Some(next) => outcome = Some(next),
+            None => {}
         }
         if event.correction.is_some() {
             correction = event.correction;
@@ -668,6 +700,11 @@ fn project_activity(events: &[&ActivityEvent], stale_after_ms: u64, now_ms: u64)
     {
         delivery = DeliveryState::Unknown;
     }
+    let normalized_command = source.normalized_command.clone().or_else(|| {
+        events
+            .iter()
+            .find_map(|event| event.normalized_command.clone())
+    });
 
     ActivityItem {
         activity_id: source.activity_id.clone(),
@@ -678,7 +715,7 @@ fn project_activity(events: &[&ActivityEvent], stale_after_ms: u64, now_ms: u64)
         state,
         delivery,
         tool: source.tool.clone(),
-        normalized_command: source.normalized_command.clone(),
+        normalized_command,
         fingerprint: source.fingerprint.clone(),
         rule_id: source.rule_id.clone(),
         confidence: source.confidence,
@@ -752,7 +789,7 @@ fn write_diagnostic(
 }
 
 fn apply_diagnostic(diagnostics: &mut ActivityDiagnostics, row: DiagnosticRow) {
-    if row.schema_version != ACTIVITY_SCHEMA_VERSION {
+    if !supported_activity_schema(row.schema_version) {
         diagnostics.malformed_rows += 1;
         return;
     }
@@ -863,6 +900,245 @@ mod tests {
 
     fn event(activity_id: &str, state: ActivityState) -> ActivityEvent {
         event_at(activity_id, state, 100)
+    }
+
+    #[test]
+    fn mixed_v1_v2_rows_read_and_compact_without_version_rewrite() {
+        let (temp, store) = fixture_store();
+        let store = store.with_limits(ActivityLimits {
+            compact_at_bytes: 1,
+            retained_lifecycles: 10,
+            ..ActivityLimits::default()
+        });
+        let mut v1 = event_at("v1", ActivityState::Allowed, 1);
+        v1.schema_version = 1;
+        fs::write(
+            temp.path().join("activity.jsonl"),
+            format!("{}\n", serde_json::to_string(&v1).unwrap()),
+        )
+        .unwrap();
+        store
+            .append(event_at("v2", ActivityState::Allowed, 2))
+            .unwrap();
+
+        let versions = store
+            .read()
+            .unwrap()
+            .events()
+            .iter()
+            .map(|event| event.schema_version)
+            .collect::<Vec<_>>();
+        assert_eq!(versions, [1, 2]);
+        assert!(store.compact_if_needed().unwrap());
+        let versions = store
+            .read()
+            .unwrap()
+            .events()
+            .iter()
+            .map(|event| event.schema_version)
+            .collect::<Vec<_>>();
+        assert_eq!(versions, [1, 2]);
+    }
+
+    #[test]
+    fn completed_is_neutral_and_does_not_supersede() {
+        let (_, store) = fixture_store();
+        store
+            .append(event_at("denied", ActivityState::Denied, 1))
+            .unwrap();
+        store
+            .append(event_at("denied", ActivityState::DeliveryFailed, 2))
+            .unwrap();
+        let mut completed = event_at("completed", ActivityState::Allowed, 3);
+        completed.state = ActivityState::Outcome;
+        completed.outcome = Some(ActivityOutcome::Completed);
+        completed.supersedes = Some("denied".into());
+        store.append(completed).unwrap();
+        let snapshot = store.snapshot(SnapshotLimits::default()).unwrap();
+        assert!(
+            snapshot
+                .attention
+                .iter()
+                .any(|item| item.activity_id == "denied")
+        );
+    }
+
+    #[test]
+    fn completed_supersession_stays_neutral_when_same_activity_later_succeeds() {
+        let (_, store) = fixture_store();
+        store
+            .append(event_at("denied", ActivityState::Denied, 1))
+            .unwrap();
+
+        let mut completed = event_at("later", ActivityState::Outcome, 2);
+        completed.outcome = Some(ActivityOutcome::Completed);
+        completed.supersedes = Some("denied".into());
+        store.append(completed).unwrap();
+
+        let mut succeeded = event_at("later", ActivityState::Outcome, 3);
+        succeeded.outcome = Some(ActivityOutcome::Succeeded);
+        store.append(succeeded).unwrap();
+
+        let snapshot = store.snapshot(SnapshotLimits::default()).unwrap();
+        assert!(
+            snapshot
+                .attention
+                .iter()
+                .any(|item| item.activity_id == "denied")
+        );
+    }
+
+    #[test]
+    fn candidate_losslessness_keeps_earlier_command_available_for_projection() {
+        let observed = event_at("activity-1", ActivityState::Observed, 1);
+        let mut terminal = event_at("activity-1", ActivityState::Allowed, 2);
+        terminal.normalized_command = None;
+        let item = project_activity(&[&observed, &terminal], 30_000, 2);
+
+        assert_eq!(
+            item.normalized_command.as_deref(),
+            observed.normalized_command.as_deref()
+        );
+    }
+
+    #[test]
+    fn equivalent_evidence_completed_never_replaces_explicit_failed_outcome() {
+        for outcomes in [
+            [ActivityOutcome::Failed, ActivityOutcome::Completed],
+            [ActivityOutcome::Completed, ActivityOutcome::Failed],
+        ] {
+            let allowed = event_at("activity-1", ActivityState::Allowed, 1);
+            let mut first = event_at("activity-1", ActivityState::Outcome, 2);
+            first.outcome = Some(outcomes[0]);
+            let mut second = event_at("activity-1", ActivityState::Outcome, 3);
+            second.outcome = Some(outcomes[1]);
+
+            let item = project_activity(&[&allowed, &first, &second], 30_000, 3);
+
+            assert_eq!(item.outcome, Some(ActivityOutcome::Failed));
+        }
+    }
+
+    #[test]
+    fn v1_diagnostic_rows_remain_readable() {
+        let (temp, store) = fixture_store();
+        fs::write(
+            temp.path().join("activity.jsonl"),
+            b"{\"schema_version\":1,\"diagnostic\":{\"kind\":\"malformed_rows\",\"count\":2}}\n",
+        )
+        .unwrap();
+        assert_eq!(store.read().unwrap().diagnostics().malformed_rows, 2);
+    }
+
+    #[test]
+    fn current_writer_rejects_v1_and_reader_diagnoses_v3() {
+        let (temp, store) = fixture_store();
+        let mut v1 = event_at("v1", ActivityState::Allowed, 1);
+        v1.schema_version = 1;
+        assert!(matches!(
+            store.append(v1),
+            Err(ActivityStoreError::UnsupportedSchema(1))
+        ));
+
+        let mut v3 = event_at("v3", ActivityState::Allowed, 3);
+        v3.schema_version = 3;
+        fs::write(
+            temp.path().join("activity.jsonl"),
+            format!("{}\n", serde_json::to_string(&v3).unwrap()),
+        )
+        .unwrap();
+        assert_eq!(store.read().unwrap().diagnostics().malformed_rows, 1);
+    }
+
+    #[test]
+    fn v1_decision_and_v2_outcome_project_and_compact_together() {
+        let (temp, store) = fixture_store();
+        let store = store.with_limits(ActivityLimits {
+            compact_at_bytes: 1,
+            retained_lifecycles: 10,
+            ..ActivityLimits::default()
+        });
+        let mut decision = event_at("mixed", ActivityState::Allowed, 1);
+        decision.schema_version = 1;
+        fs::write(
+            temp.path().join("activity.jsonl"),
+            format!("{}\n", serde_json::to_string(&decision).unwrap()),
+        )
+        .unwrap();
+        let mut outcome = event_at("mixed", ActivityState::Outcome, 2);
+        outcome.outcome = Some(ActivityOutcome::Completed);
+        store.append(outcome).unwrap();
+        assert_eq!(
+            store.snapshot(SnapshotLimits::default()).unwrap().recent[0].outcome,
+            Some(ActivityOutcome::Completed)
+        );
+        assert!(store.compact_if_needed().unwrap());
+        assert_eq!(
+            store
+                .read()
+                .unwrap()
+                .events()
+                .iter()
+                .map(|event| event.schema_version)
+                .collect::<Vec<_>>(),
+            [1, 2]
+        );
+    }
+
+    #[test]
+    fn append_from_snapshot_serializes_concurrent_idempotency_checks() {
+        let (_, store) = fixture_store();
+        store
+            .append(event_at("target", ActivityState::Allowed, 1))
+            .unwrap();
+        let store = std::sync::Arc::new(store);
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let handles = (0..2)
+            .map(|index| {
+                let store = store.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    let marker = event_at(
+                        &format!("marker-{index}"),
+                        ActivityState::Observed,
+                        index + 2,
+                    );
+                    let mut outcome = event_at("target", ActivityState::Outcome, index + 4);
+                    outcome.outcome = Some(ActivityOutcome::Completed);
+                    barrier.wait();
+                    store
+                        .append_from_snapshot(|log| {
+                            let mut rows = vec![marker];
+                            if !log.events().iter().any(|event| {
+                                event.activity_id == "target"
+                                    && event.state == ActivityState::Outcome
+                            }) {
+                                rows.push(outcome);
+                            }
+                            rows
+                        })
+                        .unwrap();
+                })
+            })
+            .collect::<Vec<_>>();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        let events = store.read().unwrap().events().to_vec();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.activity_id.starts_with("marker-"))
+                .count(),
+            2
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.state == ActivityState::Outcome)
+                .count(),
+            1
+        );
     }
 
     #[test]

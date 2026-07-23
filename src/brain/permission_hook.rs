@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use coding_brain_core::brain_activity::{
-    ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityKind, ActivityState, MAX_ACTIVITY_FIELD_BYTES,
-    ProjectEvidence, SessionTarget, redact_activity_text,
+    ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityKind, ActivityState, ProjectEvidence,
+    SessionTarget, bounded_redacted_activity_text, lossless_redacted_activity_text,
 };
 use coding_brain_core::lifecycle::{
     LifecycleEvent, LifecycleIdentity, LifecycleStore, PermissionDisposition,
@@ -110,6 +110,7 @@ struct HookActivity {
     session: SessionTarget,
     tool: String,
     command: Option<String>,
+    terminal_command: Option<String>,
 }
 
 impl HookActivity {
@@ -138,7 +139,14 @@ impl HookActivity {
             project,
             session,
             tool: request.tool_name.clone(),
-            command: request.command.as_deref().map(bounded_redacted),
+            command: request
+                .command
+                .as_deref()
+                .map(bounded_redacted_activity_text),
+            terminal_command: request
+                .command
+                .as_deref()
+                .and_then(lossless_redacted_activity_text),
         })
     }
 
@@ -152,7 +160,11 @@ impl HookActivity {
             session: Some(self.session.clone()),
             state,
             tool: Some(self.tool.clone()),
-            normalized_command: self.command.clone(),
+            normalized_command: if state.is_terminal() {
+                self.terminal_command.clone()
+            } else {
+                self.command.clone()
+            },
             fingerprint: None,
             rule_id: None,
             confidence: None,
@@ -183,18 +195,6 @@ fn epoch_ms() -> u64 {
         .as_millis()
         .try_into()
         .unwrap_or(u64::MAX)
-}
-
-fn bounded_redacted(value: &str) -> String {
-    let value = redact_activity_text(value);
-    if value.len() <= MAX_ACTIVITY_FIELD_BYTES {
-        return value;
-    }
-    let mut end = MAX_ACTIVITY_FIELD_BYTES;
-    while !value.is_char_boundary(end) {
-        end -= 1;
-    }
-    value[..end].to_string()
 }
 
 fn current_paths() -> Result<CodingBrainPaths, HookDiagnostic> {
@@ -387,7 +387,7 @@ fn parse_request(input: &str) -> Result<PermissionRequest, HookDiagnostic> {
 }
 
 fn write_diagnostic(stderr: &mut impl Write, diagnostic: impl fmt::Display) {
-    let diagnostic = bounded_redacted(&diagnostic.to_string());
+    let diagnostic = bounded_redacted_activity_text(&diagnostic.to_string());
     let _ = writeln!(stderr, "coding-brain permission hook: {diagnostic}");
 }
 
@@ -666,7 +666,7 @@ fn run_with_gate_and_stores<R, W, E, F>(
             .unwrap_or_default(),
         brain_action: &brain.action,
         brain_confidence: brain.confidence,
-        brain_reasoning: &bounded_redacted(&brain.reasoning),
+        brain_reasoning: &bounded_redacted_activity_text(&brain.reasoning),
         brain_source: brain.source,
         brain_threshold: brain.threshold,
         session_id: request.lifecycle.session_id(),
@@ -686,7 +686,7 @@ fn run_with_gate_and_stores<R, W, E, F>(
     let mut terminal = activity_context.as_ref().unwrap().event(terminal_state);
     terminal.confidence = Some(brain.confidence);
     terminal.threshold = brain.threshold;
-    terminal.reasoning = Some(bounded_redacted(&brain.reasoning));
+    terminal.reasoning = Some(bounded_redacted_activity_text(&brain.reasoning));
     terminal.decision_id = Some(decision_id.clone());
     if let Err(error) = activity_store.unwrap().append(terminal) {
         write_diagnostic(
@@ -805,7 +805,9 @@ mod tests {
     use crate::brain::decisions::decisions_dir;
     use crate::config::BrainConfig;
     use crate::rules::RuleAction;
-    use coding_brain_core::brain_activity::ActivityState;
+    use coding_brain_core::brain_activity::{
+        ActivityKind, ActivityState, MAX_ACTIVITY_FIELD_BYTES, bounded_redacted_activity_text,
+    };
     use coding_brain_core::lifecycle::{LifecycleStore, ProjectedStatus};
 
     struct FailingWriter;
@@ -1161,6 +1163,113 @@ mod tests {
             events[0].session.as_ref().unwrap().turn_id.as_deref(),
             Some("turn-1")
         );
+    }
+
+    #[test]
+    fn candidate_losslessness_blocks_asymmetric_fallbacks() {
+        let _guard = crate::config::HOME_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let home = tempfile::tempdir().unwrap();
+        let _restore_home = set_test_home(home.path());
+
+        for raw_command in [
+            "curl --token alpha".to_string(),
+            format!("{}tail", "x".repeat(MAX_ACTIVITY_FIELD_BYTES)),
+            "cargo   test".to_string(),
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            let lifecycle = LifecycleStore::at(temp.path().join("lifecycle"));
+            let activity = ActivityStore::at(temp.path().join("activity.jsonl"));
+            let cwd = std::env::current_dir().unwrap();
+            let pre = serde_json::json!({
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": cwd,
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Bash",
+                "tool_use_id": "call-1",
+                "tool_input": {"command": raw_command}
+            });
+            let mut pre_stderr = Vec::new();
+            crate::lifecycle_hook::run_with_activity(
+                Cursor::new(pre.to_string()),
+                Vec::new(),
+                &mut pre_stderr,
+                &lifecycle,
+                Some(&activity),
+            );
+            assert!(pre_stderr.is_empty());
+
+            let mut permission_stdout = Vec::new();
+            let mut permission_stderr = Vec::new();
+            run_with_gate_and_stores(
+                Cursor::new(payload_with_command(&raw_command)),
+                &mut permission_stdout,
+                &mut permission_stderr,
+                Some(&enabled_config()),
+                BrainGateMode::Auto,
+                &lifecycle,
+                Some(&activity),
+                |_, _| Ok(suggestion(RuleAction::Approve, 0.9)),
+            );
+            assert!(!permission_stdout.is_empty());
+            assert!(permission_stderr.is_empty());
+
+            let persisted_form = bounded_redacted_activity_text(&raw_command);
+            let post = serde_json::json!({
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "cwd": cwd,
+                "hook_event_name": "PostToolUse",
+                "tool_name": "Bash",
+                "tool_use_id": "call-1",
+                "tool_input": {"command": persisted_form},
+                "tool_response": "opaque response"
+            });
+            let mut post_stderr = Vec::new();
+            crate::lifecycle_hook::run_with_activity(
+                Cursor::new(post.to_string()),
+                Vec::new(),
+                &mut post_stderr,
+                &lifecycle,
+                Some(&activity),
+            );
+
+            let events = activity.read().unwrap().events().to_vec();
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| event.state == ActivityState::Outcome)
+                    .count(),
+                0,
+                "lossy candidate correlated for {raw_command:?}"
+            );
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| event.kind == ActivityKind::Diagnostic)
+                    .count(),
+                1
+            );
+            let diagnostic = events
+                .iter()
+                .find(|event| event.kind == ActivityKind::Diagnostic)
+                .unwrap();
+            assert!(diagnostic.normalized_command.is_none());
+            assert!(diagnostic.fingerprint.is_none());
+            assert!(diagnostic.note.is_none());
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| event.tool.as_deref() == Some("PostToolUse"))
+                    .count(),
+                1
+            );
+            let serialized = serde_json::to_string(&events).unwrap();
+            assert!(!serialized.contains("opaque response"));
+            assert!(!serialized.contains(&raw_command));
+        }
     }
 
     #[test]

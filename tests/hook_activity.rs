@@ -10,7 +10,9 @@ use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 use coding_brain::brain::activity::ActivityStore;
-use coding_brain_core::brain_activity::{ActivityState, DeliveryState, SnapshotLimits};
+use coding_brain_core::brain_activity::{
+    ActivityKind, ActivityOutcome, ActivityState, DeliveryState, SnapshotLimits,
+};
 use coding_brain_core::lifecycle::{LifecycleStore, ProjectedStatus};
 use fs2::FileExt;
 
@@ -18,11 +20,37 @@ fn permission_payload(cwd: &Path, command: &str) -> Vec<u8> {
     serde_json::to_vec(&serde_json::json!({
         "session_id": "session-1",
         "turn_id": "turn-1",
-        "tool_use_id": "call-1",
         "cwd": cwd,
         "hook_event_name": "PermissionRequest",
         "tool_name": "Bash",
         "tool_input": {"command": command}
+    }))
+    .unwrap()
+}
+
+fn pre_tool_payload(cwd: &Path, command: &str) -> Vec<u8> {
+    serde_json::to_vec(&serde_json::json!({
+        "session_id": "session-1",
+        "turn_id": "turn-1",
+        "tool_use_id": "call-1",
+        "cwd": cwd,
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": command}
+    }))
+    .unwrap()
+}
+
+fn post_tool_payload(cwd: &Path, command: &str) -> Vec<u8> {
+    serde_json::to_vec(&serde_json::json!({
+        "session_id": "session-1",
+        "turn_id": "turn-1",
+        "tool_use_id": "call-1",
+        "cwd": cwd,
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+        "tool_response": "Process exited with code 0"
     }))
     .unwrap()
 }
@@ -278,6 +306,86 @@ fn model_action_requires_proposal_and_terminal_before_delivery() {
 }
 
 #[test]
+fn current_codex_post_tool_use_confirms_idless_permission_decision() {
+    let home = tempfile::tempdir().unwrap();
+    install_model_fixture(home.path(), "approve");
+    let command = "cargo test --workspace";
+
+    let pre = run_lifecycle_hook(home.path(), &pre_tool_payload(home.path(), command));
+    assert!(pre.status.success());
+    assert!(pre.stderr.is_empty());
+    let permission = run_permission_hook(home.path(), &permission_payload(home.path(), command));
+    assert!(permission.status.success());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&permission.stdout).unwrap()["hookSpecificOutput"]
+            ["decision"]["behavior"],
+        "allow"
+    );
+    let before = activity(home.path()).read().unwrap().events().to_vec();
+    let decision = before
+        .iter()
+        .find(|event| event.state == ActivityState::Allowed)
+        .unwrap();
+    let activity_id = decision.activity_id.clone();
+    let decision_id = decision.decision_id.clone();
+    assert_eq!(decision.session.as_ref().unwrap().tool_use_id, None);
+
+    let post = run_lifecycle_hook(home.path(), &post_tool_payload(home.path(), command));
+    assert!(post.status.success());
+    assert!(
+        post.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&post.stderr)
+    );
+    let store = activity(home.path());
+    let events = store.read().unwrap().events().to_vec();
+    assert!(events.iter().any(|event| {
+        event.kind == ActivityKind::Lifecycle && event.tool.as_deref() == Some("PostToolUse")
+    }));
+    let outcome = events
+        .iter()
+        .find(|event| event.activity_id == activity_id && event.state == ActivityState::Outcome)
+        .unwrap();
+    assert_eq!(outcome.decision_id, decision_id);
+    assert_eq!(outcome.outcome, Some(ActivityOutcome::Completed));
+    let projected = store
+        .snapshot(SnapshotLimits::default())
+        .unwrap()
+        .recent
+        .into_iter()
+        .find(|item| item.activity_id == activity_id)
+        .unwrap();
+    assert_eq!(projected.outcome, Some(ActivityOutcome::Completed));
+    assert!(projected.tool_execution_confirmed);
+
+    let persisted =
+        std::fs::read_to_string(home.path().join(".local/state/coding-brain/activity.jsonl"))
+            .unwrap();
+    let diagnostic_rows = events
+        .iter()
+        .filter(|event| event.kind != ActivityKind::Decision)
+        .collect::<Vec<_>>();
+    for event in &diagnostic_rows {
+        assert!(event.normalized_command.is_none());
+        assert!(event.fingerprint.is_none());
+        assert!(event.note.is_none());
+    }
+    let diagnostic_rows = serde_json::to_string(&diagnostic_rows).unwrap();
+    assert!(!diagnostic_rows.contains(command));
+    assert!(!diagnostic_rows.contains("Process exited with code 0"));
+    assert!(!persisted.contains("Process exited with code 0"));
+    let lifecycle = LifecycleStore::at(home.path().join(".local/state/coding-brain"));
+    let lifecycle = lifecycle.read().unwrap().snapshot.unwrap();
+    assert_eq!(
+        lifecycle.sessions["session-1"].latest_event,
+        Some(coding_brain_core::lifecycle::LifecycleEventName::PostToolUse)
+    );
+    let lifecycle = serde_json::to_string(&lifecycle).unwrap();
+    assert!(!lifecycle.contains(command));
+    assert!(!lifecycle.contains("Process exited with code 0"));
+}
+
+#[test]
 fn explicit_on_without_toml_uses_defaults_and_audits_without_response() {
     let home = tempfile::tempdir().unwrap();
     install_default_model_fixture(home.path(), "on", "approve");
@@ -473,6 +581,9 @@ fn killed_after_stdout_is_unknown_until_later_outcome() {
     let home = tempfile::tempdir().unwrap();
     let large_message = "x".repeat(512 * 1024);
     install_model_fixture_full(home.path(), "approve", 0.9, Some(&large_message));
+    let pre = run_lifecycle_hook(home.path(), &pre_tool_payload(home.path(), "cargo test"));
+    assert!(pre.status.success());
+    assert!(pre.stderr.is_empty());
     let mut child = spawn_permission_hook(home.path());
     child
         .stdin
@@ -520,16 +631,7 @@ fn killed_after_stdout_is_unknown_until_later_outcome() {
     assert_eq!(before.attention[0].delivery, DeliveryState::Unknown);
     assert!(!before.attention[0].tool_execution_confirmed);
 
-    let outcome = serde_json::to_vec(&serde_json::json!({
-        "session_id": "session-1",
-        "turn_id": "turn-1",
-        "tool_use_id": "call-1",
-        "cwd": home.path(),
-        "hook_event_name": "PostToolUse",
-        "tool_name": "Bash",
-        "tool_response": {"exit_code": 0}
-    }))
-    .unwrap();
+    let outcome = post_tool_payload(home.path(), "cargo test");
     let lifecycle = run_lifecycle_hook(home.path(), &outcome);
     assert!(
         lifecycle.stderr.is_empty(),
