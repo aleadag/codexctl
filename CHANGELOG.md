@@ -8,6 +8,15 @@ All notable changes to codexctl are documented here.
 
 ### Changed
 
+- PostToolUse telemetry now records hook receipt independently and correlates
+  current Codex Bash executions when PermissionRequest omits `tool_use_id`.
+  Opaque unified-exec responses produce a neutral Completed outcome, not a
+  success result, and `coding-brain doctor` advises when runtime or attribution
+  coverage remains zero. New activity rows use schema v2 while v1 reads remain
+  supported; the upgrade performs no backfill or destructive migration.
+  Downgrading after v2 rows are written is unsupported, so back up
+  `~/.local/state/coding-brain/activity.jsonl` before upgrading if rollback
+  matters.
 - **Breaking:** the installed executable is now `coding-brain`; the crates.io
   package and internal Rust crates remain named `codexctl`. No compatibility
   executable is installed.

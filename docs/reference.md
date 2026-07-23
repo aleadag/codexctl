@@ -62,7 +62,7 @@ coding-brain man
 - `--upgrade` refreshes managed hooks and the marker version after reinstalling.
 - `--remove` removes managed hooks and the onboarding marker but preserves data.
 - `--purge` additionally removes the previewed current and legacy global config/state targets after confirmation. It is irreversible.
-- `doctor` checks the executable, hook definitions, trust visibility, project identity, lifecycle state, endpoint privacy, transcript discovery, and terminal integration.
+- `doctor` checks the executable, hook definitions, trust visibility, project identity, lifecycle state, outcome telemetry, endpoint privacy, transcript discovery, and terminal integration.
 
 ## Configuration helpers
 

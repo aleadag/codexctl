@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::project::ProjectId;
 
-pub const ACTIVITY_SCHEMA_VERSION: u32 = 1;
+pub const MIN_ACTIVITY_SCHEMA_VERSION: u32 = 1;
+pub const ACTIVITY_SCHEMA_VERSION: u32 = 2;
 pub const DEFAULT_INTERRUPTED_AFTER_MS: u64 = 30_000;
 pub const MAX_ACTIVITY_EVENT_BYTES: usize = 64 * 1024;
 pub const MAX_ACTIVITY_FIELD_BYTES: usize = 4_096;
@@ -82,6 +83,7 @@ pub enum ActivityOutcome {
     Succeeded,
     Failed,
     Cancelled,
+    Completed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -210,6 +212,19 @@ fn bounded(value: &str, redact: bool) -> String {
         end -= 1;
     }
     value[..end].to_owned()
+}
+
+pub fn bounded_activity_identifier(value: &str) -> String {
+    bounded(value, false)
+}
+
+pub fn bounded_redacted_activity_text(value: &str) -> String {
+    bounded(value, true)
+}
+
+pub fn lossless_redacted_activity_text(value: &str) -> Option<String> {
+    let redacted = redact_activity_text(value);
+    (redacted == value && redacted.len() <= MAX_ACTIVITY_FIELD_BYTES).then_some(redacted)
 }
 
 pub fn redact_activity_text(value: &str) -> String {
@@ -482,6 +497,51 @@ mod tests {
         let value = serde_json::to_value(activity).unwrap();
         assert_eq!(value["schema_version"], ACTIVITY_SCHEMA_VERSION);
         assert_eq!(value["kind"], "decision");
+    }
+
+    #[test]
+    fn schema_v2_serializes_neutral_completed() {
+        let mut activity = event("cargo test", "safe", "note");
+        activity.state = ActivityState::Outcome;
+        activity.outcome = Some(ActivityOutcome::Completed);
+        let value = serde_json::to_value(activity).unwrap();
+        assert_eq!(value["schema_version"], 2);
+        assert_eq!(value["outcome"], "completed");
+    }
+
+    #[test]
+    fn shared_command_normalizer_redacts_and_bounds() {
+        let command = format!(
+            "curl -H 'Authorization: Bearer secret' {}",
+            "x".repeat(5_000)
+        );
+        assert_eq!(
+            bounded_activity_identifier(&"x".repeat(5_000)).len(),
+            MAX_ACTIVITY_FIELD_BYTES
+        );
+        let normalized = bounded_redacted_activity_text(&command);
+        assert!(!normalized.contains("secret"));
+        assert_eq!(normalized.len(), MAX_ACTIVITY_FIELD_BYTES);
+    }
+
+    #[test]
+    fn lossless_activity_text_accepts_only_unchanged_bounded_values() {
+        let safe = "cargo test --workspace";
+        assert_eq!(
+            lossless_redacted_activity_text(safe),
+            Some(safe.to_string())
+        );
+        for changed in ["cargo  test", "cargo\ttest", " cargo test", "cargo test "] {
+            assert_eq!(lossless_redacted_activity_text(changed), None);
+        }
+        assert_eq!(
+            lossless_redacted_activity_text("curl -H 'Authorization: Bearer secret'"),
+            None
+        );
+        assert_eq!(
+            lossless_redacted_activity_text(&"x".repeat(MAX_ACTIVITY_FIELD_BYTES + 1)),
+            None
+        );
     }
 
     #[test]

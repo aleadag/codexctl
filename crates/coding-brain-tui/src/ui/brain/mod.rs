@@ -450,18 +450,34 @@ mod tests {
     }
 
     #[test]
-    fn outcome_is_the_only_execution_confirmation() {
-        let mut mock = MockBrainRuntime::default();
-        let mut confirmed = activity("confirmed", DeliveryState::Delivered);
-        confirmed.outcome = Some(ActivityOutcome::Succeeded);
-        confirmed.tool_execution_confirmed = true;
-        mock.activity_snapshot.recent = vec![confirmed];
-        mock.endpoint_health = online();
-        let app = fixture_app(mock);
+    fn live_status_distinguishes_outcomes_and_delivery_evidence() {
+        for (outcome, label) in [
+            (ActivityOutcome::Completed, "completed"),
+            (ActivityOutcome::Succeeded, "succeeded"),
+            (ActivityOutcome::Failed, "failed"),
+            (ActivityOutcome::Cancelled, "cancelled"),
+        ] {
+            let mut item = activity(label, DeliveryState::Delivered);
+            item.state = ActivityState::Allowed;
+            item.outcome = Some(outcome);
+            item.tool_execution_confirmed = true;
+            assert!(live::activity_status(&item).contains(&format!("outcome confirmed: {label}")));
+        }
 
-        let text = render_text(&app);
+        let mut delivered = activity("delivered", DeliveryState::Delivered);
+        delivered.state = ActivityState::Allowed;
+        assert_eq!(
+            live::activity_status(&delivered),
+            "allowed · response delivered"
+        );
 
-        assert!(text.contains("outcome confirmed: succeeded"));
+        let mut unknown = activity("unknown", DeliveryState::Unknown);
+        unknown.state = ActivityState::Allowed;
+        assert!(live::activity_status(&unknown).contains("execution not confirmed"));
+
+        let mut failed = activity("failed", DeliveryState::Failed);
+        failed.state = ActivityState::Allowed;
+        assert!(live::activity_status(&failed).contains("execution not confirmed"));
     }
 
     fn fixture_app(mock: MockBrainRuntime) -> BrainApp {

@@ -162,6 +162,7 @@ pub(crate) fn activity_status(item: &ActivityItem) -> String {
                 ActivityOutcome::Succeeded => "succeeded",
                 ActivityOutcome::Failed => "failed",
                 ActivityOutcome::Cancelled => "cancelled",
+                ActivityOutcome::Completed => "completed",
             }
         );
     }
@@ -192,10 +193,9 @@ pub(crate) fn activity_status(item: &ActivityItem) -> String {
             "{} · delivery unknown · execution not confirmed",
             decision_state(item.state)
         ),
-        DeliveryState::Delivered => format!(
-            "{} · response delivered · execution not confirmed",
-            decision_state(item.state)
-        ),
+        DeliveryState::Delivered => {
+            format!("{} · response delivered", decision_state(item.state))
+        }
         DeliveryState::NotApplicable => decision_state(item.state).into(),
     }
 }

@@ -11,12 +11,16 @@
 //! shows ✓ / ⚠ / ✗ icons and a one-line message; advisories are
 //! non-fatal so optional brain configuration does not make doctor fail.
 
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use coding_brain_core::brain_activity::{ActivityKind, ActivityState};
 use coding_brain_core::lifecycle::{LifecycleStore, StoreCondition, coding_brain_state_root};
+
+use crate::brain::activity::ActivityStore;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -64,6 +68,7 @@ pub fn run_all_checks() -> Vec<Check> {
         check_codex_hooks(),
         check_codex_hook_trust(),
         check_lifecycle_state(),
+        check_outcome_telemetry(),
         check_project_identity(),
         check_brain_endpoint(),
         check_session_discovery(),
@@ -351,6 +356,197 @@ fn check_lifecycle_state_with_store(store: &LifecycleStore) -> Check {
     }
 }
 
+fn check_outcome_telemetry() -> Check {
+    let paths = match coding_brain_core::paths::CodingBrainPaths::resolve(
+        &coding_brain_core::paths::PathEnvironment::current(),
+    ) {
+        Ok(paths) => paths,
+        Err(_) => return outcome_telemetry_unavailable(),
+    };
+    check_outcome_telemetry_with_store(&ActivityStore::at(
+        paths.state_root().join("activity.jsonl"),
+    ))
+}
+
+fn outcome_telemetry_unavailable() -> Check {
+    Check {
+        name: "outcome telemetry".into(),
+        status: CheckStatus::Advisory,
+        message: "activity store unavailable".into(),
+        fix_hint: Some("Check state-directory ownership and permissions.".into()),
+    }
+}
+
+fn check_outcome_telemetry_with_store(store: &ActivityStore) -> Check {
+    let log = match store.read() {
+        Ok(log) => log,
+        Err(_) => return outcome_telemetry_unavailable(),
+    };
+
+    fn invocation_key(
+        event: &coding_brain_core::brain_activity::ActivityEvent,
+    ) -> Option<(&str, &str, &str)> {
+        let session = event.session.as_ref()?;
+        Some((
+            session.session_id.as_str(),
+            session.turn_id.as_deref()?,
+            session.tool_use_id.as_deref()?,
+        ))
+    }
+
+    let mut invocation_recency = HashMap::new();
+    for event in log.events() {
+        if event.kind != ActivityKind::Lifecycle
+            || !matches!(event.tool.as_deref(), Some("PreToolUse" | "PostToolUse"))
+        {
+            continue;
+        }
+        let Some(key) = invocation_key(event) else {
+            continue;
+        };
+        invocation_recency
+            .entry(key)
+            .and_modify(|recorded_at_ms: &mut u64| {
+                *recorded_at_ms = (*recorded_at_ms).max(event.recorded_at_ms);
+            })
+            .or_insert(event.recorded_at_ms);
+    }
+    let mut invocation_recency = invocation_recency.into_iter().collect::<Vec<_>>();
+    invocation_recency
+        .sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+    let selected_invocations = invocation_recency
+        .into_iter()
+        .take(100)
+        .map(|(key, _)| key)
+        .collect::<HashSet<_>>();
+
+    let mut invocation_evidence = HashMap::new();
+    for event in log.events().iter().rev() {
+        if event.kind != ActivityKind::Lifecycle {
+            continue;
+        }
+        let Some(key) = invocation_key(event) else {
+            continue;
+        };
+        if !selected_invocations.contains(&key) {
+            continue;
+        }
+        let evidence = invocation_evidence.entry(key).or_insert((false, false));
+        match event.tool.as_deref() {
+            Some("PreToolUse") => evidence.0 = true,
+            Some("PostToolUse") => evidence.1 = true,
+            _ => {}
+        }
+    }
+
+    let pre_count = invocation_evidence
+        .values()
+        .filter(|(has_pre, _)| *has_pre)
+        .count();
+    if pre_count < 10 {
+        return Check {
+            name: "outcome telemetry".into(),
+            status: CheckStatus::Skipped,
+            message: format!("insufficient activity ({pre_count}/10 tool invocations)"),
+            fix_hint: None,
+        };
+    }
+
+    let post_count = invocation_evidence
+        .values()
+        .filter(|(_, has_post)| *has_post)
+        .count();
+    if post_count == 0 {
+        return Check {
+            name: "outcome telemetry".into(),
+            status: CheckStatus::Advisory,
+            message: format!("no PostToolUse evidence across {pre_count} recent invocations"),
+            fix_hint: Some(
+                "Upgrade or restart Codex, review `/hooks`, complete local tools, and rerun `coding-brain doctor`."
+                    .into(),
+            ),
+        };
+    }
+
+    #[derive(Default)]
+    struct DecisionEvidence {
+        first_terminal: Option<ActivityState>,
+        delivered_at_ms: Option<u64>,
+        has_outcome: bool,
+    }
+
+    let mut decisions = HashMap::<&str, DecisionEvidence>::new();
+    for event in log
+        .events()
+        .iter()
+        .filter(|event| event.kind == ActivityKind::Decision)
+    {
+        let evidence = decisions.entry(&event.activity_id).or_default();
+        if evidence.first_terminal.is_none() && event.state.is_terminal() {
+            evidence.first_terminal = Some(event.state);
+        }
+        if event.state == ActivityState::Delivered {
+            evidence.delivered_at_ms = Some(
+                evidence
+                    .delivered_at_ms
+                    .map_or(event.recorded_at_ms, |current| {
+                        current.max(event.recorded_at_ms)
+                    }),
+            );
+        }
+        evidence.has_outcome |= event.state == ActivityState::Outcome;
+    }
+
+    let mut eligible = decisions
+        .into_iter()
+        .filter_map(|(activity_id, evidence)| {
+            (evidence.first_terminal == Some(ActivityState::Allowed))
+                .then_some(evidence.delivered_at_ms)
+                .flatten()
+                .map(|delivered_at_ms| (activity_id, delivered_at_ms, evidence.has_outcome))
+        })
+        .collect::<Vec<_>>();
+    eligible.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(right.0)));
+    eligible.truncate(20);
+
+    let eligible_count = eligible.len();
+    if eligible_count < 5 {
+        return Check {
+            name: "outcome telemetry".into(),
+            status: CheckStatus::Skipped,
+            message: format!("insufficient decisions ({eligible_count}/5 eligible decisions)"),
+            fix_hint: None,
+        };
+    }
+
+    let outcome_count = eligible
+        .iter()
+        .filter(|(_, _, has_outcome)| *has_outcome)
+        .count();
+    if outcome_count == 0 {
+        return Check {
+            name: "outcome telemetry".into(),
+            status: CheckStatus::Advisory,
+            message: format!(
+                "PostToolUse observed but 0/{eligible_count} recent decisions have outcomes"
+            ),
+            fix_hint: Some(
+                "Run current Codex hooks and inspect lifecycle-hook attribution diagnostics."
+                    .into(),
+            ),
+        };
+    }
+
+    Check {
+        name: "outcome telemetry".into(),
+        status: CheckStatus::Pass,
+        message: format!(
+            "PostToolUse {post_count}/{pre_count} recent invocations; outcomes {outcome_count}/{eligible_count} recent decisions"
+        ),
+        fix_hint: None,
+    }
+}
+
 fn check_brain_endpoint() -> Check {
     let endpoint = crate::config::Config::load()
         .brain
@@ -541,6 +737,327 @@ fn check_terminal_integration() -> Check {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use coding_brain_core::brain_activity::{
+        ACTIVITY_SCHEMA_VERSION, ActivityEvent, ActivityKind, ActivityOutcome, ActivityState,
+        ProjectEvidence, SessionTarget,
+    };
+    use coding_brain_core::project::ProjectId;
+
+    use crate::brain::activity::ActivityStore;
+
+    fn telemetry_event(
+        activity_id: &str,
+        kind: ActivityKind,
+        state: ActivityState,
+        recorded_at_ms: u64,
+        tool: &str,
+        tool_use_id: Option<&str>,
+        outcome: Option<ActivityOutcome>,
+    ) -> ActivityEvent {
+        let project_id = ProjectId::Temporary("doctor-project".into());
+        ActivityEvent {
+            schema_version: ACTIVITY_SCHEMA_VERSION,
+            kind,
+            activity_id: activity_id.into(),
+            recorded_at_ms,
+            project: ProjectEvidence {
+                project_id: project_id.clone(),
+                cwd: PathBuf::from("/work/doctor-project"),
+                label: Some("doctor-project".into()),
+            },
+            session: Some(SessionTarget {
+                session_id: "doctor-session".into(),
+                turn_id: Some("doctor-turn".into()),
+                tool_use_id: tool_use_id.map(str::to_owned),
+                project_id,
+                cwd: PathBuf::from("/work/doctor-project"),
+                provider_hints: Vec::new(),
+            }),
+            state,
+            tool: Some(tool.into()),
+            normalized_command: (kind == ActivityKind::Decision).then(|| "cargo test".into()),
+            fingerprint: None,
+            rule_id: None,
+            confidence: None,
+            threshold: None,
+            reasoning: None,
+            decision_id: (kind == ActivityKind::Decision)
+                .then(|| format!("decision-{activity_id}")),
+            outcome,
+            correction: None,
+            note: None,
+            supersedes: None,
+        }
+    }
+
+    fn fixture_activity_store() -> (tempfile::TempDir, ActivityStore) {
+        let temp = tempfile::tempdir().unwrap();
+        let store = ActivityStore::at(temp.path().join("activity.jsonl"));
+        (temp, store)
+    }
+
+    fn append_tool_invocation(store: &ActivityStore, index: usize, with_post: bool) {
+        let call = format!("call-{index}");
+        store
+            .append(telemetry_event(
+                &format!("pre-{index}"),
+                ActivityKind::Lifecycle,
+                ActivityState::Abstained,
+                (index * 2) as u64,
+                "PreToolUse",
+                Some(&call),
+                None,
+            ))
+            .unwrap();
+        if with_post {
+            store
+                .append(telemetry_event(
+                    &format!("post-{index}"),
+                    ActivityKind::Lifecycle,
+                    ActivityState::Abstained,
+                    (index * 2 + 1) as u64,
+                    "PostToolUse",
+                    Some(&call),
+                    None,
+                ))
+                .unwrap();
+        }
+    }
+
+    fn append_delivered_decision(store: &ActivityStore, index: usize, with_outcome: bool) {
+        let id = format!("activity-{index}");
+        store
+            .append(telemetry_event(
+                &id,
+                ActivityKind::Decision,
+                ActivityState::Allowed,
+                (10_000 + index * 3) as u64,
+                "Bash",
+                None,
+                None,
+            ))
+            .unwrap();
+        store
+            .append(telemetry_event(
+                &id,
+                ActivityKind::Decision,
+                ActivityState::Delivered,
+                (10_001 + index * 3) as u64,
+                "Bash",
+                None,
+                None,
+            ))
+            .unwrap();
+        if with_outcome {
+            store
+                .append(telemetry_event(
+                    &id,
+                    ActivityKind::Decision,
+                    ActivityState::Outcome,
+                    (10_002 + index * 3) as u64,
+                    "Bash",
+                    Some(&format!("call-{index}")),
+                    Some(ActivityOutcome::Completed),
+                ))
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn outcome_telemetry_has_exact_minimum_boundaries() {
+        let (_, store) = fixture_activity_store();
+        for index in 0..9 {
+            append_tool_invocation(&store, index, false);
+        }
+        assert_eq!(
+            check_outcome_telemetry_with_store(&store).status,
+            CheckStatus::Skipped
+        );
+        append_tool_invocation(&store, 9, false);
+        let check = check_outcome_telemetry_with_store(&store);
+        assert_eq!(check.status, CheckStatus::Advisory);
+        assert_eq!(exit_code(&[check]), 0);
+
+        let (_, store) = fixture_activity_store();
+        for index in 0..10 {
+            append_tool_invocation(&store, index, true);
+        }
+        for index in 0..4 {
+            append_delivered_decision(&store, index, false);
+        }
+        assert_eq!(
+            check_outcome_telemetry_with_store(&store).status,
+            CheckStatus::Skipped
+        );
+        append_delivered_decision(&store, 4, false);
+        assert_eq!(
+            check_outcome_telemetry_with_store(&store).status,
+            CheckStatus::Advisory
+        );
+    }
+
+    #[test]
+    fn outcome_telemetry_retries_do_not_inflate_unique_invocations() {
+        let (_, store) = fixture_activity_store();
+        for index in 0..11 {
+            store
+                .append(telemetry_event(
+                    &format!("retry-{index}"),
+                    ActivityKind::Lifecycle,
+                    ActivityState::Abstained,
+                    index as u64,
+                    "PreToolUse",
+                    Some("same-call"),
+                    None,
+                ))
+                .unwrap();
+        }
+        assert_eq!(
+            check_outcome_telemetry_with_store(&store).status,
+            CheckStatus::Skipped
+        );
+    }
+
+    #[test]
+    fn outcome_telemetry_counts_post_receipt_independently_from_pre_threshold() {
+        let (_, store) = fixture_activity_store();
+        for index in 0..9 {
+            append_tool_invocation(&store, index, false);
+        }
+        store
+            .append(telemetry_event(
+                "post-only",
+                ActivityKind::Lifecycle,
+                ActivityState::Abstained,
+                100,
+                "PostToolUse",
+                Some("post-only-call"),
+                None,
+            ))
+            .unwrap();
+
+        let check = check_outcome_telemetry_with_store(&store);
+        assert_eq!(check.status, CheckStatus::Skipped);
+        assert!(check.message.contains("9/10 tool invocations"));
+
+        append_tool_invocation(&store, 9, false);
+        let check = check_outcome_telemetry_with_store(&store);
+        assert_eq!(check.status, CheckStatus::Skipped);
+        assert!(check.message.contains("0/5 eligible decisions"));
+        assert!(!check.message.contains("no PostToolUse evidence"));
+    }
+
+    #[test]
+    fn outcome_telemetry_old_post_evidence_expires_from_the_hundred_key_window() {
+        let (_, store) = fixture_activity_store();
+        append_tool_invocation(&store, 0, true);
+        for index in 1..=100 {
+            append_tool_invocation(&store, index, false);
+        }
+        let check = check_outcome_telemetry_with_store(&store);
+        assert_eq!(check.status, CheckStatus::Advisory);
+        assert!(check.message.contains("no PostToolUse evidence"));
+    }
+
+    #[test]
+    fn outcome_telemetry_delayed_outcome_does_not_reorder_the_decision_window() {
+        let (_, store) = fixture_activity_store();
+        for index in 0..10 {
+            append_tool_invocation(&store, index, true);
+        }
+        for index in 0..21 {
+            append_delivered_decision(&store, index, false);
+        }
+        store
+            .append(telemetry_event(
+                "activity-0",
+                ActivityKind::Decision,
+                ActivityState::Outcome,
+                99_999,
+                "Bash",
+                Some("call-0"),
+                Some(ActivityOutcome::Completed),
+            ))
+            .unwrap();
+        let check = check_outcome_telemetry_with_store(&store);
+        assert_eq!(check.status, CheckStatus::Advisory);
+        assert!(check.message.contains("0/20"));
+    }
+
+    #[test]
+    fn outcome_telemetry_reverse_post_rows_do_not_hide_selected_pre_rows() {
+        let (_, store) = fixture_activity_store();
+        for index in 0..100 {
+            append_tool_invocation(&store, index, true);
+        }
+        let check = check_outcome_telemetry_with_store(&store);
+        assert_eq!(check.status, CheckStatus::Skipped);
+        assert!(!check.message.contains("insufficient activity"));
+        assert!(!check.message.contains("no PostToolUse evidence"));
+    }
+
+    #[test]
+    fn outcome_telemetry_passes_with_current_bounded_evidence() {
+        let (_, store) = fixture_activity_store();
+        for index in 0..10 {
+            append_tool_invocation(&store, index, true);
+        }
+        for index in 0..5 {
+            append_delivered_decision(&store, index, index == 4);
+        }
+        let check = check_outcome_telemetry_with_store(&store);
+        assert_eq!(check.status, CheckStatus::Pass);
+        assert!(check.message.contains("10/10"));
+        assert!(check.message.contains("1/5"));
+    }
+
+    #[test]
+    fn outcome_telemetry_decision_retries_do_not_inflate_eligible_count() {
+        let (_, store) = fixture_activity_store();
+        for index in 0..10 {
+            append_tool_invocation(&store, index, true);
+        }
+        for index in 0..6 {
+            store
+                .append(telemetry_event(
+                    "same-activity",
+                    ActivityKind::Decision,
+                    if index % 2 == 0 {
+                        ActivityState::Allowed
+                    } else {
+                        ActivityState::Delivered
+                    },
+                    (10_000 + index) as u64,
+                    "Bash",
+                    None,
+                    None,
+                ))
+                .unwrap();
+        }
+        let check = check_outcome_telemetry_with_store(&store);
+        assert_eq!(check.status, CheckStatus::Skipped);
+        assert!(check.message.contains("1/5"));
+    }
+
+    #[test]
+    fn outcome_telemetry_store_read_failures_are_non_fatal_and_metadata_safe() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = ActivityStore::at(temp.path());
+
+        let check = check_outcome_telemetry_with_store(&store);
+
+        assert_eq!(check.status, CheckStatus::Advisory);
+        assert_eq!(exit_code(std::slice::from_ref(&check)), 0);
+        assert!(check.message.contains("activity store unavailable"));
+        assert!(!check.message.contains(&temp.path().display().to_string()));
+        assert!(
+            check
+                .fix_hint
+                .unwrap()
+                .contains("state-directory ownership and permissions")
+        );
+    }
 
     fn fixture_paths(home: &Path) -> coding_brain_core::paths::CodingBrainPaths {
         coding_brain_core::paths::CodingBrainPaths::resolve(
