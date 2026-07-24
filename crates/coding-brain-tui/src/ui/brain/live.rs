@@ -257,7 +257,7 @@ fn evidence_field(
     ])
 }
 
-fn safe_evidence_text(value: &str) -> String {
+pub(super) fn safe_evidence_text(value: &str) -> String {
     let mut output = String::new();
     for character in value.chars() {
         if character.is_control() {
@@ -465,7 +465,7 @@ impl ActivityBadge {
     }
 }
 
-fn safe_row_text(value: &str) -> String {
+pub(super) fn safe_row_text(value: &str) -> String {
     let mut output = String::new();
     let mut pending_space = false;
     for character in value.chars() {
@@ -486,7 +486,7 @@ fn safe_row_text(value: &str) -> String {
     output
 }
 
-fn truncate_display(value: &str, max_width: usize) -> String {
+pub(super) fn truncate_display(value: &str, max_width: usize) -> String {
     if UnicodeWidthStr::width(value) <= max_width {
         return value.to_owned();
     }

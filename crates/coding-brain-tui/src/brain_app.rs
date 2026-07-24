@@ -26,6 +26,7 @@ pub enum BrainTab {
     Live,
     Review,
     Scorecard,
+    Diagnostics,
 }
 
 impl BrainTab {
@@ -33,7 +34,8 @@ impl BrainTab {
         match self {
             Self::Live => Self::Review,
             Self::Review => Self::Scorecard,
-            Self::Scorecard => Self::Live,
+            Self::Scorecard => Self::Diagnostics,
+            Self::Diagnostics => Self::Live,
         }
     }
 }
@@ -42,6 +44,50 @@ impl BrainTab {
 enum LiveList {
     Attention,
     Recent,
+}
+
+#[derive(Debug, Default)]
+struct EvidenceViewport {
+    activity_id: Option<String>,
+    scroll: Cell<u16>,
+    page_size: Cell<u16>,
+    max_scroll: Cell<u16>,
+}
+
+impl EvidenceViewport {
+    fn reset(&self) {
+        self.scroll.set(0);
+    }
+
+    fn page_down(&self) {
+        self.scroll.set(
+            self.scroll
+                .get()
+                .saturating_add(self.page_size.get().max(1))
+                .min(self.max_scroll.get()),
+        );
+    }
+
+    fn page_up(&self) {
+        self.scroll.set(
+            self.scroll
+                .get()
+                .saturating_sub(self.page_size.get().max(1)),
+        );
+    }
+
+    fn update_metrics(&self, page_size: u16, max_scroll: u16) {
+        self.page_size.set(page_size.max(1));
+        self.max_scroll.set(max_scroll);
+        self.scroll.set(self.scroll.get().min(max_scroll));
+    }
+
+    fn reset_if_selection_changed(&mut self, selected: Option<&str>) {
+        if selected != self.activity_id.as_deref() {
+            self.reset();
+            self.activity_id = selected.map(str::to_owned);
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -117,10 +163,8 @@ pub struct BrainApp {
     live_list: LiveList,
     live_attention_selection: usize,
     live_recent_selection: usize,
-    live_evidence_activity_id: Option<String>,
-    live_evidence_scroll: Cell<u16>,
-    live_evidence_page_size: Cell<u16>,
-    live_evidence_max_scroll: Cell<u16>,
+    live_evidence: EvidenceViewport,
+    diagnostics_evidence: EvidenceViewport,
     input: Option<BrainInput>,
     session_action_worker: SessionActionWorker,
     pending_action_status: Option<String>,
@@ -143,10 +187,8 @@ impl BrainApp {
             live_list: LiveList::Attention,
             live_attention_selection: 0,
             live_recent_selection: 0,
-            live_evidence_activity_id: None,
-            live_evidence_scroll: Cell::new(0),
-            live_evidence_page_size: Cell::new(1),
-            live_evidence_max_scroll: Cell::new(0),
+            live_evidence: EvidenceViewport::default(),
+            diagnostics_evidence: EvidenceViewport::default(),
             input: None,
             session_action_worker: SessionActionWorker::new(),
             pending_action_status: None,
@@ -249,23 +291,23 @@ impl BrainApp {
                 self.tab = self.tab.next();
                 self.selection = 0;
                 self.reset_live_evidence_scroll();
+                self.diagnostics_evidence.reset();
                 None
             }
             KeyCode::PageDown if self.tab == BrainTab::Live => {
-                let next = self
-                    .live_evidence_scroll
-                    .get()
-                    .saturating_add(self.live_evidence_page_size.get())
-                    .min(self.live_evidence_max_scroll.get());
-                self.live_evidence_scroll.set(next);
+                self.live_evidence.page_down();
                 None
             }
             KeyCode::PageUp if self.tab == BrainTab::Live => {
-                self.live_evidence_scroll.set(
-                    self.live_evidence_scroll
-                        .get()
-                        .saturating_sub(self.live_evidence_page_size.get()),
-                );
+                self.live_evidence.page_up();
+                None
+            }
+            KeyCode::PageDown if self.tab == BrainTab::Diagnostics => {
+                self.diagnostics_evidence.page_down();
+                None
+            }
+            KeyCode::PageUp if self.tab == BrainTab::Diagnostics => {
+                self.diagnostics_evidence.page_up();
                 None
             }
             KeyCode::Char('J') if self.tab == BrainTab::Live => {
@@ -284,6 +326,9 @@ impl BrainApp {
                     if len > 0 {
                         self.selection = (self.selection + 1).min(len - 1);
                     }
+                    if self.tab == BrainTab::Diagnostics {
+                        self.reset_diagnostics_evidence_scroll_if_selection_changed();
+                    }
                 }
                 None
             }
@@ -292,6 +337,9 @@ impl BrainApp {
                     self.move_live_selection_up();
                 } else {
                     self.selection = self.selection.saturating_sub(1);
+                    if self.tab == BrainTab::Diagnostics {
+                        self.reset_diagnostics_evidence_scroll_if_selection_changed();
+                    }
                 }
                 None
             }
@@ -603,6 +651,7 @@ impl BrainApp {
             BrainTab::Live => self.live_len(self.live_list),
             BrainTab::Review => self.review_queue.len(),
             BrainTab::Scorecard => 0,
+            BrainTab::Diagnostics => self.snapshot.diagnostic_events.len(),
         }
     }
 
@@ -671,20 +720,27 @@ impl BrainApp {
         self.clamp_live_selection();
         self.selection = self.selection.min(self.current_len().saturating_sub(1));
         self.reset_live_evidence_scroll_if_selection_changed();
+        self.reset_diagnostics_evidence_scroll_if_selection_changed();
     }
 
     fn reset_live_evidence_scroll(&self) {
-        self.live_evidence_scroll.set(0);
+        self.live_evidence.reset();
     }
 
     fn reset_live_evidence_scroll_if_selection_changed(&mut self) {
         let selected = self
             .selected_live_activity()
             .map(|item| item.activity_id.clone());
-        if selected != self.live_evidence_activity_id {
-            self.reset_live_evidence_scroll();
-            self.live_evidence_activity_id = selected;
-        }
+        self.live_evidence
+            .reset_if_selection_changed(selected.as_deref());
+    }
+
+    fn reset_diagnostics_evidence_scroll_if_selection_changed(&mut self) {
+        let selected = self
+            .selected_diagnostic()
+            .map(|item| item.activity_id.clone());
+        self.diagnostics_evidence
+            .reset_if_selection_changed(selected.as_deref());
     }
 
     pub fn selected_live_activity(&self) -> Option<&ActivityItem> {
@@ -715,14 +771,28 @@ impl BrainApp {
     }
 
     pub(crate) fn live_evidence_scroll(&self) -> u16 {
-        self.live_evidence_scroll.get()
+        self.live_evidence.scroll.get()
     }
 
     pub(crate) fn update_live_evidence_metrics(&self, page_size: u16, max_scroll: u16) {
-        self.live_evidence_page_size.set(page_size.max(1));
-        self.live_evidence_max_scroll.set(max_scroll);
-        self.live_evidence_scroll
-            .set(self.live_evidence_scroll.get().min(max_scroll));
+        self.live_evidence.update_metrics(page_size, max_scroll);
+    }
+
+    pub fn selected_diagnostic(&self) -> Option<&ActivityItem> {
+        if self.tab == BrainTab::Diagnostics {
+            self.snapshot.diagnostic_events.get(self.selection)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn diagnostics_evidence_scroll(&self) -> u16 {
+        self.diagnostics_evidence.scroll.get()
+    }
+
+    pub(crate) fn update_diagnostics_evidence_metrics(&self, page_size: u16, max_scroll: u16) {
+        self.diagnostics_evidence
+            .update_metrics(page_size, max_scroll);
     }
 
     pub fn tab(&self) -> BrainTab {
@@ -854,7 +924,101 @@ mod tests {
         app.handle_key(key(KeyCode::Tab));
         assert_eq!(app.tab(), BrainTab::Scorecard);
         app.handle_key(key(KeyCode::Tab));
+        assert_eq!(app.tab(), BrainTab::Diagnostics);
+        app.handle_key(key(KeyCode::Tab));
         assert_eq!(app.tab(), BrainTab::Live);
+    }
+
+    #[test]
+    fn diagnostics_selection_is_bounded_and_read_only() {
+        let (mut app, _) = fixture_app(false);
+        app.snapshot.diagnostic_events = vec![
+            diagnostic_activity("diagnostic-1", 200),
+            diagnostic_activity("diagnostic-2", 100),
+        ];
+
+        for _ in 0..3 {
+            app.handle_key(key(KeyCode::Tab));
+        }
+        assert_eq!(app.tab(), BrainTab::Diagnostics);
+        assert_eq!(
+            app.selected_diagnostic().unwrap().activity_id,
+            "diagnostic-1"
+        );
+
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(
+            app.selected_diagnostic().unwrap().activity_id,
+            "diagnostic-2"
+        );
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(
+            app.selected_diagnostic().unwrap().activity_id,
+            "diagnostic-2"
+        );
+        app.handle_key(key(KeyCode::Char('k')));
+        assert_eq!(
+            app.selected_diagnostic().unwrap().activity_id,
+            "diagnostic-1"
+        );
+        assert_eq!(app.handle_key(key(KeyCode::Enter)), None);
+    }
+
+    #[test]
+    fn diagnostics_evidence_page_keys_use_viewport_and_reset() {
+        let (mut app, _) = fixture_app(false);
+        app.snapshot.diagnostic_events = vec![
+            diagnostic_activity("diagnostic-1", 200),
+            diagnostic_activity("diagnostic-2", 100),
+        ];
+        app.update_live_evidence_metrics(5, 12);
+        app.handle_key(key(KeyCode::PageDown));
+        assert_eq!(app.live_evidence_scroll(), 5);
+
+        for _ in 0..3 {
+            app.handle_key(key(KeyCode::Tab));
+        }
+        app.update_diagnostics_evidence_metrics(5, 12);
+        app.handle_key(key(KeyCode::PageDown));
+        app.handle_key(key(KeyCode::PageDown));
+        app.handle_key(key(KeyCode::PageDown));
+        assert_eq!(app.diagnostics_evidence_scroll(), 12);
+        app.handle_key(key(KeyCode::PageUp));
+        assert_eq!(app.diagnostics_evidence_scroll(), 7);
+
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.diagnostics_evidence_scroll(), 0);
+        assert_eq!(app.live_evidence_scroll(), 0);
+
+        app.update_diagnostics_evidence_metrics(5, 12);
+        app.handle_key(key(KeyCode::PageDown));
+        app.handle_key(key(KeyCode::Tab));
+        assert_eq!(app.diagnostics_evidence_scroll(), 0);
+        assert_eq!(app.live_evidence_scroll(), 0);
+    }
+
+    #[test]
+    fn refresh_removing_selected_diagnostic_clamps_selection_and_resets_evidence() {
+        let (mut app, _) = fixture_app(false);
+        app.snapshot.diagnostic_events = vec![
+            diagnostic_activity("diagnostic-1", 200),
+            diagnostic_activity("diagnostic-2", 100),
+        ];
+        for _ in 0..3 {
+            app.handle_key(key(KeyCode::Tab));
+        }
+        app.handle_key(key(KeyCode::Char('j')));
+        app.update_diagnostics_evidence_metrics(5, 12);
+        app.handle_key(key(KeyCode::PageDown));
+
+        app.snapshot.diagnostic_events = vec![diagnostic_activity("diagnostic-1", 200)];
+        app.clamp_selection();
+
+        assert_eq!(
+            app.selected_diagnostic().unwrap().activity_id,
+            "diagnostic-1"
+        );
+        assert_eq!(app.diagnostics_evidence_scroll(), 0);
     }
 
     #[test]
@@ -1662,6 +1826,23 @@ mod tests {
             note: None,
             tool_execution_confirmed: false,
         }
+    }
+
+    fn diagnostic_activity(id: &str, recorded_at_ms: u64) -> ActivityItem {
+        let mut item = activity();
+        item.activity_id = id.into();
+        item.kind = ActivityKind::Diagnostic;
+        item.recorded_at_ms = recorded_at_ms;
+        item.state = ActivityState::Error;
+        item.delivery = DeliveryState::NotApplicable;
+        item.tool = None;
+        item.normalized_command = None;
+        item.reasoning = Some("orphan outcome: Bash command is not losslessly correlatable".into());
+        item.decision_id = None;
+        item.outcome = None;
+        item.correction = None;
+        item.note = None;
+        item
     }
 
     fn key(code: KeyCode) -> KeyEvent {
