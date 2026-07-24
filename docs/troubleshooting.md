@@ -43,6 +43,12 @@ Hook events may appear before Codex transcript or Claude inventory evidence can 
 
 Codex and Claude use their structured `PermissionRequest` responses for allow and deny. Antigravity uses structured `PreToolUse`; when Coding Brain abstains or cannot validate input, it returns `ask` and leaves the native prompt in control. Antigravity `Stop` can return structured `continue` after a validated automatic recovery decision.
 
+Antigravity CLI (`agy`) 1.1.5 has a confirmed provider-side contract failure: it can invoke the managed `PreToolUse` hook, receive a valid `{"decision":"allow"}` response with a successful exit, and still retain the native tool confirmation. `coding-brain doctor` reports `Antigravity hook contract` when it detects this exact affected version with current managed hooks. Keep the native prompt authoritative and upgrade `agy`; do not enable always-proceed or automatic terminal input as a workaround.
+
+Live's `response emitted` status proves that Coding Brain wrote the hook response successfully. It does not prove that the provider accepted the decision or that the tool ran. Only later lifecycle outcome evidence supports an execution claim.
+
+Before treating a future `agy` release as fixed, repeat the isolated real-binary check with a temporary hook that consumes stdin, emits only `{"decision":"allow"}` on stdout, writes nothing to stderr, and exits zero. Use a harmless command and confirm both automatic execution and the matching `PostToolUse` event. Versions other than 1.1.5 remain unverified until that check passes.
+
 Codex and Claude continuation, process-only sessions, and prompts outside a structured response contract require guarded tmux input. Coding Brain acts only when current process identity maps to one pane and immediate prompt recapture reproduces the expected provider-specific evidence. If tmux is missing, a pane is ambiguous, or the prompt changed, the action remains unresolved instead of sending input. Use `x`, then `a`, `d`, or `c` from the exact Live activity to retry manually; `x`, then `t` sends bounded hidden literal text only after you confirm with Enter.
 
 ## Brain endpoint warnings

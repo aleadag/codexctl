@@ -75,6 +75,7 @@ pub fn run_all_checks() -> Vec<Check> {
     }
     checks.extend([check_binary_on_path()]);
     checks.extend(check_provider_setups());
+    checks.extend(check_antigravity_hook_contract());
     checks.extend([
         check_codex_hook_trust(),
         check_lifecycle_state(),
@@ -186,6 +187,90 @@ struct ProviderSetupEvidence {
     recorded: bool,
     executable_available: bool,
     hooks: ProviderHookInspection,
+}
+
+const ANTIGRAVITY_VERSION_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
+const ANTIGRAVITY_VERSION_OUTPUT_LIMIT: usize = 128;
+
+fn parse_antigravity_version(output: &[u8]) -> Option<[u64; 3]> {
+    let text = std::str::from_utf8(output).ok()?;
+    let token = text
+        .strip_suffix("\r\n")
+        .or_else(|| text.strip_suffix('\n'))
+        .unwrap_or(text);
+    if token.is_empty() || token.bytes().any(|byte| byte.is_ascii_whitespace()) {
+        return None;
+    }
+    let parts = token.split('.').collect::<Vec<_>>();
+    if parts.len() != 3
+        || parts.iter().any(|part| {
+            part.is_empty()
+                || !part.bytes().all(|byte| byte.is_ascii_digit())
+                || (part.len() > 1 && part.starts_with('0'))
+        })
+    {
+        return None;
+    }
+    Some([
+        parts[0].parse().ok()?,
+        parts[1].parse().ok()?,
+        parts[2].parse().ok()?,
+    ])
+}
+
+fn check_antigravity_hook_contract_with(
+    evidence: ProviderSetupEvidence,
+    probe: impl FnOnce() -> Option<[u64; 3]>,
+) -> Option<Check> {
+    if !evidence.executable_available || evidence.hooks != ProviderHookInspection::Current {
+        return None;
+    }
+    (probe()? == [1, 1, 5]).then(|| Check {
+        name: "Antigravity hook contract".into(),
+        status: CheckStatus::Advisory,
+        message: "agy 1.1.5 may ignore PreToolUse decisions and retain the native prompt".into(),
+        fix_hint: Some(
+            "Keep the native prompt authoritative; upgrade agy, then revalidate the real hook contract."
+                .into(),
+        ),
+    })
+}
+
+#[cfg(unix)]
+fn probe_antigravity_version() -> Option<[u64; 3]> {
+    let mut command = std::process::Command::new("agy");
+    command.arg("--version");
+    let output = crate::provider_hooks::run_bounded_process(
+        &mut command,
+        ANTIGRAVITY_VERSION_TIMEOUT,
+        ANTIGRAVITY_VERSION_OUTPUT_LIMIT,
+    )?;
+    parse_antigravity_version(&output)
+}
+
+#[cfg(not(unix))]
+fn probe_antigravity_version() -> Option<[u64; 3]> {
+    None
+}
+
+fn check_antigravity_hook_contract() -> Option<Check> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let cwd = std::env::current_dir().ok()?;
+    let executable_available =
+        crate::init::state::detect_provider_executables().contains(&AgentProvider::Antigravity);
+    let hooks = crate::init::provider_hooks::inspect_provider_hooks_at(
+        AgentProvider::Antigravity,
+        &home,
+        &cwd,
+    );
+    check_antigravity_hook_contract_with(
+        ProviderSetupEvidence {
+            recorded: false,
+            executable_available,
+            hooks,
+        },
+        probe_antigravity_version,
+    )
 }
 
 fn check_provider_setups() -> Vec<Check> {
@@ -1718,6 +1803,106 @@ mod tests {
                 },
             );
             assert_eq!(check.status, CheckStatus::Fail);
+        }
+    }
+
+    #[test]
+    fn antigravity_1_1_5_with_current_hooks_is_advisory() {
+        let check = check_antigravity_hook_contract_with(
+            ProviderSetupEvidence {
+                recorded: true,
+                executable_available: true,
+                hooks: ProviderHookInspection::Current,
+            },
+            || Some([1, 1, 5]),
+        )
+        .expect("affected version must be visible");
+
+        assert_eq!(check.name, "Antigravity hook contract");
+        assert_eq!(check.status, CheckStatus::Advisory);
+        assert!(check.message.contains("agy 1.1.5"));
+        assert!(check.message.contains("native prompt"));
+        assert!(
+            check
+                .fix_hint
+                .as_deref()
+                .is_some_and(|hint| hint.contains("upgrade"))
+        );
+        assert_eq!(exit_code(&[check]), 0);
+    }
+
+    #[test]
+    fn antigravity_compatibility_probe_is_gated_by_current_setup() {
+        use std::cell::Cell;
+
+        for evidence in [
+            ProviderSetupEvidence {
+                recorded: true,
+                executable_available: false,
+                hooks: ProviderHookInspection::Current,
+            },
+            ProviderSetupEvidence {
+                recorded: true,
+                executable_available: true,
+                hooks: ProviderHookInspection::Missing,
+            },
+            ProviderSetupEvidence {
+                recorded: true,
+                executable_available: true,
+                hooks: ProviderHookInspection::Stale,
+            },
+            ProviderSetupEvidence {
+                recorded: true,
+                executable_available: true,
+                hooks: ProviderHookInspection::Duplicate,
+            },
+            ProviderSetupEvidence {
+                recorded: true,
+                executable_available: true,
+                hooks: ProviderHookInspection::Invalid,
+            },
+        ] {
+            let calls = Cell::new(0);
+            let check = check_antigravity_hook_contract_with(evidence, || {
+                calls.set(calls.get() + 1);
+                Some([1, 1, 5])
+            });
+            assert!(check.is_none());
+            assert_eq!(calls.get(), 0);
+        }
+    }
+
+    #[test]
+    fn antigravity_unverified_versions_have_no_compatibility_claim() {
+        for version in [None, Some([1, 1, 4]), Some([1, 1, 6]), Some([2, 0, 0])] {
+            let check = check_antigravity_hook_contract_with(
+                ProviderSetupEvidence {
+                    recorded: true,
+                    executable_available: true,
+                    hooks: ProviderHookInspection::Current,
+                },
+                || version,
+            );
+            assert!(check.is_none(), "{version:?}");
+        }
+    }
+
+    #[test]
+    fn antigravity_version_parser_accepts_only_one_simple_semver_token() {
+        assert_eq!(parse_antigravity_version(b"1.1.5\n"), Some([1, 1, 5]));
+        assert_eq!(parse_antigravity_version(b"1.1.5\r\n"), Some([1, 1, 5]));
+
+        for malformed in [
+            b"agy 1.1.5".as_slice(),
+            b"1.1".as_slice(),
+            b"1.1.5-beta".as_slice(),
+            b"1.1.5 extra".as_slice(),
+            b" 1.1.5".as_slice(),
+            b"1.1.5 ".as_slice(),
+            b"01.1.5".as_slice(),
+            b"\xff\xfe".as_slice(),
+        ] {
+            assert_eq!(parse_antigravity_version(malformed), None, "{malformed:?}");
         }
     }
 
