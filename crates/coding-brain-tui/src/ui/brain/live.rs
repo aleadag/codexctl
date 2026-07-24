@@ -232,12 +232,6 @@ pub(crate) fn activity_status(item: &ActivityItem) -> String {
             }
         );
     }
-    if matches!(
-        (item.state, item.delivery),
-        (ActivityState::Denied, DeliveryState::Delivered)
-    ) {
-        return "blocked · command did not execute".into();
-    }
     match item.delivery {
         DeliveryState::Failed => format!(
             "{} · delivery failed · execution not confirmed",
@@ -248,7 +242,7 @@ pub(crate) fn activity_status(item: &ActivityItem) -> String {
             decision_state(item.state)
         ),
         DeliveryState::Delivered => {
-            format!("{} · response delivered", decision_state(item.state))
+            format!("{} · response emitted", decision_state(item.state))
         }
         DeliveryState::NotApplicable => decision_state(item.state).into(),
     }

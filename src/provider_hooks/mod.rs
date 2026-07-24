@@ -287,7 +287,7 @@ pub(super) fn normalized_outcome(response: Option<&Value>) -> ActivityOutcome {
 
 const MAX_PARENT_DEPTH: usize = 16;
 const MAX_PARENT_RECORD_BYTES: usize = 4 * 1024;
-#[cfg(any(all(unix, not(target_os = "linux")), all(test, unix)))]
+#[cfg(unix)]
 const PARENT_PROCESS_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(250);
 
 #[derive(Clone, Debug)]
@@ -454,8 +454,8 @@ fn read_parent_process(pid: u32) -> Option<ParentProcessEvidence> {
     })
 }
 
-#[cfg(any(all(unix, not(target_os = "linux")), all(test, unix)))]
-fn run_bounded_process(
+#[cfg(unix)]
+pub(crate) fn run_bounded_process(
     command: &mut std::process::Command,
     timeout: std::time::Duration,
     output_limit: usize,
@@ -535,7 +535,7 @@ fn run_bounded_process(
     }
 }
 
-#[cfg(any(all(unix, not(target_os = "linux")), all(test, unix)))]
+#[cfg(unix)]
 fn terminate_process_group(child: &mut std::process::Child) {
     if let Ok(process_group) = i32::try_from(child.id()) {
         unsafe {
@@ -716,5 +716,19 @@ mod tests {
             None
         );
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bounded_process_group_collection_rejects_oversized_output() {
+        use std::process::Command;
+        use std::time::Duration;
+
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "printf 12345"]);
+        assert_eq!(
+            run_bounded_process(&mut command, Duration::from_millis(100), 4),
+            None
+        );
     }
 }

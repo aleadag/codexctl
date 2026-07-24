@@ -393,7 +393,7 @@ mod tests {
     }
 
     #[test]
-    fn delivered_deny_is_recent_and_reports_blocked_execution() {
+    fn delivered_deny_is_recent_and_reports_response_emission() {
         let mock = MockBrainRuntime {
             activity_snapshot: ActivitySnapshot {
                 recent: vec![activity("deny-1", DeliveryState::Delivered)],
@@ -405,8 +405,9 @@ mod tests {
 
         let text = render_text(&fixture_app(mock));
 
-        assert!(text.contains("blocked · command did not execute"));
-        assert!(!text.contains("denied · response delivered · execution not confirmed"));
+        assert!(text.contains("denied · response emitted"));
+        assert!(!text.contains("blocked"));
+        assert!(!text.contains("command did not execute"));
         assert!(text.contains("No unresolved decisions"));
     }
 
@@ -552,11 +553,18 @@ mod tests {
             assert!(live::activity_status(&item).contains(&format!("outcome confirmed: {label}")));
         }
 
-        let mut delivered = activity("delivered", DeliveryState::Delivered);
-        delivered.state = ActivityState::Allowed;
+        let mut delivered_allow = activity("delivered-allow", DeliveryState::Delivered);
+        delivered_allow.state = ActivityState::Allowed;
         assert_eq!(
-            live::activity_status(&delivered),
-            "allowed · response delivered"
+            live::activity_status(&delivered_allow),
+            "allowed · response emitted"
+        );
+
+        let mut delivered_deny = activity("delivered-deny", DeliveryState::Delivered);
+        delivered_deny.state = ActivityState::Denied;
+        assert_eq!(
+            live::activity_status(&delivered_deny),
+            "denied · response emitted"
         );
 
         let mut unknown = activity("unknown", DeliveryState::Unknown);

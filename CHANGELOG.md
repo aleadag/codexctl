@@ -28,6 +28,10 @@ All notable changes to codexctl are documented here.
 
 ### Fixed
 
+- `coding-brain doctor` now warns when current Antigravity hooks are paired
+  with `agy` 1.1.5, which may ignore valid `PreToolUse` decisions. Live reports
+  successful hook writes as `response emitted` and reserves execution claims
+  for later lifecycle outcomes.
 - Antigravity automatic approvals now attach tool steps only to their open
   invocation. Stale, replayed, or post-invocation permission requests fall back
   to `ask`, and failed lifecycle persistence no longer appears as Allowed in
