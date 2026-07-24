@@ -6,6 +6,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::brain_app::{BrainApp, BrainTab};
 
+pub mod diagnostics;
 pub mod live;
 pub mod review;
 pub mod scorecard;
@@ -24,6 +25,7 @@ pub fn render(frame: &mut Frame<'_>, app: &BrainApp) {
         BrainTab::Live => live::render(frame, areas[1], app),
         BrainTab::Review => review::render(frame, areas[1], app),
         BrainTab::Scorecard => scorecard::render(frame, areas[1], app),
+        BrainTab::Diagnostics => diagnostics::render(frame, areas[1], app),
     }
     render_footer(frame, areas[2], app);
 }
@@ -68,6 +70,8 @@ fn render_header(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &Brain
         tab("Review", app.tab() == BrainTab::Review, theme),
         Span::raw("  "),
         tab("Scorecard", app.tab() == BrainTab::Scorecard, theme),
+        Span::raw("  "),
+        tab("Diagnostics", app.tab() == BrainTab::Diagnostics, theme),
     ]);
     let guidance = if health.reachable {
         Line::raw("")
@@ -110,6 +114,9 @@ fn render_footer(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &Brain
                     "j/k select  m mark  n note+mark  s skip  Tab tabs  q quit".into()
                 }
                 BrainTab::Scorecard => "Tab tabs  r refresh  q quit".into(),
+                BrainTab::Diagnostics => {
+                    "j/k select  PgUp/PgDn evidence  Tab tabs  r refresh  q quit".into()
+                }
             })
     });
     frame.render_widget(
@@ -126,8 +133,9 @@ mod tests {
     use std::sync::Arc;
 
     use coding_brain_core::brain_activity::{
-        ActivityItem, ActivityKind, ActivityOutcome, ActivitySnapshot, ActivityState,
-        AttentionItem, CorrectionDisposition, DeliveryState, ProjectEvidence, SessionTarget,
+        ActivityDiagnostics, ActivityItem, ActivityKind, ActivityOutcome, ActivitySnapshot,
+        ActivityState, AttentionItem, CorrectionDisposition, DeliveryState, ProjectEvidence,
+        SessionTarget,
     };
     use coding_brain_core::project::ProjectId;
     use coding_brain_core::runtime::{
@@ -203,6 +211,142 @@ mod tests {
             text.contains("model off"),
             "missing model-off label:\n{text}"
         );
+    }
+
+    #[test]
+    fn diagnostics_renders_store_health_events_and_neutral_evidence() {
+        let app = populated_diagnostics_app(ThemeMode::Dark);
+        let text = render_text_at(&app, 140, 38);
+
+        for expected in [
+            "[ Diagnostics ]",
+            "Store integrity",
+            "malformed rows: 2",
+            "duplicate terminals: 1",
+            "truncated tails: 1",
+            "discarded bytes: 17",
+            "Recent Diagnostics (2)",
+            "Diagnostic",
+            "Provider: Codex",
+            "Reason: orphan outcome: Bash command is not losslessly correlatable",
+        ] {
+            assert!(text.contains(expected), "missing {expected}:\n{text}");
+        }
+        for forbidden in ["Status: error", "failed command", "secret command"] {
+            assert!(!text.contains(forbidden), "found {forbidden}:\n{text}");
+        }
+    }
+
+    #[test]
+    fn diagnostics_empty_state_is_explicit() {
+        let mut app = fixture_app(MockBrainRuntime::default());
+        for _ in 0..3 {
+            app.handle_key(key(KeyCode::Tab));
+        }
+
+        let text = render_text(&app);
+
+        assert!(text.contains("No recent diagnostic events"), "{text}");
+    }
+
+    #[test]
+    fn diagnostics_store_health_remains_visible_without_events() {
+        let mut mock = MockBrainRuntime::default();
+        mock.activity_snapshot.diagnostics = ActivityDiagnostics {
+            malformed_rows: 2,
+            malformed_offsets: vec![12, 24],
+            duplicate_terminal_states: 1,
+            truncated_tails: 1,
+            discarded_tail_bytes: 17,
+        };
+        let mut app = fixture_app(mock);
+        for _ in 0..3 {
+            app.handle_key(key(KeyCode::Tab));
+        }
+
+        let text = render_text(&app);
+
+        for expected in [
+            "Store integrity",
+            "malformed rows: 2",
+            "duplicate terminals: 1",
+            "truncated tails: 1",
+            "discarded bytes: 17",
+            "No recent diagnostic events",
+        ] {
+            assert!(text.contains(expected), "missing {expected}:\n{text}");
+        }
+    }
+
+    #[test]
+    fn diagnostics_escapes_controls_and_truncates_unicode_by_display_width() {
+        let app = populated_diagnostics_app_with_reason(
+            ThemeMode::Dark,
+            format!("unsafe\u{1b} {}", "界".repeat(80)),
+        );
+        let text = render_text_at(&app, 30, 38);
+
+        assert!(text.contains("\\u{1b}"), "missing escaped control:\n{text}");
+        assert!(!text.contains('\u{1b}'), "raw control:\n{text}");
+        assert!(text.contains("Diagnostic"), "{text}");
+        for expected in [
+            "malformed rows: 2",
+            "duplicate terminals: 1",
+            "truncated tails: 1",
+            "discarded bytes: 17",
+        ] {
+            assert!(text.contains(expected), "missing {expected}:\n{text}");
+        }
+    }
+
+    #[test]
+    fn diagnostics_evidence_scrolls_and_resets() {
+        for width in [119, 120] {
+            let mut app = populated_diagnostics_app_with_reason(
+                ThemeMode::Dark,
+                (1..=40)
+                    .map(|number| format!("diagnostic-{number:02}"))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            );
+            let initial = render_text_at(&app, width, 24);
+            assert!(initial.contains("↓ more"), "{initial}");
+            app.handle_key(key(KeyCode::PageDown));
+            let scrolled = render_text_at(&app, width, 24);
+            assert!(scrolled.contains("↑ more"), "{scrolled}");
+            let mut bottom = scrolled;
+            for _ in 0..10 {
+                if !bottom.contains("↓ more") {
+                    break;
+                }
+                app.handle_key(key(KeyCode::PageDown));
+                bottom = render_text_at(&app, width, 24);
+            }
+            assert!(bottom.contains("diagnostic-40"), "{bottom}");
+            assert!(!bottom.contains("↓ more"), "{bottom}");
+            app.handle_key(key(KeyCode::Char('j')));
+            let reset = render_text_at(&app, width, 24);
+            assert!(!reset.contains("↑ more"), "{reset}");
+        }
+
+        for mode in [ThemeMode::Dark, ThemeMode::None] {
+            let text = render_text_at(&populated_diagnostics_app(mode), 120, 38);
+            assert!(text.contains("Diagnostic"), "{text}");
+        }
+        for width in [119, 120] {
+            let text = render_text_at(&populated_diagnostics_app(ThemeMode::Dark), width, 38);
+            for expected in [
+                "Diagnostics",
+                "Recent Diagnostics (2)",
+                "Store integrity",
+                "Reason:",
+            ] {
+                assert!(
+                    text.contains(expected),
+                    "missing {expected} at {width}:\n{text}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -652,6 +796,7 @@ mod tests {
         assert!(!scorecard.contains("Cost"));
 
         app.handle_key(key(KeyCode::Tab));
+        app.handle_key(key(KeyCode::Tab));
         app.handle_key(key(KeyCode::Char('c')));
         let correction = render_text(&app);
         assert!(correction.contains("brain right"));
@@ -698,11 +843,63 @@ mod tests {
     }
 
     fn fixture_app(mock: MockBrainRuntime) -> BrainApp {
+        fixture_app_with_theme(mock, ThemeMode::Dark)
+    }
+
+    fn fixture_app_with_theme(mock: MockBrainRuntime, mode: ThemeMode) -> BrainApp {
         let mock = Arc::new(mock);
         BrainApp::new(
             BrainRuntime::new(mock.clone(), mock),
-            Theme::from_mode(ThemeMode::Dark),
+            Theme::from_mode(mode),
         )
+    }
+
+    fn populated_diagnostics_app(mode: ThemeMode) -> BrainApp {
+        populated_diagnostics_app_with_reason(
+            mode,
+            "orphan outcome: Bash command is not losslessly correlatable".into(),
+        )
+    }
+
+    fn populated_diagnostics_app_with_reason(mode: ThemeMode, reason: String) -> BrainApp {
+        let mut first = activity("diagnostic-1", DeliveryState::NotApplicable);
+        first.kind = ActivityKind::Diagnostic;
+        first.state = ActivityState::Error;
+        first.recorded_at_ms = 200;
+        first.tool = Some("Bash".into());
+        first.normalized_command = Some("secret command".into());
+        first.reasoning = Some(reason);
+        first.decision_id = None;
+        first.outcome = None;
+        first.correction = None;
+        first.note = None;
+
+        let mut second = first.clone();
+        second.activity_id = "diagnostic-2".into();
+        second.recorded_at_ms = 100;
+
+        let mut app = fixture_app_with_theme(
+            MockBrainRuntime {
+                activity_snapshot: ActivitySnapshot {
+                    diagnostic_events: vec![first, second],
+                    diagnostics: ActivityDiagnostics {
+                        malformed_rows: 2,
+                        malformed_offsets: vec![12, 24],
+                        duplicate_terminal_states: 1,
+                        truncated_tails: 1,
+                        discarded_tail_bytes: 17,
+                    },
+                    ..ActivitySnapshot::default()
+                },
+                endpoint_health: online(),
+                ..MockBrainRuntime::default()
+            },
+            mode,
+        );
+        for _ in 0..3 {
+            app.handle_key(key(KeyCode::Tab));
+        }
+        app
     }
 
     fn populated_live_app_with_note(note: Option<String>) -> BrainApp {

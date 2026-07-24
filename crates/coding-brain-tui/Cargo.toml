@@ -15,7 +15,7 @@ path = "src/lib.rs"
 
 [dependencies]
 coding-brain-core = { path = "../coding-brain-core", version = "0.53.0" }
-ratatui = "0.29"
+ratatui = { version = "0.29", features = ["unstable-rendered-line-info"] }
 crossterm = "0.28"
 ctrlc = "3"
 libc = "0.2"
