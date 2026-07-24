@@ -448,6 +448,9 @@ mod tests {
 
     #[test]
     fn irreversible_home_delete_denies() {
+        let _guard = crate::config::HOME_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut commands = vec![
             "rm -rf ~".to_string(),
             "/bin/rm -rf ~/work".to_string(),
